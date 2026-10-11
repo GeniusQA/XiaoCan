@@ -10,8 +10,8 @@ android {
         applicationId = "com.genius.xiaocanpurify"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     buildTypes {
