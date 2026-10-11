@@ -322,6 +322,8 @@ public final class LocationCacheHook {
                         Object[] args = chain.getArgs().toArray();
                         if (args[fIdx] != null) {
                             final Object orig = args[fIdx];
+                            final java.util.concurrent.atomic.AtomicBoolean gotReal =
+                                    new java.util.concurrent.atomic.AtomicBoolean(false);
                             args[fIdx] = Proxy.newProxyInstance(
                                     listenerClass.getClassLoader(),
                                     new Class<?>[]{listenerClass},
@@ -329,20 +331,83 @@ public final class LocationCacheHook {
                                         if ("onLocationChanged".equals(method.getName())
                                                 && mArgs != null && mArgs.length >= 1
                                                 && mArgs[0] instanceof Location) {
+                                            gotReal.set(true);
                                             Location loc = (Location) mArgs[0];
                                             recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
                                         }
                                         Method real = method;
                                         return real.invoke(orig, mArgs);
                                     });
+                            // 注册后若始终无真实定位（如 GPS 关闭），延迟注入缓存位置，
+                            // 让直接使用系统定位的页面（如「选择地址」）也能拿到结果
+                            if (hasCache()) {
+                                final Object cached = buildCachedResult(Location.class);
+                                final Method onLoc = safeOnLocationChanged(listenerClass);
+                                if (cached != null && onLoc != null) {
+                                    new android.os.Handler(android.os.Looper.getMainLooper())
+                                            .postDelayed(() -> {
+                                                if (gotReal.get()) return;
+                                                try {
+                                                    onLoc.invoke(orig, cached);
+                                                    MainHook.log("LocationCache: injected cached location to framework listener");
+                                                } catch (Throwable ignored) {
+                                                }
+                                            }, 600L);
+                                }
+                            }
                         }
                         return chain.proceed(args);
                     });
                 } catch (Throwable ignored) {
                 }
             }
+
+            // getLastKnownLocation：返回 null 且有缓存时回放缓存，覆盖「选择地址」等直接读系统最后位置的页面
+            for (Method m : lmClass.getDeclaredMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if ("getLastKnownLocation".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
+                    try {
+                        xposed.hook(m).intercept(chain -> {
+                            Object result = chain.proceed();
+                            if (result == null && hasCache()) {
+                                MainHook.log("LocationCache: framework getLastKnownLocation null, replay cache");
+                                return buildCachedResult(Location.class);
+                            }
+                            return result;
+                        });
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+
+            // isProviderEnabled：定位服务关闭但已有缓存时放行为 true，
+            // 避免宿主在请求定位前就判定「定位失败，请先开启定位服务」
+            for (Method m : lmClass.getDeclaredMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if ("isProviderEnabled".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
+                    try {
+                        xposed.hook(m).intercept(chain -> {
+                            Object result = chain.proceed();
+                            if (Boolean.FALSE.equals(result) && hasCache()) {
+                                MainHook.log("LocationCache: framework isProviderEnabled=false -> true (cache exists)");
+                                return Boolean.TRUE;
+                            }
+                            return result;
+                        });
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
         } catch (Throwable t) {
             MainHook.log("LocationCache: framework capture hook failed: " + t);
+        }
+    }
+
+    private static Method safeOnLocationChanged(Class<?> listenerClass) {
+        try {
+            return listenerClass.getMethod("onLocationChanged", Location.class);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
