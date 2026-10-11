@@ -1,10 +1,11 @@
 package com.genius.xiaocanpurify;
 
+import android.content.SharedPreferences;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.github.libxposed.api.XposedModule;
-import io.github.libxposed.api.XposedService;
 
 /**
  * Hook-side reader of module settings.
@@ -57,7 +58,7 @@ public final class PurifyPrefs {
     public static final String ORDER_FREE = "hide_order_free";
     public static final String ORDER_BONUS_BUTTONS = "hide_order_bonus_buttons";
 
-    private static volatile XposedService.RemotePreferences remote;
+    private static volatile SharedPreferences remote;
     private static final Map<String, Boolean> LOCAL = new ConcurrentHashMap<>();
 
     private PurifyPrefs() {}
@@ -79,7 +80,7 @@ public final class PurifyPrefs {
      */
     public static boolean hide(String key) {
         Boolean local = LOCAL.get(key);
-        XposedService.RemotePreferences prefs = remote;
+        SharedPreferences prefs = remote;
         if (prefs != null) {
             try {
                 return prefs.getBoolean(key, local == null || local);

@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     };
 
     private SharedPreferences localPrefs;
-    private volatile XposedService.RemotePreferences remotePrefs;
+    private volatile SharedPreferences remotePrefs;
     private final Map<String, Switch> switches = new LinkedHashMap<>();
     private boolean refreshing;
 
@@ -173,10 +173,10 @@ public class MainActivity extends Activity {
 
     private void registerServiceListener() {
         try {
-            XposedServiceHelper.registerListener(new XposedServiceHelper.Listener() {
+            XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
                 @Override
                 public void onServiceBind(XposedService service) {
-                    XposedService.RemotePreferences prefs = null;
+                    SharedPreferences prefs = null;
                     try {
                         prefs = service.getRemotePreferences(PurifyPrefs.PREFS_NAME);
                     } catch (Throwable ignored) {
@@ -191,7 +191,7 @@ public class MainActivity extends Activity {
                 }
 
                 @Override
-                public void onServiceDied() {
+                public void onServiceDied(XposedService service) {
                     remotePrefs = null;
                 }
             });
@@ -282,7 +282,7 @@ public class MainActivity extends Activity {
 
     private boolean getHide(String key) {
         boolean def = localPrefs.getBoolean(key, true);
-        XposedService.RemotePreferences rp = remotePrefs;
+        SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
                 return rp.getBoolean(key, def);
@@ -294,10 +294,10 @@ public class MainActivity extends Activity {
 
     private void setHide(String key, boolean hide) {
         localPrefs.edit().putBoolean(key, hide).apply();
-        XposedService.RemotePreferences rp = remotePrefs;
+        SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
-                rp.putBoolean(key, hide);
+                rp.edit().putBoolean(key, hide).apply();
             } catch (Throwable ignored) {
             }
         }
