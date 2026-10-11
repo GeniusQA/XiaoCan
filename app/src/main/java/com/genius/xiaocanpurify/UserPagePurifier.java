@@ -326,7 +326,9 @@ public final class UserPagePurifier {
             if (!PurifyPrefs.hide(item[0])) continue;
             View label = findLabelView(root, item[1]);
             if (label == null) continue;
-            View target = enclosingClickableItem(label);
+            // 向上爬到「子树不含其它入口文案」的最大安全容器：防止整行容器
+            // 可点击时把元宝/卡券/红包同行其它入口一起隐藏
+            View target = enclosingExclusiveContainer(label, item[1]);
             if (target != null && target.getVisibility() != View.GONE) {
                 target.setVisibility(View.GONE);
                 MainHook.log("Hidden user asset item: " + item[1]);
@@ -469,37 +471,61 @@ public final class UserPagePurifier {
         return false;
     }
 
-    /** 从标签向上找最近一个带点击事件的祖先容器作为整项。 */
-    private static View enclosingClickableItem(View label) {
-        View cur = label;
-        while (cur.getParent() instanceof View) {
-            cur = (View) cur.getParent();
-            if (cur.hasOnClickListeners()) {
-                return cur;
-            }
-        }
-        // 没有可点击祖先时退化为标签的直接父容器
-        return label.getParent() instanceof View ? (View) label.getParent() : label;
-    }
-
     /**
-     * 在布局中查找"承载该文案的最小可点击子项"：先看直接子节点，命中即返回，
-     * 否则递归下探，保证隐藏的是整项而不是其中一行文字。
+     * 在布局中查找"只承载该文案的最小子项"：命中节点若还包含其它入口文案，
+     * 说明它是整行容器而非单项，继续向内下探，保证隐藏的是单项而不是整行。
      */
     private static View findItemView(View parent, String keyword) {
-        if (!(parent instanceof android.view.ViewGroup)) return null;
-        android.view.ViewGroup group = (android.view.ViewGroup) parent;
+        if (!(parent instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) parent;
+        // 第一轮：找子树只含目标文案（不含其它入口文案）的直接子项
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
-            if (subtreeText(child).contains(keyword)) {
+            if (subtreeText(child).contains(keyword) && !subtreeHasOtherEntries(child, keyword)) {
                 return child;
             }
         }
+        // 第二轮：命中子项内部继续下探找最小单项
         for (int i = 0; i < group.getChildCount(); i++) {
-            View found = findItemView(group.getChildAt(i), keyword);
-            if (found != null) return found;
+            View child = group.getChildAt(i);
+            if (subtreeText(child).contains(keyword)) {
+                View found = findItemView(child, keyword);
+                if (found != null) return found;
+            }
         }
         return null;
+    }
+
+    /** 从命中节点向上爬到「子树不含其它入口文案」的最大安全容器。 */
+    private static View enclosingExclusiveContainer(View node, String keyword) {
+        View best = node;
+        View cur = node;
+        while (cur.getParent() instanceof View) {
+            View parent = (View) cur.getParent();
+            if (subtreeHasOtherEntries(parent, keyword)) break;
+            best = parent;
+            cur = parent;
+        }
+        return best;
+    }
+
+    /** 子树是否出现其它入口/板块文案（与当前关键词互为子串的除外）。 */
+    private static boolean subtreeHasOtherEntries(View view, String keyword) {
+        String text = subtreeText(view);
+        if (text.isEmpty()) return false;
+        for (String[] item : MENU_ITEMS) {
+            if (isExclusionKeyword(keyword, item[1]) && text.contains(item[1])) return true;
+        }
+        for (String[] item : ASSET_ITEMS) {
+            if (isExclusionKeyword(keyword, item[1]) && text.contains(item[1])) return true;
+        }
+        return subtreeHasOtherSection(text)
+                || text.contains("全部订单") || text.contains("待上传");
+    }
+
+    /** 排除词与当前关键词互不为子串时才生效，避免「红包」误伤「红包雨」自身。 */
+    private static boolean isExclusionKeyword(String keyword, String other) {
+        return !keyword.contains(other) && !other.contains(keyword);
     }
 
     private static String subtreeText(View view) {
