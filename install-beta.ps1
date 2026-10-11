@@ -24,7 +24,8 @@ $conclusion = (& $gh -R $Repo run view $RunId --json conclusion -q .conclusion 2
 Write-Host "CONCLUSION=$conclusion"
 if ($conclusion -ne "success") { Write-Host "BUILD FAILED"; exit 1 }
 
-$tmp = Join-Path $PSScriptRoot "build_dl\beta_$RunId"
+# 下载到桌面 build_dl 目录，不占用项目目录；安装后自动删除
+$tmp = Join-Path ([Environment]::GetFolderPath("Desktop")) "build_dl\beta_$RunId"
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 & $gh -R $Repo run download $RunId -D $tmp 2>&1
 $apk = Get-ChildItem -Path $tmp -Recurse -Filter *.apk | Select-Object -First 1
