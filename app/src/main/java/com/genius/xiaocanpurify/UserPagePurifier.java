@@ -131,6 +131,11 @@ public final class UserPagePurifier {
                                     if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
                                         hideUserOrderSection(b);
                                     }
+                                    // 重渲染后同样做单入口居中（对所有卡片生效）
+                                    try {
+                                        View root2 = getBindingRoot(b);
+                                        if (root2 != null) centerSingleVisibleEntries(root2);
+                                    } catch (Throwable ignored) {}
                                 }
                             }
                         } catch (Throwable ignored) {}
@@ -196,6 +201,12 @@ public final class UserPagePurifier {
                     }
                 } catch (Throwable ignored) {}
             }
+
+            // 净化后卡片内只剩一个可见入口时水平居中展示（对所有卡片生效）
+            try {
+                View root = getBindingRoot(binding);
+                if (root != null) centerSingleVisibleEntries(root);
+            } catch (Throwable ignored) {}
 
             MainHook.log("Successfully purged unwanted user page views");
         } catch (Throwable t) {
@@ -296,6 +307,48 @@ public final class UserPagePurifier {
         if (!hasVisibleChild(group)) {
             group.setVisibility(View.GONE);
             MainHook.log("layoutMenu empty after filter: collapsed");
+        }
+    }
+
+    /**
+     * 卡片内只剩一个可见入口时水平居中展示（对所有卡片生效）。
+     * 递归整棵视图树：对水平方向的 LinearLayout，若可见子项恰好为 1 个
+     * 且未被 weight 拉伸，则将其 layout_gravity 设为水平居中（保留原垂直对齐）。
+     * 只改 gravity，不改尺寸与可见性，宿主重渲染后由 renderState 路径重放。
+     */
+    private static void centerSingleVisibleEntries(View root) {
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            if (group instanceof android.widget.LinearLayout
+                    && ((android.widget.LinearLayout) group).getOrientation() == android.widget.LinearLayout.HORIZONTAL) {
+                View only = null;
+                int visibleCount = 0;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    View child = group.getChildAt(i);
+                    if (child.getVisibility() == View.VISIBLE) {
+                        visibleCount++;
+                        only = child;
+                        if (visibleCount > 1) break;
+                    }
+                }
+                if (visibleCount == 1 && only != null) {
+                    ViewGroup.LayoutParams lp = only.getLayoutParams();
+                    if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                        android.widget.LinearLayout.LayoutParams llp = (android.widget.LinearLayout.LayoutParams) lp;
+                        if (llp.weight == 0f
+                                && (llp.gravity & android.view.Gravity.HORIZONTAL_GRAVITY_MASK)
+                                        != android.view.Gravity.CENTER_HORIZONTAL) {
+                            int vertical = llp.gravity & android.view.Gravity.VERTICAL_GRAVITY_MASK;
+                            llp.gravity = android.view.Gravity.CENTER_HORIZONTAL | vertical;
+                            only.setLayoutParams(llp);
+                            only.requestLayout();
+                        }
+                    }
+                }
+            }
+            for (int i = 0; i < group.getChildCount(); i++) {
+                centerSingleVisibleEntries(group.getChildAt(i));
+            }
         }
     }
 
