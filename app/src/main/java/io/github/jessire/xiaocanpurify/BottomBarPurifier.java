@@ -15,13 +15,28 @@ import io.github.libxposed.api.XposedInterface;
 public final class BottomBarPurifier {
     private BottomBarPurifier() {}
 
+    private static volatile boolean hideVip;
+    private static volatile boolean hideBenefit;
+    private static volatile boolean hidePlacement;
+
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
-        hookTabActionList(xposed, classLoader);
-        hookMainActivitySetupPages(xposed, classLoader);
-        hookOnItemSelectedListener(xposed, classLoader);
-        hookChangeTabIndex(xposed, classLoader);
-        hookApplyBottomTabTheme(xposed, classLoader);
-        hookSecondTabPlacement(xposed, classLoader);
+        hideVip = PurifyPrefs.hide(PurifyPrefs.TAB_VIP);
+        hideBenefit = PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT);
+        hidePlacement = PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
+        boolean threeTabMode = hideVip && hideBenefit;
+
+        if (threeTabMode) {
+            hookTabActionList(xposed, classLoader);
+            hookMainActivitySetupPages(xposed, classLoader);
+            hookOnItemSelectedListener(xposed, classLoader);
+            hookChangeTabIndex(xposed, classLoader);
+        }
+        if (hideVip || hideBenefit) {
+            hookApplyBottomTabTheme(xposed, classLoader);
+        }
+        if (hidePlacement) {
+            hookSecondTabPlacement(xposed, classLoader);
+        }
     }
 
     /**
@@ -147,43 +162,52 @@ public final class BottomBarPurifier {
             View nbiTd = (View) nbiTdField.get(binding);
 
             // Hide VIP decorations / badges
-            try {
-                Field lyActiveVip = binding.getClass().getField("lyActiveVip");
-                View v = (View) lyActiveVip.get(binding);
-                if (v != null) v.setVisibility(View.GONE);
-            } catch (Throwable ignored) {}
+            if (hideVip) {
+                try {
+                    Field lyActiveVip = binding.getClass().getField("lyActiveVip");
+                    View v = (View) lyActiveVip.get(binding);
+                    if (v != null) v.setVisibility(View.GONE);
+                } catch (Throwable ignored) {}
 
-            try {
-                Field tvVipExpire = binding.getClass().getField("tvVipExpireTag");
-                View v = (View) tvVipExpire.get(binding);
-                if (v != null) v.setVisibility(View.GONE);
-            } catch (Throwable ignored) {}
+                try {
+                    Field tvVipExpire = binding.getClass().getField("tvVipExpireTag");
+                    View v = (View) tvVipExpire.get(binding);
+                    if (v != null) v.setVisibility(View.GONE);
+                } catch (Throwable ignored) {}
+            }
 
             // Hide floating red packet icon on main activity
-            try {
-                Field ivFloatingWindowField = binding.getClass().getField("ivFloatingWindow");
-                View v = (View) ivFloatingWindowField.get(binding);
-                if (v != null) v.setVisibility(View.GONE);
-            } catch (Throwable ignored) {}
+            if (PurifyPrefs.hide(PurifyPrefs.FLOATING_WINDOW)) {
+                try {
+                    Field ivFloatingWindowField = binding.getClass().getField("ivFloatingWindow");
+                    View v = (View) ivFloatingWindowField.get(binding);
+                    if (v != null) v.setVisibility(View.GONE);
+                } catch (Throwable ignored) {}
+            }
 
+            boolean removed = false;
             if (navView != null) {
-                if (nbiVip != null) {
+                if (hideVip && nbiVip != null) {
                     nbiVip.setVisibility(View.GONE);
                     navView.removeView(nbiVip);
+                    removed = true;
                 }
-                if (nbiBenefit != null) {
+                if (hideBenefit && nbiBenefit != null) {
                     nbiBenefit.setVisibility(View.GONE);
                     navView.removeView(nbiBenefit);
+                    removed = true;
                 }
-                if (nbiTd != null) {
+                if (hideVip && hideBenefit && nbiTd != null) {
                     try {
                         Method setItemKey = nbiTd.getClass().getMethod("setItemKey", String.class);
                         setItemKey.invoke(nbiTd, "order");
                     } catch (Throwable ignored) {}
                 }
-                Method initMethod = navView.getClass().getMethod("init");
-                initMethod.invoke(navView);
-                MainHook.log("navView purged and re-initialized with 3 items");
+                if (removed) {
+                    Method initMethod = navView.getClass().getMethod("init");
+                    initMethod.invoke(navView);
+                    MainHook.log("navView purged and re-initialized");
+                }
             }
         } catch (Throwable t) {
             MainHook.log("Failed to purge extra tabs: " + t);

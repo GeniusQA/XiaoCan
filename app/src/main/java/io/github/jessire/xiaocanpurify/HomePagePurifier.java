@@ -20,16 +20,55 @@ public final class HomePagePurifier {
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         hookStatusBarAndWindow(xposed, classLoader);
         hookSearchHint(xposed, classLoader);
-        hookSearchRightBanner(xposed, classLoader);
-        hookTopBanner(xposed, classLoader);
-        hookFeedBanners(xposed, classLoader);
-        hookOrderBanner(xposed, classLoader);
-        hookFloatingRedPacket(xposed, classLoader);
-        hookBottomPlacement(xposed, classLoader);
-        hookRefreshLayout(xposed, classLoader);
-        hookMenusRow(xposed, classLoader);
-        hookHomeBottomInit(xposed, classLoader);
-        hookHideHeadAdapter(xposed, classLoader);
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_SEARCH_BANNER)) {
+            hookSearchRightBanner(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
+            hookTopBanner(xposed, classLoader);
+            hookHideHeadAdapter(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_ORDER_BANNER)) {
+            hookOrderBanner(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_FAB)) {
+            hookFloatingRedPacket(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_BOTTOM_PLACEMENT)) {
+            hookBottomPlacement(xposed, classLoader);
+            hookHomeBottomInit(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_SECOND_FLOOR)) {
+            hookRefreshLayout(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_MENU_ROW)) {
+            hookMenusRow(xposed, classLoader);
+        }
+        hookHomeFragmentGuard(xposed, classLoader);
+    }
+
+    /**
+     * Persistent layout guard re-hiding restored views according to the toggles.
+     */
+    private static void hookHomeFragmentGuard(XposedInterface xposed, ClassLoader cl) {
+        try {
+            Class<?> fragClass = Class.forName("com.realtech.promotion.pages.home.HomeFragment", false, cl);
+            for (Method m : fragClass.getDeclaredMethods()) {
+                String mName = m.getName();
+                if ("lazyInitView".equals(mName) || "lazyLoadData".equals(mName) || "onResume".equals(mName)) {
+                    xposed.hook(m).intercept(chain -> {
+                        Object result = chain.proceed();
+                        Object fragment = chain.getThisObject();
+                        if (fragment != null) {
+                            forceHideFloatingViews(fragment);
+                        }
+                        return result;
+                    });
+                    MainHook.log("Hooked HomeFragment." + mName);
+                }
+            }
+        } catch (Throwable t) {
+            MainHook.log("Failed to hook HomeFragment lifecycle: " + t);
+        }
     }
 
     private static void hookRefreshLayout(XposedInterface xposed, ClassLoader cl) {
@@ -324,9 +363,11 @@ public final class HomePagePurifier {
             View trafficExpBanner = (View) trafficExpBannerField.get(headBinding);
             if (trafficExpBanner != null) trafficExpBanner.setVisibility(View.GONE);
 
-            Field conHelicopterField = headBinding.getClass().getField("conHelicopterchallenge");
-            View conHelicopter = (View) conHelicopterField.get(headBinding);
-            if (conHelicopter != null) conHelicopter.setVisibility(View.GONE);
+            if (PurifyPrefs.hide(PurifyPrefs.HOME_STORE_CARD)) {
+                Field conHelicopterField = headBinding.getClass().getField("conHelicopterchallenge");
+                View conHelicopter = (View) conHelicopterField.get(headBinding);
+                if (conHelicopter != null) conHelicopter.setVisibility(View.GONE);
+            }
         } catch (Throwable ignored) {}
     }
 
@@ -716,26 +757,8 @@ public final class HomePagePurifier {
             MainHook.log("Failed to hook HomeFabOrderBannerAdapter: " + t);
         }
 
-        // 6. Hook HomeFragment lazyInitView (called when fragment becomes visible)
-        try {
-            Class<?> fragClass = Class.forName("com.realtech.promotion.pages.home.HomeFragment", false, cl);
-            for (Method m : fragClass.getDeclaredMethods()) {
-                String mName = m.getName();
-                if ("lazyInitView".equals(mName) || "lazyLoadData".equals(mName) || "onResume".equals(mName)) {
-                    xposed.hook(m).intercept(chain -> {
-                        Object result = chain.proceed();
-                        Object fragment = chain.getThisObject();
-                        if (fragment != null) {
-                            forceHideFloatingViews(fragment);
-                        }
-                        return result;
-                    });
-                    MainHook.log("Hooked HomeFragment." + mName);
-                }
-            }
-        } catch (Throwable t) {
-            MainHook.log("Failed to hook HomeFragment lifecycle: " + t);
-        }
+        // 6. HomeFragment lifecycle guard is installed by hookHomeFragmentGuard().
+
     }
 
     private static final java.util.WeakHashMap<View, Boolean> watchedHomes = new java.util.WeakHashMap<>();
@@ -754,12 +777,20 @@ public final class HomePagePurifier {
     }
 
     private static void enforceHome(Object binding) {
-        for (String name : new String[]{"layoutFab", "flSceondFloor", "lySceondFloorGuide", "layoutSecondHeader"})
-            collapseView(asView(field(binding, name)));
-        collapseView(asView(field(field(binding, "layoutBottom"), "layoutBottomPlacement")));
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_FAB)) {
+            collapseView(asView(field(binding, "layoutFab")));
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_SECOND_FLOOR)) {
+            for (String name : new String[]{"flSceondFloor", "lySceondFloorGuide", "layoutSecondHeader"})
+                collapseView(asView(field(binding, name)));
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.HOME_BOTTOM_PLACEMENT)) {
+            collapseView(asView(field(field(binding, "layoutBottom"), "layoutBottomPlacement")));
+        }
         View rv = asView(field(binding, "rv"));
         View toolbar = asView(field(binding, "toolBar"));
-        if (rv != null && toolbar != null && toolbar.getHeight() > 0) {
+        boolean headerCollapsed = PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER);
+        if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
             // The title bar is taller than the search pill, and that spare band is transparent,
             // so the gray page background shows through. Pin the list to the pill itself.
             View search = findViewByName(toolbar, "search_view");
@@ -821,13 +852,17 @@ public final class HomePagePurifier {
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
             String id = getViewIdName(child);
-            if ("fl_banner".equals(id)) {
+            if ("fl_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
                 // Header root owns the promotional blocks, not the merchant filter adapter.
                 if (child.getParent() instanceof View) collapseHeader((View) child.getParent());
             }
-            if ("layout_traffic_exp_c_order_banner".equals(id) || "layout_bottom_placement".equals(id)
-                    || "layout_fab".equals(id) || "fl_sceond_floor".equals(id)
-                    || "ly_sceond_floor_guide".equals(id) || "layout_second_header".equals(id)) collapseView(child);
+            boolean hide = ("layout_traffic_exp_c_order_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_ORDER_BANNER))
+                    || ("layout_bottom_placement".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_BOTTOM_PLACEMENT))
+                    || ("layout_fab".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_FAB))
+                    || (("fl_sceond_floor".equals(id) || "ly_sceond_floor_guide".equals(id)
+                        || "layout_second_header".equals(id)) && PurifyPrefs.hide(PurifyPrefs.HOME_SECOND_FLOOR))
+                    || ("con_helicopterchallenge".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_STORE_CARD));
+            if (hide) collapseView(child);
             if (child instanceof ViewGroup) cleanHomeTree((ViewGroup) child);
         }
     }

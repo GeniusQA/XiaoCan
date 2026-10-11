@@ -14,28 +14,31 @@ public final class OrderPagePurifier {
     private OrderPagePurifier() {}
 
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
-        hookOrderTypeFragment(xposed, classLoader);
-        hookOrderListFragment(xposed, classLoader);
-        hookOrderHolders(xposed, classLoader);
+        boolean hideChallenge = PurifyPrefs.hide(PurifyPrefs.ORDER_CHALLENGE);
+        boolean hideFree = PurifyPrefs.hide(PurifyPrefs.ORDER_FREE);
+        boolean hideBonusButtons = PurifyPrefs.hide(PurifyPrefs.ORDER_BONUS_BUTTONS);
+        hookOrderTypeFragment(xposed, classLoader, hideChallenge, hideFree);
+        hookOrderListFragment(xposed, classLoader, hideChallenge);
+        hookOrderHolders(xposed, classLoader, hideBonusButtons);
     }
 
     /**
      * Purge top banner/challenge and promo entry in OrderTypeFragment.
      */
-    private static void hookOrderTypeFragment(XposedInterface xposed, ClassLoader cl) {
+    private static void hookOrderTypeFragment(XposedInterface xposed, ClassLoader cl, boolean hideChallenge, boolean hideFree) {
         try {
             Class<?> typeFragClass = Class.forName("com.realtech.my_order.ui.OrderTypeFragment", false, cl);
 
             for (Method m : typeFragClass.getDeclaredMethods()) {
                 String mName = m.getName();
-                if ("lazyInitView".equals(mName)) {
+                if ("lazyInitView".equals(mName) && (hideChallenge || hideFree)) {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
-                        purgeOrderTypeViews(chain.getThisObject());
+                        purgeOrderTypeViews(chain.getThisObject(), hideChallenge, hideFree);
                         return result;
                     });
                     MainHook.log("Hooked OrderTypeFragment.lazyInitView");
-                } else if ("renderStickyBar".equals(mName)) {
+                } else if ("renderStickyBar".equals(mName) && hideChallenge) {
                     xposed.hook(m).intercept(chain -> {
                         List<Object> args = chain.getArgs();
                         if (!args.isEmpty() && args.get(0) != null) {
@@ -44,9 +47,9 @@ public final class OrderPagePurifier {
                         return null;
                     });
                     MainHook.log("Hooked OrderTypeFragment.renderStickyBar");
-                } else if ("initFreeOrderInviteView".equals(mName)) {
+                } else if ("initFreeOrderInviteView".equals(mName) && hideFree) {
                     xposed.hook(m).intercept(chain -> {
-                        purgeOrderTypeViews(chain.getThisObject());
+                        purgeOrderTypeViews(chain.getThisObject(), hideChallenge, hideFree);
                         return null;
                     });
                     MainHook.log("Hooked OrderTypeFragment.initFreeOrderInviteView");
@@ -57,16 +60,20 @@ public final class OrderPagePurifier {
         }
     }
 
-    private static void purgeOrderTypeViews(Object fragment) {
+    private static void purgeOrderTypeViews(Object fragment, boolean hideChallenge, boolean hideFree) {
         if (fragment == null) return;
         try {
             Method getBinding = fragment.getClass().getMethod("getBinding");
             Object binding = getBinding.invoke(fragment);
             if (binding != null) {
-                hideField(binding, "clMachallenge");
-                hideField(binding, "llFreeOrder");
-                hideField(binding, "ivTips");
-                hideField(binding, "ivFreeOrderTag");
+                if (hideChallenge) {
+                    hideField(binding, "clMachallenge");
+                }
+                if (hideFree) {
+                    hideField(binding, "llFreeOrder");
+                    hideField(binding, "ivTips");
+                    hideField(binding, "ivFreeOrderTag");
+                }
             }
         } catch (Throwable ignored) {}
     }
@@ -74,7 +81,7 @@ public final class OrderPagePurifier {
     /**
      * Prevent feed images, native ads, and challenge popups in OrderListFragment.
      */
-    private static void hookOrderListFragment(XposedInterface xposed, ClassLoader cl) {
+    private static void hookOrderListFragment(XposedInterface xposed, ClassLoader cl, boolean hideChallenge) {
         try {
             Class<?> listFragClass = Class.forName("com.realtech.my_order.ui.OrderListFragment", false, cl);
 
@@ -82,9 +89,9 @@ public final class OrderPagePurifier {
                 String mName = m.getName();
                 if ("renderFeedImage".equals(mName)
                         || "renderNativeAd".equals(mName)
-                        || "renderChallenge".equals(mName)
-                        || "showMaChallengePopUp".equals(mName)
-                        || "renderOrderTip".equals(mName)) {
+                        || "renderOrderTip".equals(mName)
+                        || ("renderChallenge".equals(mName) && hideChallenge)
+                        || ("showMaChallengePopUp".equals(mName) && hideChallenge)) {
                     xposed.hook(m).intercept(chain -> null);
                     MainHook.log("Hooked OrderListFragment." + mName + " -> blocked");
                 }
@@ -97,7 +104,7 @@ public final class OrderPagePurifier {
     /**
      * Purge order list ad holders and promo buttons ("领1k元宝").
      */
-    private static void hookOrderHolders(XposedInterface xposed, ClassLoader cl) {
+    private static void hookOrderHolders(XposedInterface xposed, ClassLoader cl, boolean hideBonusButtons) {
         // 1. OrderBannerHolder
         try {
             Class<?> bannerHolderClass = Class.forName("com.realtech.my_order.adapter.holder.OrderBannerHolder", false, cl);
@@ -133,7 +140,7 @@ public final class OrderPagePurifier {
         }
 
         // 3. OrderNormalHolder action buttons (filter out "领1k元宝") and tip banner
-        try {
+        if (hideBonusButtons) try {
             Class<?> normalHolderClass = Class.forName("com.realtech.my_order.adapter.holder.OrderNormalHolder", false, cl);
             for (Method m : normalHolderClass.getDeclaredMethods()) {
                 if ("bindActionButtons".equals(m.getName())) {

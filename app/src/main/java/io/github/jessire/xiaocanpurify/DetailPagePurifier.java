@@ -51,8 +51,11 @@ final class DetailPagePurifier {
 
     private static void cleanBinding(Object binding) {
         if (binding == null) return;
-        for (String name : new String[]{"flTobidContainer", "ivShare"}) {
-            try { collapse(binding.getClass().getField(name).get(binding)); }
+        // ToBid ad slot is pure advertising and stays blocked regardless of toggles.
+        try { collapse(binding.getClass().getField("flTobidContainer").get(binding)); }
+        catch (ReflectiveOperationException ignored) {}
+        if (PurifyPrefs.hide(PurifyPrefs.DETAIL_SHARE)) {
+            try { collapse(binding.getClass().getField("ivShare").get(binding)); }
             catch (ReflectiveOperationException ignored) {}
         }
     }

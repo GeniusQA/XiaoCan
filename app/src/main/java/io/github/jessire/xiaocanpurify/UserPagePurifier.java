@@ -14,8 +14,12 @@ public final class UserPagePurifier {
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         hookUserV2Fragment(xposed, classLoader);
         hookUserModules(xposed, classLoader);
-        hookUserInfoModule(xposed, classLoader);
-        hookVipCarousel(xposed, classLoader);
+        if (PurifyPrefs.hide(PurifyPrefs.USER_EARN)) {
+            hookUserInfoModule(xposed, classLoader);
+        }
+        if (PurifyPrefs.hide(PurifyPrefs.USER_VIP_CAROUSEL)) {
+            hookVipCarousel(xposed, classLoader);
+        }
     }
 
     private static void hookVipCarousel(XposedInterface xposed, ClassLoader cl) {
@@ -90,16 +94,17 @@ public final class UserPagePurifier {
                         Object state = chain.getArg(0);
                         if (state != null) {
                             String sName = state.getClass().getSimpleName();
-                            if (sName.contains("Menu")
-                                    || sName.contains("Service")
-                                    || sName.contains("BWC")
-                                    || sName.contains("Notice")
-                                    || sName.contains("NewUserTip")
-                                    || sName.contains("Commerce")
+                            boolean hide = (sName.contains("Menu") && PurifyPrefs.hide(PurifyPrefs.USER_MENU_ROW))
+                                    || (sName.contains("Service") && PurifyPrefs.hide(PurifyPrefs.USER_SERVICE))
+                                    || (sName.contains("BWC") && PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT))
+                                    || (sName.contains("Notice") && PurifyPrefs.hide(PurifyPrefs.USER_NOTICE))
+                                    || (sName.contains("NewUserTip") && PurifyPrefs.hide(PurifyPrefs.USER_NEW_USER_TIP))
+                                    || (sName.contains("Commerce") && PurifyPrefs.hide(PurifyPrefs.USER_COMMERCE))
                                     || sName.contains("BaiduAd")
-                                    || sName.contains("MatchPlacement")
+                                    || (sName.contains("MatchPlacement") && PurifyPrefs.hide(PurifyPrefs.USER_OTHER_MATCH))
                                     || sName.contains("Challenge")
-                                    || sName.contains("YuanBao")) {
+                                    || sName.contains("YuanBao");
+                            if (hide) {
                                 MainHook.log("Filtered UserCenterViewState: " + sName);
                                 return null;
                             }
@@ -123,24 +128,42 @@ public final class UserPagePurifier {
 
             hideBindingField(binding, "adContainer");
             hideBindingField(binding, "bqtContainer");
-            hideBindingField(binding, "commerceGridContainer");
-            hideBindingField(binding, "bannerNotice");
-            hideBindingField(binding, "ivFloatingWindow");
-            hideBindingField(binding, "frameBottomBonus");
-            hideBindingLayout(binding, "layoutNewUserTip");
-            hideBindingLayout(binding, "layoutMenu");
-            hideBindingLayout(binding, "layoutUserMerchant");
-            hideBindingLayout(binding, "layoutServer");
+            if (PurifyPrefs.hide(PurifyPrefs.USER_COMMERCE)) {
+                hideBindingField(binding, "commerceGridContainer");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_NOTICE)) {
+                hideBindingField(binding, "bannerNotice");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.FLOATING_WINDOW)) {
+                hideBindingField(binding, "ivFloatingWindow");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_BONUS)) {
+                hideBindingField(binding, "frameBottomBonus");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_NEW_USER_TIP)) {
+                hideBindingLayout(binding, "layoutNewUserTip");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_ROW)) {
+                hideBindingLayout(binding, "layoutMenu");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT)) {
+                hideBindingLayout(binding, "layoutUserMerchant");
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_SERVICE)) {
+                hideBindingLayout(binding, "layoutServer");
+            }
 
             // Hide "赚钱" button and "待领蚕豆" badge next to 提现
-            try {
-                Field silkField = binding.getClass().getField("layoutSilkEarn");
-                Object silkBinding = silkField.get(binding);
-                if (silkBinding != null) {
-                    hideBindingField(silkBinding, "tvMakeProfit");
-                    hideBindingField(silkBinding, "tvMakeProfitClaimBadge");
-                }
-            } catch (Throwable ignored) {}
+            if (PurifyPrefs.hide(PurifyPrefs.USER_EARN)) {
+                try {
+                    Field silkField = binding.getClass().getField("layoutSilkEarn");
+                    Object silkBinding = silkField.get(binding);
+                    if (silkBinding != null) {
+                        hideBindingField(silkBinding, "tvMakeProfit");
+                        hideBindingField(silkBinding, "tvMakeProfitClaimBadge");
+                    }
+                } catch (Throwable ignored) {}
+            }
 
             MainHook.log("Successfully purged unwanted user page views");
         } catch (Throwable t) {
@@ -202,17 +225,18 @@ public final class UserPagePurifier {
     }
 
     private static void hookUserModules(XposedInterface xposed, ClassLoader cl) {
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserMenuModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserServiceModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserBWCModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserNoticeModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserCommerceGridModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserOtherMatchModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserBqtModule");
-        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.NewUserTipModule");
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserMenuModule", PurifyPrefs.USER_MENU_ROW);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserServiceModule", PurifyPrefs.USER_SERVICE);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserBWCModule", PurifyPrefs.USER_MERCHANT);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserNoticeModule", PurifyPrefs.USER_NOTICE);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserCommerceGridModule", PurifyPrefs.USER_COMMERCE);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserOtherMatchModule", PurifyPrefs.USER_OTHER_MATCH);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.UserBqtModule", PurifyPrefs.USER_BQT);
+        hookModuleRender(xposed, cl, "com.realtech.user.pages.userv2.NewUserTipModule", PurifyPrefs.USER_NEW_USER_TIP);
     }
 
-    private static void hookModuleRender(XposedInterface xposed, ClassLoader cl, String className) {
+    private static void hookModuleRender(XposedInterface xposed, ClassLoader cl, String className, String prefKey) {
+        if (!PurifyPrefs.hide(prefKey)) return;
         try {
             Class<?> moduleClass = Class.forName(className, false, cl);
             for (Method m : moduleClass.getDeclaredMethods()) {

@@ -111,6 +111,10 @@ public final class MainHook extends XposedModule {
         }
         log("Target classes available, installing purifier hooks with ClassLoader: " + classLoader);
 
+        if (xposed instanceof XposedModule) {
+            PurifyPrefs.init((XposedModule) xposed);
+        }
+
         try {
             AdBlocker.install(xposed, classLoader);
             log("AdBlocker installed successfully.");
