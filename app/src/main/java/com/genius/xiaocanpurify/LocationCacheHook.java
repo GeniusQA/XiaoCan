@@ -34,6 +34,15 @@ public final class LocationCacheHook {
     private static volatile SharedPreferences prefs;
     private static volatile boolean cacheValid;
 
+    /**
+     * 重入保护：allProvidersDisabled 内部会调用 lm.isProviderEnabled()，
+     * 而该方法本身被本类 hook —— 不加保护会形成
+     * intercept -> allProvidersDisabled -> isProviderEnabled -> intercept ... 无限递归，
+     * 最终 LSPosed HookBridge.invokeExactOriginalMethod 在 JNI 层拿到 null 导致 ART abort(SIGSEGV)。
+     * 置位期间 hook 直接放行原始调用。
+     */
+    private static final ThreadLocal<Boolean> PROVIDER_CHECKING = new ThreadLocal<>();
+
     private LocationCacheHook() {}
 
     public static void install(XposedInterface xposed, ClassLoader cl) {
@@ -427,6 +436,10 @@ public final class LocationCacheHook {
                         xposed.hook(m).intercept(chain -> {
                             try {
                                 Object result = chain.proceed();
+                                // 重入调用（由 allProvidersDisabled 内部发起）：直接返回真实结果，防止无限递归
+                                if (Boolean.TRUE.equals(PROVIDER_CHECKING.get())) {
+                                    return result;
+                                }
                                 if (Boolean.FALSE.equals(result) && hasCache()
                                         && allProvidersDisabled((android.location.LocationManager) chain.getThisObject())) {
                                     MainHook.log("LocationCache: framework isProviderEnabled=false -> true (all providers disabled, cache exists)");
@@ -469,13 +482,18 @@ public final class LocationCacheHook {
                 android.location.LocationManager.PASSIVE_PROVIDER,
                 "fused"
         };
-        for (String p : providers) {
-            try {
-                if (lm.isProviderEnabled(p)) return false;
-            } catch (Throwable ignored) {
+        PROVIDER_CHECKING.set(Boolean.TRUE);
+        try {
+            for (String p : providers) {
+                try {
+                    if (lm.isProviderEnabled(p)) return false;
+                } catch (Throwable ignored) {
+                }
             }
+            return true;
+        } finally {
+            PROVIDER_CHECKING.remove();
         }
-        return true;
     }
 
     private static void recordFrameworkLocation(double lat, double lng) {
