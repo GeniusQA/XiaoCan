@@ -72,7 +72,7 @@
 
 ## 构建与安装
 
-- 编译环境：Microsoft JDK 17, Gradle 9.5.1, Android SDK 37 (compileSdk=android-37.0, minSdk=26, targetSdk=35)
+- 编译环境：Microsoft JDK 17, Gradle 9.5.1, Android SDK 37 (compileSdk=37.0, minSdk=26, targetSdk=35)
 - 产物路径：`XiaoCanPurify-1.0.0-release.apk`
 - 安装步骤：
   1. 将生成的 APK 安装到设备。
