@@ -215,6 +215,7 @@ public final class UserPagePurifier {
             {PurifyPrefs.USER_MENU_RAIN, "红包雨"},
             {PurifyPrefs.USER_MENU_ELIMINATE, "有奖消消乐"},
             {PurifyPrefs.USER_MENU_QUALIFY, "免单资格"},
+            {PurifyPrefs.USER_MENU_CHECKIN, "签到"},
     };
 
     /**
