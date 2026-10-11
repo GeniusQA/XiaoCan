@@ -337,8 +337,9 @@ public final class UserPagePurifier {
     /**
      * 隐藏「我」页面订单板块：待上传/审核中/已驳回/已取消/全部订单 图标行 + 上传凭证提醒条。
      * 该板块没有稳定的 binding 字段名，用文案锚点定位：
-     * 找到锚点 TextView 后向上爬升到页面根容器的直接子节点（即整张卡片），
-     * 校验该子节点子树只包含订单内容（不含其他板块特征文案）后整块 GONE。
+     * 优先爬升到页面根容器的直接子节点整卡 GONE（校验只含订单内容）；
+     * 卡片与资产行等其它板块同层时，兜底按「不含其它板块关键词的最高祖先」
+     * 定位订单卡片边界整卡隐藏，避免只藏子项后留下空白卡片壳。
      */
     private static void hideUserOrderSection(Object binding) {
         try {
@@ -356,16 +357,19 @@ public final class UserPagePurifier {
             if (notice != null) collectOrderSection(rootGroup, notice, sections);
 
             if (sections.isEmpty()) {
-                // 兜底：布局层级异常时按可点击子项逐个隐藏
+                // 兜底：订单卡片与其它板块同处一个根级子节点，无法整块折叠根节点，
+                // 此时爬升到不含其它板块关键词的最高祖先（订单卡片边界）整卡 GONE
+                java.util.Set<View> cards = new java.util.LinkedHashSet<>();
                 for (String label : new String[]{"待上传", "审核中", "已驳回", "已取消", "全部订单"}) {
                     View labelView = findLabelView(root, label);
-                    if (labelView != null) {
-                        View item = enclosingClickableItem(labelView);
-                        if (item.getVisibility() != View.GONE) {
-                            item.setVisibility(View.GONE);
-                        }
-                    }
+                    if (labelView != null) collectOrderCard(rootGroup, labelView, cards);
                 }
+                View noticeBar = findTextContaining(root, "上传凭证");
+                if (noticeBar != null) collectOrderCard(rootGroup, noticeBar, cards);
+                for (View card : cards) {
+                    card.setVisibility(View.GONE);
+                }
+                MainHook.log("Hidden user order card fallback (" + cards.size() + " view(s))");
                 return;
             }
             for (View section : sections) {
@@ -388,16 +392,38 @@ public final class UserPagePurifier {
         boolean looksLikeOrder = text.contains("全部订单") || text.contains("待上传") || text.contains("上传凭证");
         // 排除列表必须包含资产行关键词：订单行与资产行（元宝/卡券/红包）常在同一张卡片，
         // 否则隐藏订单板块会把资产行一起整块 GONE，资产子项开关全部关闭也无法恢复显示
-        boolean hasOtherSection = text.contains("可提现蚕豆")
+        if (looksLikeOrder && !subtreeHasOtherSection(text) && cur.getVisibility() != View.GONE) {
+            out.add(cur);
+        }
+    }
+
+    /**
+     * 兜底用：从锚点向上爬到「子树不含其它板块关键词」的最高祖先（即订单卡片边界）。
+     * 一旦祖先子树出现资产行等其它板块文案立即停止，保证不误伤同卡的资产行。
+     */
+    private static void collectOrderCard(ViewGroup rootGroup, View anchor, java.util.Set<View> out) {
+        View best = anchor;
+        View cur = anchor;
+        while (cur.getParent() instanceof View && cur.getParent() != rootGroup) {
+            View parent = (View) cur.getParent();
+            if (subtreeHasOtherSection(subtreeText(parent))) break;
+            best = parent;
+            cur = parent;
+        }
+        if (best != anchor && best.getVisibility() != View.GONE) {
+            out.add(best);
+        }
+    }
+
+    /** 订单板块排除文案：出现即说明子树混有资产行等其它板块，不能整块折叠。 */
+    private static boolean subtreeHasOtherSection(String text) {
+        return text.contains("可提现蚕豆")
                 || text.contains("累计团员")
                 || text.contains("信用极好")
                 || text.contains("免费抽奖")
                 || text.contains("元宝")
                 || text.contains("卡券")
                 || text.contains("红包");
-        if (looksLikeOrder && !hasOtherSection && cur.getVisibility() != View.GONE) {
-            out.add(cur);
-        }
     }
 
     /** 查找文本包含关键词的第一个 TextView（区别于 findLabelView 的精确匹配）。 */
