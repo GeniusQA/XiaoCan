@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.USER_ASSET_YUANBAO, "资产行「元宝」", "元宝余额入口（元宝/卡券/红包一行）"},
                     {PurifyPrefs.USER_ASSET_COUPON, "资产行「卡券」", "卡券入口（元宝/卡券/红包一行）"},
                     {PurifyPrefs.USER_ASSET_REDPACKET, "资产行「红包」", "红包入口（元宝/卡券/红包一行）"},
+                    {PurifyPrefs.USER_ORDER, "「订单」板块", "待上传/审核中/已驳回/已取消/全部订单图标行与上传凭证提醒条"},
                     {PurifyPrefs.USER_MERCHANT, "霸王餐入驻 / 0元探店入驻横条", "商家招募推广横条"},
                     {PurifyPrefs.USER_VIP_CAROUSEL, "小蚕会员 SVIP 轮播卡", "「订单全额返利」会员卡与轮播指示器"},
                     {PurifyPrefs.USER_COMMERCE, "电商/生活/出行特惠网格", "电商补贴、生活特惠、出行特惠、电影票、打车券等导购网格"},
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.USER_BQT, "BQT 营销模块", "BQT 容器营销模块"},
             }},
             {"详情页 / 订单页", new String[][]{
+                    {PurifyPrefs.DETAIL_ENTER_SHOP, "隐藏「进店看餐品/进店逛逛」按钮", "活动详情底部进店按钮；默认关闭（按钮显示），开启后隐藏"},
                     {PurifyPrefs.DETAIL_SHARE, "「分享赚豆」浮动入口", "详情页右下角分享赚豆浮标"},
                     {PurifyPrefs.ORDER_CHALLENGE, "霸王餐挑战", "订单页挑战横条与挑战弹窗"},
                     {PurifyPrefs.ORDER_FREE, "免费单入口", "免费单邀请条与标签提示"},
@@ -188,6 +190,7 @@ public class MainActivity extends Activity {
                 "• 拦截抖音商城红包弹窗、蛋糕/周年庆弹窗\n" +
                 "• 屏蔽应用强制检查升级弹窗\n" +
                 "• 屏蔽元宝升级提示弹窗、开学季及分享弹窗\n" +
+                "• 拦截「愉悦推SDK」应用列表授权弹窗、「小蚕卫士」检测弹窗\n" +
                 "• 净化全局弹窗队列与 Compose 浮动弹窗"));
 
         // Feature 3
@@ -327,8 +330,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean getHide(String key) {
-        // 隐藏桌面图标默认显示（false），其余净化开关默认隐藏（true）
-        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key) ? false : true;
+        // 隐藏桌面图标、进店按钮开关默认关闭（false），其余净化开关默认隐藏（true）
+        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
+                || PurifyPrefs.DETAIL_ENTER_SHOP.equals(key) ? false : true;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {

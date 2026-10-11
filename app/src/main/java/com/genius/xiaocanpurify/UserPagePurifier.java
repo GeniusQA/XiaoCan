@@ -102,21 +102,34 @@ public final class UserPagePurifier {
                                     || (sName.contains("Commerce") && PurifyPrefs.hide(PurifyPrefs.USER_COMMERCE))
                                     || sName.contains("BaiduAd")
                                     || (sName.contains("MatchPlacement") && PurifyPrefs.hide(PurifyPrefs.USER_OTHER_MATCH))
-                                    || sName.contains("Challenge")
-                                    || sName.contains("YuanBao");
+                                    // 活动行/资产行：仅当全部子项开关都勾选隐藏时才整行拦截；
+                                    // 否则必须放行渲染，由 filterMenuItems/filterAssetItems 逐项过滤，
+                                    // 保证关掉单个开关后对应入口能恢复显示
+                                    || (sName.contains("Challenge") && allMenuItemsHidden())
+                                    || (sName.contains("YuanBao") && allAssetItemsHidden());
                             if (hide) {
                                 MainHook.log("Filtered UserCenterViewState: " + sName);
                                 return null;
                             }
                         }
                         Object result = chain.proceed();
-                        // 渲染后重放资产行子项过滤（计数等异步更新不影响已隐藏状态）
+                        // 渲染后重放子项过滤（活动行 + 资产行，计数等异步更新不影响已隐藏状态）
                         try {
                             Object fragment = chain.getThisObject();
                             if (fragment != null) {
                                 Field bf = fragment.getClass().getField("binding");
                                 Object b = bf.get(fragment);
-                                if (b != null) filterAssetItems(b);
+                                if (b != null) {
+                                    if (allMenuItemsHidden()) {
+                                        hideBindingLayout(b, "layoutMenu");
+                                    } else {
+                                        filterMenuItems(b);
+                                    }
+                                    filterAssetItems(b);
+                                    if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
+                                        hideUserOrderSection(b);
+                                    }
+                                }
                             }
                         } catch (Throwable ignored) {}
                         return result;
@@ -159,6 +172,9 @@ public final class UserPagePurifier {
                 filterMenuItems(binding);
             }
             filterAssetItems(binding);
+            if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
+                hideUserOrderSection(binding);
+            }
             if (PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT)) {
                 hideBindingLayout(binding, "layoutUserMerchant");
             }
@@ -211,6 +227,16 @@ public final class UserPagePurifier {
     /** 仅当活动行的全部子项都被勾选隐藏时，才整行隐藏（避免留下空行）。 */
     private static boolean allMenuItemsHidden() {
         for (String[] item : MENU_ITEMS) {
+            if (!PurifyPrefs.hide(item[0])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 仅当资产行（元宝/卡券/红包）的全部子项都被勾选隐藏时，才允许整行拦截。 */
+    private static boolean allAssetItemsHidden() {
+        for (String[] item : ASSET_ITEMS) {
             if (!PurifyPrefs.hide(item[0])) {
                 return false;
             }
@@ -278,6 +304,83 @@ public final class UserPagePurifier {
                 MainHook.log("Hidden user asset item: " + item[1]);
             }
         }
+    }
+
+    /**
+     * 隐藏「我」页面订单板块：待上传/审核中/已驳回/已取消/全部订单 图标行 + 上传凭证提醒条。
+     * 该板块没有稳定的 binding 字段名，用文案锚点定位：
+     * 找到锚点 TextView 后向上爬升到页面根容器的直接子节点（即整张卡片），
+     * 校验该子节点子树只包含订单内容（不含其他板块特征文案）后整块 GONE。
+     */
+    private static void hideUserOrderSection(Object binding) {
+        try {
+            View root = getBindingRoot(binding);
+            if (!(root instanceof ViewGroup)) return;
+            ViewGroup rootGroup = (ViewGroup) root;
+
+            java.util.Set<View> sections = new java.util.LinkedHashSet<>();
+            for (String label : new String[]{"待上传", "全部订单"}) {
+                View labelView = findLabelView(root, label);
+                if (labelView != null) collectOrderSection(rootGroup, labelView, sections);
+            }
+            // 上传凭证提醒条（文案动态，用包含匹配）
+            View notice = findTextContaining(root, "上传凭证");
+            if (notice != null) collectOrderSection(rootGroup, notice, sections);
+
+            if (sections.isEmpty()) {
+                // 兜底：布局层级异常时按可点击子项逐个隐藏
+                for (String label : new String[]{"待上传", "审核中", "已驳回", "已取消", "全部订单"}) {
+                    View labelView = findLabelView(root, label);
+                    if (labelView != null) {
+                        View item = enclosingClickableItem(labelView);
+                        if (item.getVisibility() != View.GONE) {
+                            item.setVisibility(View.GONE);
+                        }
+                    }
+                }
+                return;
+            }
+            for (View section : sections) {
+                section.setVisibility(View.GONE);
+            }
+            MainHook.log("Hidden user order section (" + sections.size() + " view(s))");
+        } catch (Throwable t) {
+            MainHook.log("hideUserOrderSection error: " + t);
+        }
+    }
+
+    /** 从锚点向上爬到 root 的直接子节点，校验子树确为订单板块后加入候选集合。 */
+    private static void collectOrderSection(ViewGroup rootGroup, View anchor, java.util.Set<View> out) {
+        View cur = anchor;
+        while (cur.getParent() instanceof View && cur.getParent() != rootGroup) {
+            cur = (View) cur.getParent();
+        }
+        if (cur.getParent() != rootGroup || cur == rootGroup) return;
+        String text = subtreeText(cur);
+        boolean looksLikeOrder = text.contains("全部订单") || text.contains("待上传") || text.contains("上传凭证");
+        boolean hasOtherSection = text.contains("可提现蚕豆")
+                || text.contains("累计团员")
+                || text.contains("信用极好")
+                || text.contains("免费抽奖");
+        if (looksLikeOrder && !hasOtherSection && cur.getVisibility() != View.GONE) {
+            out.add(cur);
+        }
+    }
+
+    /** 查找文本包含关键词的第一个 TextView（区别于 findLabelView 的精确匹配）。 */
+    private static View findTextContaining(View parent, String keyword) {
+        if (parent instanceof android.widget.TextView) {
+            String text = normalize(((android.widget.TextView) parent).getText().toString());
+            return text.contains(keyword) ? parent : null;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findTextContaining(group.getChildAt(i), keyword);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     /** 查找文本精确等于关键词（或「关键词(计数)」）的 TextView。 */

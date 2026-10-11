@@ -815,7 +815,64 @@ public final class HomePagePurifier {
             if (rv instanceof ViewGroup) ((ViewGroup) rv).setClipToPadding(true);
         }
         View root = asView(binding);
-        if (root instanceof ViewGroup) cleanHomeTree((ViewGroup) root);
+        if (root instanceof ViewGroup) {
+            cleanHomeTree((ViewGroup) root);
+            collapseMerchantCouponTabs((ViewGroup) root);
+        }
+    }
+
+    /**
+     * 隐藏首页顶部导航栏里的「美团水果券」营销 Tab（常开，不受开关影响）。
+     * 该 Tab 是服务端活动期间动态插入的（附近商家/爆品好价 旁边），
+     * 没有固定的 view id，按文案定位后折叠其所在的可点击 Tab 项；
+     * 宿主重新渲染后由 GlobalLayout 守卫再次折叠。
+     */
+    private static void collapseMerchantCouponTabs(ViewGroup group) {
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            View child = group.getChildAt(i);
+            if (child instanceof android.widget.TextView
+                    && ((android.widget.TextView) child).getText() != null
+                    && ((android.widget.TextView) child).getText().toString().contains("美团水果券")) {
+                View tab = enclosingClickable(child);
+                if (tab != child && isTabItemOnly(tab)) {
+                    tab.setVisibility(View.GONE);
+                } else {
+                    child.setVisibility(View.GONE);
+                }
+            }
+            if (child instanceof ViewGroup) collapseMerchantCouponTabs((ViewGroup) child);
+        }
+    }
+
+    /** 校验该可点击节点只包含「美团水果券」这一个 Tab 的内容（防止爬升过头折叠整行）。 */
+    private static boolean isTabItemOnly(View tab) {
+        if (!(tab instanceof ViewGroup)) return true;
+        StringBuilder sb = new StringBuilder();
+        collectTabText((ViewGroup) tab, sb);
+        String text = sb.toString();
+        return !text.contains("附近商家") && !text.contains("爆品好价") && !text.contains("只看可抢");
+    }
+
+    private static void collectTabText(ViewGroup group, StringBuilder sb) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof android.widget.TextView
+                    && ((android.widget.TextView) child).getText() != null) {
+                sb.append(((android.widget.TextView) child).getText()).append('\n');
+            }
+            if (child instanceof ViewGroup) collectTabText((ViewGroup) child, sb);
+        }
+    }
+
+    /** 向上查找最近的可点击祖先（Tab 项整体可点击切换页面）。 */
+    private static View enclosingClickable(View v) {
+        View cur = v;
+        while (cur.getParent() instanceof View) {
+            View parent = (View) cur.getParent();
+            if (parent.isClickable()) return parent;
+            cur = parent;
+        }
+        return cur;
     }
 
     private static View topmostContent(View rv) {

@@ -46,6 +46,8 @@ public final class PurifyPrefs {
     public static final String USER_ASSET_YUANBAO = "hide_user_asset_yuanbao";
     public static final String USER_ASSET_COUPON = "hide_user_asset_coupon";
     public static final String USER_ASSET_REDPACKET = "hide_user_asset_redpacket";
+    // 「我」页面订单板块（待上传/审核中/已驳回/已取消/全部订单 + 上传凭证提醒条）
+    public static final String USER_ORDER = "hide_user_order";
     public static final String USER_MERCHANT = "hide_user_merchant";
     public static final String USER_VIP_CAROUSEL = "hide_user_vip_carousel";
     public static final String USER_COMMERCE = "hide_user_commerce";
@@ -68,6 +70,8 @@ public final class PurifyPrefs {
 
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
+    // 进店按钮开关语义与其他净化项相反：默认关闭 = 按钮显示，开启后才隐藏
+    public static final String DETAIL_ENTER_SHOP = "hide_detail_enter_shop";
 
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";
@@ -119,5 +123,20 @@ public final class PurifyPrefs {
             } catch (Throwable ignored) {}
         }
         return true;
+    }
+
+    /**
+     * Opt-in switch (default OFF): entry stays visible unless the user
+     * explicitly enables hiding in the module UI (e.g. detail enter-shop button).
+     */
+    public static boolean hideOptIn(String key) {
+        Boolean local = LOCAL.get(key);
+        SharedPreferences prefs = remote;
+        if (prefs != null) {
+            try {
+                return prefs.getBoolean(key, local != null && local);
+            } catch (Throwable ignored) {}
+        }
+        return local != null && local;
     }
 }

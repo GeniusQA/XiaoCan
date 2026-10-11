@@ -16,12 +16,14 @@ import io.github.libxposed.api.XposedInterface;
 /**
  * 定位缓存：解决「不打开 GPS 就无法定位、拿不到商家活动数据」的问题。
  *
- * 宿主 com.realtech.location.LocationManager 底层使用腾讯定位 SDK
- * (com.tencent.map.geolocation.*)。这里在 SDK 层拦截：
- *  - 定位成功（error == ERROR_OK）时，把 TencentLocation 全量快照缓存到宿主私有 SharedPreferences；
- *  - 定位失败且已有缓存时，直接回调缓存的 TencentLocation（error=0），宿主自然走「使用腾讯定位」成功链路；
- *  - getLastKnownLocation 类方法返回 null 时也回放缓存。
- * 用户开 GPS 时仍走真实定位并自动刷新缓存。
+ * 策略（GPS 关闭时只回放缓存，不做网络定位降级）：
+ *  - GPS 开启：真实定位照常透传；定位成功（error == ERROR_OK）时把 TencentLocation
+ *    全量快照缓存到宿主私有 SharedPreferences，缓存始终跟随最新 GPS 位置；
+ *  - GPS 关闭：一律不使用降级的网络（基站/WiFi）定位——
+ *      有缓存时直接回调缓存的 TencentLocation（error=0），宿主自然走「使用腾讯定位」成功链路；
+ *      无缓存时吞掉定位回调/返回 null，让宿主按定位失败处理（报错）。
+ *  - getLastKnownLocation 类方法在 GPS 关闭时同样只回放缓存。
+ * 用户点「重新定位」拿到的是固定缓存位置，不会再随机漂移。
  */
 public final class LocationCacheHook {
     private static final String PREFS_NAME = "purify_loc_cache";
@@ -35,9 +37,9 @@ public final class LocationCacheHook {
     private static volatile boolean cacheValid;
 
     /**
-     * 重入保护：allProvidersDisabled 内部会调用 lm.isProviderEnabled()，
+     * 重入保护：isGpsActuallyEnabled 内部会调用 lm.isProviderEnabled()，
      * 而该方法本身被本类 hook —— 不加保护会形成
-     * intercept -> allProvidersDisabled -> isProviderEnabled -> intercept ... 无限递归，
+     * intercept -> isGpsActuallyEnabled -> isProviderEnabled -> intercept ... 无限递归，
      * 最终 LSPosed HookBridge.invokeExactOriginalMethod 在 JNI 层拿到 null 导致 ART abort(SIGSEGV)。
      * 置位期间 hook 直接放行原始调用。
      */
@@ -136,22 +138,28 @@ public final class LocationCacheHook {
             try {
                 if ("onLocationChanged".equals(method.getName()) && args != null && args.length >= 2) {
                     int error = (Integer) args[1];
-                    if (error == errorOk()) {
-                        // 定位成功：刷新缓存
-                        cacheSnapshot(args[0]);
+                    if (isGpsActuallyEnabled()) {
+                        if (error == errorOk()) {
+                            // GPS 开启：定位成功，刷新缓存并透传真实位置
+                            cacheSnapshot(args[0]);
+                            return dispatchOriginal(method, args);
+                        }
+                        // GPS 开启但本次定位失败：有缓存则回放成功回调，屏蔽失败回调
+                        if (hasCache()) {
+                            MainHook.log("LocationCache: location failed(error=" + error + "), replay cached location");
+                            return replayCache(method, args);
+                        }
                         return dispatchOriginal(method, args);
                     }
-                    // 定位失败：有缓存则回放成功回调，屏蔽失败回调
+                    // GPS 关闭：不使用降级网络定位，只回放缓存
                     if (hasCache()) {
-                        MainHook.log("LocationCache: location failed(error=" + error + "), replay cached location");
-                        Object cached = buildCachedTencentLocation(args[0] != null ? args[0].getClass() : null);
-                        if (cached != null) {
-                            Object[] replay = args.clone();
-                            replay[0] = cached;
-                            replay[1] = 0;
-                            if (replay.length >= 3) replay[2] = "purify_cache";
-                            return dispatchOriginal(method, replay);
-                        }
+                        MainHook.log("LocationCache: gps off, replay cached location (error=" + error + ")");
+                        return replayCache(method, args);
+                    }
+                    // GPS 关闭且无缓存：吞掉成功回调（宿主按定位失败处理并报错），失败回调照常透传
+                    if (error == errorOk()) {
+                        MainHook.log("LocationCache: gps off, no cache, drop degraded network fix");
+                        return null;
                     }
                     return dispatchOriginal(method, args);
                 }
@@ -161,6 +169,20 @@ public final class LocationCacheHook {
                 // 回调异常绝不能逃逸到宿主的 JNI/平台线程边界，否则进程会被 SIGSEGV(SI_USER) 强杀
                 return dispatchOriginalSafe(method, args);
             }
+        }
+
+        /** 用缓存位置替换本次定位参数，以成功回调（error=0）派发给原始监听器。 */
+        private Object replayCache(Method method, Object[] args) throws Throwable {
+            Object cached = buildCachedTencentLocation(args[0] != null ? args[0].getClass() : null);
+            if (cached != null) {
+                Object[] replay = args.clone();
+                replay[0] = cached;
+                replay[1] = 0;
+                // 保留原始第 3 参（provider/reason），不再注入自定义标记字符串——
+                // 非法 provider 名（如 purify_cache）上报后会被风控识别为伪造定位
+                return dispatchOriginal(method, replay);
+            }
+            return dispatchOriginal(method, args);
         }
 
         private Object dispatchOriginal(Method method, Object[] args) throws Throwable {
@@ -261,14 +283,35 @@ public final class LocationCacheHook {
     }
 
     private static Object buildCachedResult(Class<?> returnType) {
+        return buildCachedResult(returnType, null);
+    }
+
+    /**
+     * 构造回放用的 Location。坐标固定为缓存值（重新定位不漂移），
+     * 但动态字段每次回放都刷新：时间戳取当前、elapsedRealtimeNanos 取当前、
+     * 精度在 22~38m 间轻微浮动——避免「请求是新的、定位时间却冻结在缓存时刻、
+     * 精度字节级一致」这类可被风控识别的假定位指纹。
+     * provider 使用真实合法值（优先镜像宿主请求的 provider），不再使用自定义标记。
+     */
+    private static Object buildCachedResult(Class<?> returnType, String providerHint) {
         try {
             if (returnType == Location.class) {
-                Location loc = new Location("purify_cache");
+                String provider = providerHint != null && !providerHint.isEmpty()
+                        ? providerHint : "network";
+                // 校验 provider 合法，防止宿主传入奇怪值
+                if (!"gps".equals(provider) && !"network".equals(provider)
+                        && !"fused".equals(provider) && !"passive".equals(provider)) {
+                    provider = "network";
+                }
+                Location loc = new Location(provider);
                 double[] ll = cachedLatLng();
                 loc.setLatitude(ll[0]);
                 loc.setLongitude(ll[1]);
-                loc.setAccuracy(30f);
-                loc.setTime(cachedTime());
+                loc.setAccuracy(22f + (float) (Math.random() * 16f));
+                loc.setTime(System.currentTimeMillis());
+                loc.setElapsedRealtimeNanos(android.os.SystemClock.elapsedRealtimeNanos());
+                loc.setSpeed(0f);
+                loc.setBearing(0f);
                 return loc;
             }
             return buildCachedTencentLocation(returnType);
@@ -302,10 +345,29 @@ public final class LocationCacheHook {
         final Class<?> locationIface = iface;
 
         Class<?>[] interfaces = collectLocationInterfaces(locationIface).toArray(new Class<?>[0]);
+        // 每次回放生成新的动态字段（时间戳取当前、精度轻微浮动），
+        // 避免所有请求携带字节级一致、时间冻结的定位元数据被风控识别
+        final long freshTime = System.currentTimeMillis();
+        final long freshElapsed = android.os.SystemClock.elapsedRealtimeNanos();
+        final float freshAccuracy = 22f + (float) (Math.random() * 16f);
         return Proxy.newProxyInstance(locationIface.getClassLoader(), interfaces,
                 (proxy, method, args) -> {
                     String name = method.getName();
                     Class<?> rt = method.getReturnType();
+                    // 动态字段优先：刷新为当前值，覆盖快照中的冻结值
+                    if ("getTime".equals(name) && (rt == long.class || rt == Long.class)) {
+                        return freshTime;
+                    }
+                    if ("getElapsedRealtimeNanos".equals(name) && (rt == long.class || rt == Long.class)) {
+                        return freshElapsed;
+                    }
+                    if ("getAccuracy".equals(name) && (rt == float.class || rt == Float.class)) {
+                        return freshAccuracy;
+                    }
+                    if (("getSpeed".equals(name) || "getBearing".equals(name))
+                            && (rt == double.class || rt == Double.class || rt == float.class || rt == Float.class)) {
+                        return rt == float.class || rt == Float.class ? 0.0f : 0.0d;
+                    }
                     if (dSnap.containsKey(name) && (rt == double.class || rt == Double.class)) {
                         return dSnap.get(name);
                     }
@@ -346,8 +408,9 @@ public final class LocationCacheHook {
                             Object[] args = chain.getArgs().toArray();
                             if (args[fIdx] != null) {
                                 final Object orig = args[fIdx];
-                                final java.util.concurrent.atomic.AtomicBoolean gotReal =
+                                final java.util.concurrent.atomic.AtomicBoolean handled =
                                         new java.util.concurrent.atomic.AtomicBoolean(false);
+                                final Method onLoc = safeOnLocationChanged(listenerClass);
                                 args[fIdx] = Proxy.newProxyInstance(
                                         listenerClass.getClassLoader(),
                                         new Class<?>[]{listenerClass},
@@ -356,9 +419,24 @@ public final class LocationCacheHook {
                                                 if ("onLocationChanged".equals(method.getName())
                                                         && mArgs != null && mArgs.length >= 1
                                                         && mArgs[0] instanceof Location) {
-                                                    gotReal.set(true);
                                                     Location loc = (Location) mArgs[0];
+                                                    if (!isGpsActuallyEnabled()) {
+                                                        // GPS 关闭：屏蔽降级网络定位，改为回放缓存；
+                                                        // 无缓存则丢弃回调（宿主按定位失败处理）
+                                                        if (handled.compareAndSet(false, true)
+                                                                && hasCache() && onLoc != null) {
+                                                            try {
+                                                                onLoc.invoke(orig, buildCachedResult(
+                                                                        Location.class, loc.getProvider()));
+                                                                MainHook.log("LocationCache: gps off, injected cached location (framework)");
+                                                            } catch (Throwable ignored) {
+                                                            }
+                                                        }
+                                                        return null;
+                                                    }
+                                                    handled.set(true);
                                                     recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
+                                                    return method.invoke(orig, mArgs);
                                                 }
                                                 return method.invoke(orig, mArgs);
                                             } catch (Throwable t) {
@@ -372,23 +450,30 @@ public final class LocationCacheHook {
                                                 }
                                             }
                                         });
-                                // 注册后若始终无真实定位（如定位服务整体关闭），延迟注入缓存位置，
-                                // 让直接使用系统定位的页面（如「选择地址」）也能拿到结果。
-                                // 延迟给足 3 秒：网络定位（基站/WiFi）通常 1~3 秒内回调，
-                                // 避免缓存抢在真实定位之前注入导致显示旧位置。
+                                // 注册后若始终无定位回调，延迟注入缓存位置兜底：
+                                // GPS 关闭时网络定位已被屏蔽，尽快（500ms）回放缓存；
+                                // GPS 开启时给真实定位 3 秒时间，超时未定到才用缓存兜底。
                                 if (hasCache()) {
-                                    final Object cached = buildCachedResult(Location.class);
-                                    final Method onLoc = safeOnLocationChanged(listenerClass);
+                                    // provider 镜像宿主注册时请求的 provider，保持元数据一致
+                                    String providerHint = null;
+                                    for (Object arg : args) {
+                                        if (arg instanceof String) {
+                                            providerHint = (String) arg;
+                                            break;
+                                        }
+                                    }
+                                    final Object cached = buildCachedResult(Location.class, providerHint);
+                                    final long delay = isGpsActuallyEnabled() ? 3000L : 500L;
                                     if (cached != null && onLoc != null) {
                                         new android.os.Handler(android.os.Looper.getMainLooper())
                                                 .postDelayed(() -> {
-                                                    if (gotReal.get()) return;
+                                                    if (handled.get()) return;
                                                     try {
                                                         onLoc.invoke(orig, cached);
                                                         MainHook.log("LocationCache: injected cached location to framework listener");
                                                     } catch (Throwable ignored) {
                                                     }
-                                                }, 3000L);
+                                                }, delay);
                                     }
                                 }
                             }
@@ -402,7 +487,8 @@ public final class LocationCacheHook {
                 }
             }
 
-            // getLastKnownLocation：返回 null 且有缓存时回放缓存，覆盖「选择地址」等直接读系统最后位置的页面
+            // getLastKnownLocation：GPS 关闭时不返回降级网络位置，只回放缓存；
+            // GPS 开启时仅在返回 null 且有缓存时回放。覆盖「选择地址」等直接读系统最后位置的页面
             for (Method m : lmClass.getDeclaredMethods()) {
                 Class<?>[] ps = m.getParameterTypes();
                 if ("getLastKnownLocation".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
@@ -410,9 +496,24 @@ public final class LocationCacheHook {
                         xposed.hook(m).intercept(chain -> {
                             try {
                                 Object result = chain.proceed();
+                                // provider 镜像宿主查询的 provider（gps/network/passive 等）
+                                Object providerArg = chain.getArgs().toArray().length > 0
+                                        ? chain.getArgs().toArray()[0] : null;
+                                String providerHint = providerArg instanceof String ? (String) providerArg : null;
+                                if (!isGpsActuallyEnabled()) {
+                                    // GPS 关闭：只回放缓存；无缓存返回 null，宿主按定位失败处理
+                                    if (hasCache()) {
+                                        if (result == null) {
+                                            MainHook.log("LocationCache: gps off, getLastKnownLocation null, replay cache");
+                                        }
+                                        return buildCachedResult(Location.class, providerHint);
+                                    }
+                                    MainHook.log("LocationCache: gps off, no cache, getLastKnownLocation -> null");
+                                    return null;
+                                }
                                 if (result == null && hasCache()) {
                                     MainHook.log("LocationCache: framework getLastKnownLocation null, replay cache");
-                                    return buildCachedResult(Location.class);
+                                    return buildCachedResult(Location.class, providerHint);
                                 }
                                 return result;
                             } catch (Throwable t) {
@@ -425,10 +526,9 @@ public final class LocationCacheHook {
                 }
             }
 
-            // isProviderEnabled：仅在所有定位源都不可用但已有缓存时放行为 true，
-            // 避免宿主在请求定位前就判定「定位失败，请先开启定位服务」。
-            // 注意：只关 GPS 时不能伪造 gps 为 true，否则腾讯 SDK 会死等 GPS 卫星
-            // 而不降级到网络定位（基站/WiFi），导致回放缓存、位置与真实位置不符。
+            // isProviderEnabled：定位服务关闭但已有缓存时放行为 true，
+            // 避免宿主在请求定位前就判定「定位失败，请先开启定位服务」
+            // （随后由缓存回放链路提供位置）。无缓存时保持 false，宿主直接报错。
             for (Method m : lmClass.getDeclaredMethods()) {
                 Class<?>[] ps = m.getParameterTypes();
                 if ("isProviderEnabled".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
@@ -436,13 +536,12 @@ public final class LocationCacheHook {
                         xposed.hook(m).intercept(chain -> {
                             try {
                                 Object result = chain.proceed();
-                                // 重入调用（由 allProvidersDisabled 内部发起）：直接返回真实结果，防止无限递归
+                                // 重入调用（由 isGpsActuallyEnabled 内部发起）：直接返回真实结果，防止无限递归
                                 if (Boolean.TRUE.equals(PROVIDER_CHECKING.get())) {
                                     return result;
                                 }
-                                if (Boolean.FALSE.equals(result) && hasCache()
-                                        && allProvidersDisabled((android.location.LocationManager) chain.getThisObject())) {
-                                    MainHook.log("LocationCache: framework isProviderEnabled=false -> true (all providers disabled, cache exists)");
+                                if (Boolean.FALSE.equals(result) && hasCache()) {
+                                    MainHook.log("LocationCache: framework isProviderEnabled=false -> true (cache exists)");
                                     return Boolean.TRUE;
                                 }
                                 return result;
@@ -469,36 +568,31 @@ public final class LocationCacheHook {
     }
 
     /**
-     * 判断是否所有常用定位源（gps/network/passive/fused）都不可用。
-     * 只有全部不可用才允许伪造 isProviderEnabled=true 走缓存兜底；
-     * 若仍有任一真实定位源可用（如只关了 GPS 但基站/WiFi 定位可用），
-     * 保持真实结果让 SDK 自行降级，获取实时位置。
+     * 查询 GPS 定位源的真实可用状态（绕过本类对 isProviderEnabled 的伪造）。
+     * GPS 关闭时模块只回放缓存、不使用降级网络定位；
+     * 查询失败（无法取到 Context 等）时按 GPS 可用处理，保持真实定位透传。
      */
-    private static boolean allProvidersDisabled(android.location.LocationManager lm) {
-        if (lm == null) return true;
-        String[] providers = {
-                android.location.LocationManager.GPS_PROVIDER,
-                android.location.LocationManager.NETWORK_PROVIDER,
-                android.location.LocationManager.PASSIVE_PROVIDER,
-                "fused"
-        };
-        PROVIDER_CHECKING.set(Boolean.TRUE);
+    private static boolean isGpsActuallyEnabled() {
         try {
-            for (String p : providers) {
-                try {
-                    if (lm.isProviderEnabled(p)) return false;
-                } catch (Throwable ignored) {
-                }
+            Context ctx = currentApplication();
+            if (ctx == null) return true;
+            Object lm = ctx.getSystemService(Context.LOCATION_SERVICE);
+            if (!(lm instanceof android.location.LocationManager)) return true;
+            android.location.LocationManager manager = (android.location.LocationManager) lm;
+            PROVIDER_CHECKING.set(Boolean.TRUE);
+            try {
+                return manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER);
+            } finally {
+                PROVIDER_CHECKING.remove();
             }
+        } catch (Throwable t) {
             return true;
-        } finally {
-            PROVIDER_CHECKING.remove();
         }
     }
 
     private static void recordFrameworkLocation(double lat, double lng) {
-        // 系统层真实定位始终刷新缓存：保证缓存跟随用户最新位置，
-        // 避免「开关 GPS 前后位置不一致」（缓存一直停留在老位置）
+        // 仅在 GPS 开启时被调用（GPS 关闭的网络定位在调用前已被屏蔽），
+        // 缓存始终跟随最新 GPS 真实位置
         if (lat == 0.0 && lng == 0.0) return;
         try {
             Map<String, Double> dbl = new HashMap<>();

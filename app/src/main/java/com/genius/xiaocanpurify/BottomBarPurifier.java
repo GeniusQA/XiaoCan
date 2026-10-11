@@ -5,16 +5,28 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 
+import android.widget.TextView;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedInterface;
 
 public final class BottomBarPurifier {
     private BottomBarPurifier() {}
+
+    /**
+     * 已识别的营销位 Tab action（0元到店/抖音补贴等，服务端活动期间动态替换原生 Tab）。
+     * 由 isSecondTabPlacementAction 的**原始返回值**记录（该 hook 对外固定返回 false）。
+     */
+    private static final Map<Object, Boolean> PLACEMENT_ACTIONS =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     /**
      * 宿主原始 Tab 列表（[HOME, TASK, ORDER, VIP, USER]），
@@ -123,6 +135,15 @@ public final class BottomBarPurifier {
         if (hideVip() && name.endsWith("$VIP")) return true;
         // 「福利/赚钱」Tab 对应 TASK
         if (hideBenefit() && name.endsWith("$TASK")) return true;
+        // 营销位（0元到店/抖音补贴等）活动期间会动态替换 Tab 列表中的原生 Tab，
+        // 类名不固定，无法用 $TASK/$ORDER 后缀识别。开启开关时按隐藏处理，
+        // 否则第二个导航项会映射到营销页——其内容已被置空，表现为空白页面。
+        if (hidePlacement()) {
+            if (PLACEMENT_ACTIONS.containsKey(action)) return true;
+            boolean nativeTab = name.endsWith("$HOME") || name.endsWith("$TASK")
+                    || name.endsWith("$ORDER") || name.endsWith("$VIP") || name.endsWith("$USER");
+            if (!nativeTab) return true;
+        }
         return false;
     }
 
@@ -143,7 +164,18 @@ public final class BottomBarPurifier {
                         return null;
                     });
                 } else if ("isSecondTabPlacementAction".equals(mName)) {
-                    xposed.hook(m).intercept(chain -> hidePlacement() ? false : chain.proceed());
+                    xposed.hook(m).intercept(chain -> {
+                        // 先取原始判定结果，记录营销位 action（供导航映射过滤使用），
+                        // 再按开关对外返回 false
+                        Object result = chain.proceed();
+                        if (Boolean.TRUE.equals(result)) {
+                            List<Object> args = chain.getArgs();
+                            if (!args.isEmpty() && args.get(0) != null) {
+                                PLACEMENT_ACTIONS.put(args.get(0), Boolean.TRUE);
+                            }
+                        }
+                        return hidePlacement() ? Boolean.FALSE : result;
+                    });
                 }
             }
             MainHook.log("Hooked second tab placement overrides");
@@ -247,20 +279,52 @@ public final class BottomBarPurifier {
                 navView.removeView(nbiBenefit);
                 removed = true;
             }
-            if (hideVip && hideBenefit) {
-                View nbiTd = getBindingView(binding, "nbiTd");
-                if (nbiTd != null) {
-                    try {
-                        Method setItemKey = nbiTd.getClass().getMethod("setItemKey", String.class);
-                        setItemKey.invoke(nbiTd, "order");
-                    } catch (Throwable ignored) {}
-                }
+            View nbiTd = getBindingView(binding, "nbiTd");
+            if (hideVip && hideBenefit && nbiTd != null) {
+                try {
+                    Method setItemKey = nbiTd.getClass().getMethod("setItemKey", String.class);
+                    setItemKey.invoke(nbiTd, "order");
+                } catch (Throwable ignored) {}
+            }
+            if (hidePlacement && nbiTd != null) {
+                // 营销位活动期间第二个 Tab 会被替换为「0元到店/抖音补贴」：
+                // 强制恢复为订单 Tab（itemKey 驱动标题/图标/点击行为），并把残留的
+                // 营销文案改回「订单」，避免导航文案与实际页面不一致
+                try {
+                    Method setItemKey = nbiTd.getClass().getMethod("setItemKey", String.class);
+                    setItemKey.invoke(nbiTd, "order");
+                } catch (Throwable ignored) {}
+                revertPlacementTitle(nbiTd);
             }
             if (removed) {
                 MainHook.log("navView purged (pages kept intact)");
             }
         } catch (Throwable t) {
             MainHook.log("Failed to purge extra tabs: " + t);
+        }
+    }
+
+    /** 营销位活动期间导航项标题可能被改为「0元到店/抖音补贴」，强制改回「订单」。 */
+    private static void revertPlacementTitle(View navItem) {
+        if (!(navItem instanceof ViewGroup)) return;
+        List<TextView> texts = new ArrayList<>();
+        collectTextViews((ViewGroup) navItem, texts);
+        for (TextView tv : texts) {
+            CharSequence t = tv.getText();
+            if (t == null) continue;
+            String s = t.toString().trim();
+            if (s.contains("0元到店") || s.contains("抖音补贴")) {
+                tv.setText("订单");
+                MainHook.log("Reverted placement tab title '" + s + "' -> 订单");
+            }
+        }
+    }
+
+    private static void collectTextViews(ViewGroup group, List<TextView> out) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView) out.add((TextView) child);
+            if (child instanceof ViewGroup) collectTextViews((ViewGroup) child, out);
         }
     }
 

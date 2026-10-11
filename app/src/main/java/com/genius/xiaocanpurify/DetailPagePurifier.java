@@ -58,6 +58,68 @@ final class DetailPagePurifier {
             try { collapse(binding.getClass().getField("ivShare").get(binding)); }
             catch (ReflectiveOperationException ignored) {}
         }
+        if (PurifyPrefs.hideOptIn(PurifyPrefs.DETAIL_ENTER_SHOP)) {
+            try {
+                Object root = binding.getClass().getMethod("getRoot").invoke(binding);
+                if (root instanceof ViewGroup) collapseEnterShopButtons((ViewGroup) root);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    /**
+     * 按文案隐藏底部「进店看餐品 / 进店逛逛」按钮（独立开关，默认关闭 = 按钮显示）。
+     * 命中后折叠其所在的可点击按钮整体；宿主重渲染由 GlobalLayout 守卫再次折叠。
+     */
+    private static void collapseEnterShopButtons(ViewGroup group) {
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            View child = group.getChildAt(i);
+            if (child instanceof android.widget.TextView) {
+                CharSequence text = ((android.widget.TextView) child).getText();
+                if (text != null) {
+                    String s = text.toString().trim();
+                    if ("进店看餐品".equals(s) || "进店逛逛".equals(s)) {
+                        View btn = enclosingClickable(child);
+                        if (btn != child && isEnterShopButtonOnly(btn)) {
+                            collapse(btn);
+                        } else {
+                            collapse(child);
+                        }
+                        MainHook.log("Hidden detail enter-shop button: " + s);
+                    }
+                }
+            }
+            if (child instanceof ViewGroup) collapseEnterShopButtons((ViewGroup) child);
+        }
+    }
+
+    /** 校验爬到的可点击节点只包含进店按钮自身内容（防止爬升过头折叠整个底栏）。 */
+    private static boolean isEnterShopButtonOnly(View btn) {
+        if (!(btn instanceof ViewGroup)) return true;
+        StringBuilder sb = new StringBuilder();
+        collectText((ViewGroup) btn, sb);
+        String text = sb.toString();
+        return !text.contains("立即报名") && !text.contains("客服") && !text.contains("领红包");
+    }
+
+    private static void collectText(ViewGroup group, StringBuilder sb) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof android.widget.TextView
+                    && ((android.widget.TextView) child).getText() != null) {
+                sb.append(((android.widget.TextView) child).getText()).append('\n');
+            }
+            if (child instanceof ViewGroup) collectText((ViewGroup) child, sb);
+        }
+    }
+
+    private static View enclosingClickable(View v) {
+        View cur = v;
+        while (cur.getParent() instanceof View) {
+            View parent = (View) cur.getParent();
+            if (parent.isClickable()) return parent;
+            cur = parent;
+        }
+        return cur;
     }
 
     private static void collapse(Object object) {

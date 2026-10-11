@@ -3,6 +3,9 @@ package com.genius.xiaocanpurify;
 import android.app.Activity;
 import android.app.Dialog;
 import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -27,7 +30,76 @@ public final class PopupBlocker {
         hookSpecificDialogClasses(xposed, classLoader);
         hookKuiklyDialogQueue(xposed, classLoader);
         hookTaobaoInstallPrompt(xposed, classLoader);
+        hookDialogShowByContent(xposed);
         EnrollmentJumpGuard.install(xposed, classLoader);
+    }
+
+    /**
+     * 按文案拦截指定弹窗（始终开启，不受开关影响）：
+     *  - 「愉悦推SDK」想要读取您的应用列表 —— 任务校验类隐私授权弹窗（元宝任务页）；
+     *  - 「小蚕卫士」安全保障 / 检测中弹窗（下单流程页）。
+     * 宿主自定义 Dialog 均继承 android.app.Dialog，show 前扫描窗口内容，
+     * 命中关键词则跳过展示；若内容在 show 过程中才装配，show 后立即 dismiss。
+     */
+    private static void hookDialogShowByContent(XposedInterface xposed) {
+        try {
+            for (Method m : Dialog.class.getDeclaredMethods()) {
+                if (!"show".equals(m.getName()) || m.getParameterTypes().length != 0
+                        || Modifier.isStatic(m.getModifiers())) continue;
+                xposed.hook(m).intercept(chain -> {
+                    Dialog dialog = chain.getThisObject() instanceof Dialog
+                            ? (Dialog) chain.getThisObject() : null;
+                    if (dialog != null && containsBlockedText(dialog)) {
+                        MainHook.log("Blocked dialog by content before show");
+                        return null;
+                    }
+                    Object result = chain.proceed();
+                    if (dialog != null && containsBlockedText(dialog)) {
+                        MainHook.log("Blocked dialog by content after show, dismissing");
+                        try {
+                            dialog.dismiss();
+                        } catch (Throwable ignored) {
+                        }
+                        return null;
+                    }
+                    return result;
+                });
+                break;
+            }
+            MainHook.log("Content-based dialog guard installed");
+        } catch (Throwable t) {
+            MainHook.log("Failed to hook Dialog.show by content: " + t);
+        }
+    }
+
+    private static boolean containsBlockedText(Dialog dialog) {
+        try {
+            android.view.Window window = dialog.getWindow();
+            if (window == null) return false;
+            View decor = window.getDecorView();
+            if (decor == null) return false;
+            StringBuilder sb = new StringBuilder();
+            collectText(decor, sb);
+            String text = sb.toString();
+            return text.contains("愉悦推")
+                    || text.contains("读取您的应用列表")
+                    || text.contains("小蚕卫士");
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void collectText(View view, StringBuilder sb) {
+        if (view instanceof TextView) {
+            CharSequence text = ((TextView) view).getText();
+            if (text != null && text.length() > 0) sb.append(text).append('\n');
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                collectText(group.getChildAt(i), sb);
+            }
+        }
     }
 
     private static void hookTaobaoInstallPrompt(XposedInterface xposed, ClassLoader cl) {
