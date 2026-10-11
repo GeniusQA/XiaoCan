@@ -2,10 +2,9 @@ name: Android Build & Release
 # 运行列表标题按渠道展示，例如 "Android Build & Canary"
 run-name: Android Build & ${{ inputs.channel == 'canary' && 'Canary' || inputs.channel == 'beta' && 'Beta' || inputs.channel == 'release' && 'Release' || inputs.channel }}
 
+# 仅手动触发：Actions 页面 Run workflow 时选择渠道
+# canary=仅 debug 产物 / beta=仅 release 产物 / stable=正式发布并打 Tag
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       channel:
@@ -17,7 +16,6 @@ on:
           - beta
           - stable
         default: canary
-  pull_request:
 
 concurrency:
   group: android-build-${{ github.ref }}
