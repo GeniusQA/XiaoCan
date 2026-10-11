@@ -1,7 +1,9 @@
 package com.genius.xiaocanpurify;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -66,6 +68,9 @@ public class MainActivity extends Activity {
             {"全局", new String[][]{
                     {PurifyPrefs.FLOATING_WINDOW, "浮动红包小窗", "主页/我的页悬浮红包小图标"},
             }},
+            {"模块界面", new String[][]{
+                    {PurifyPrefs.HIDE_DESKTOP_ICON, "隐藏桌面图标", "关闭后从桌面移除本模块图标；仍可在 LSPosed 模块列表中打开设置页重新开启"},
+            }},
             {"定位", new String[][]{
                     {PurifyPrefs.LOCATION_CACHE, "无 GPS 时使用缓存定位", "成功定位一次后缓存位置；之后不开定位服务也默认用该位置加载商家活动数据（开启定位后自动刷新）"},
             }},
@@ -85,6 +90,8 @@ public class MainActivity extends Activity {
 
         localPrefs = getSharedPreferences(PurifyPrefs.PREFS_NAME, MODE_PRIVATE);
         registerServiceListener();
+        // 对齐桌面图标状态，避免重装后组件默认启用而偏好记录为隐藏导致不一致
+        setLauncherIconEnabled(!getHide(PurifyPrefs.HIDE_DESKTOP_ICON));
 
         ScrollView scrollView = new ScrollView(this);
         scrollView.setBackgroundColor(Color.parseColor("#F6F7F9"));
@@ -311,7 +318,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean getHide(String key) {
-        boolean def = localPrefs.getBoolean(key, true);
+        // 隐藏桌面图标默认显示（false），其余净化开关默认隐藏（true）
+        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key) ? false : true;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
@@ -324,6 +332,11 @@ public class MainActivity extends Activity {
 
     private void setHide(String key, boolean hide) {
         localPrefs.edit().putBoolean(key, hide).commit();
+
+        // 隐藏桌面图标：立即切换 launcher alias 的启用状态（非宿主 hook，即时生效）
+        if (PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)) {
+            setLauncherIconEnabled(!hide);
+        }
 
         boolean synced = false;
         SharedPreferences rp = remotePrefs;
@@ -343,6 +356,20 @@ public class MainActivity extends Activity {
         android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
                 + " remoteSynced=" + synced);
         updateSyncStatus();
+    }
+
+    private void setLauncherIconEnabled(boolean enabled) {
+        try {
+            PackageManager pm = getPackageManager();
+            ComponentName alias = new ComponentName(this, "com.genius.xiaocanpurify.MainActivityAlias");
+            int state = enabled
+                    ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+            pm.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP);
+            android.util.Log.i("XiaoCanPurify", "Launcher icon " + (enabled ? "shown" : "hidden"));
+        } catch (Throwable t) {
+            android.util.Log.e("XiaoCanPurify", "setLauncherIconEnabled failed: " + t);
+        }
     }
 
     private void flushPendingRemoteWrites() {

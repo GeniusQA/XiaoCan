@@ -27,9 +27,23 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
         </activity>
+
+        <!-- 承载桌面图标的入口：隐藏图标时禁用该 alias 即可，设置页仍可通过 LSPosed 模块列表打开 -->
+        <activity-alias
+            android:name=".MainActivityAlias"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@android:drawable/sym_def_app_icon">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
     </application>
 
 </manifest>

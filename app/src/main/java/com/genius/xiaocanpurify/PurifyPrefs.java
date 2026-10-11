@@ -60,6 +60,9 @@ public final class PurifyPrefs {
     // Global
     public static final String FLOATING_WINDOW = "hide_floating_window";
 
+    // Module UI
+    public static final String HIDE_DESKTOP_ICON = "hide_desktop_icon";
+
     // Location
     public static final String LOCATION_CACHE = "location_cache";
 
