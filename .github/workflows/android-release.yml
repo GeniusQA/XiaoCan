@@ -1,0 +1,243 @@
+name: Android Build & Release
+# 运行列表标题按渠道展示，例如 "Android Build & Canary"
+run-name: Android Build & ${{ inputs.channel == 'canary' && 'Canary' || inputs.channel == 'beta' && 'Beta' || inputs.channel == 'release' && 'Release' || inputs.channel }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: '构建渠道 (canary=仅 debug 产物 / beta=仅 release 产物 / stable=正式发布并打 Tag)'
+        required: true
+        type: choice
+        options:
+          - canary
+          - beta
+          - stable
+        default: canary
+  pull_request:
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 版本检测 Version Gate
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANNEL: ${{ github.event.inputs.channel }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do echo "$line" >> "$GITHUB_OUTPUT"; done < <(bash .github/scripts/resolve-version.sh)
+
+      - name: 构建摘要 Build Summary
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CHANNEL: ${{ steps.gate.outputs.channel }}
+          FULL_NAME: ${{ steps.gate.outputs.full_name }}
+          CODE: ${{ steps.gate.outputs.code }}
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+          commit_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
+          {
+            echo "## 构建摘要 XiaoCanPurify"
+            echo
+            echo "| 项目 | 内容 |"
+            echo "| --- | --- |"
+            echo "| 渠道 | $CHANNEL |"
+            echo "| 版本 | v$FULL_NAME ($CODE) |"
+            echo "| 触发者 | ${{ github.actor }} |"
+            echo
+            echo "### 本次提交说明 ([$short_sha]($commit_url))"
+            echo
+            echo '```text'
+            git log -1 --pretty=format:'%B' HEAD
+            echo
+            echo '```'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          base=""
+          if parent="$(git rev-parse HEAD^ 2>/dev/null)"; then
+            base="$(git describe --tags --abbrev=0 "$parent" 2>/dev/null || true)"
+          fi
+          if [[ -n "$base" ]]; then
+            range="$base..HEAD^"
+            list_title="自 $base 以来的提交"
+          else
+            range="HEAD~10..HEAD"
+            list_title="最近提交"
+          fi
+          {
+            echo "### $list_title"
+            git log "$range" --pretty=format:'- `%h` %s' --no-merges 2>/dev/null || true
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 安装 JDK Setup Java
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 安装 Android SDK Setup Android SDK
+        if: steps.gate.outputs.skip != 'true'
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platforms;android-37 build-tools;34.0.0
+
+      - name: 引导生成 Gradle Wrapper
+        # 本仓库未提交 gradle wrapper，CI 先下载 Gradle 9.5.1 生成 wrapper 再走统一构建流程
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GRADLE_USER_HOME: ${{ github.workspace }}/.gradle
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-9.5.1-bin.zip
+          mkdir -p "$HOME/gradle-bootstrap"
+          unzip -q /tmp/gradle.zip -d "$HOME/gradle-bootstrap"
+          "$HOME/gradle-bootstrap/gradle-9.5.1/bin/gradle" wrapper --gradle-version 9.5.1 --distribution-type bin
+
+      - name: 配置 Gradle Setup Gradle
+        if: steps.gate.outputs.skip != 'true'
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: wrapper
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: 授权脚本 Grant Permission
+        if: steps.gate.outputs.skip != 'true'
+        run: chmod +x gradlew .github/scripts/resolve-version.sh .github/scripts/generate-release-body.sh
+
+      - name: 构建 Debug 或 Release Build
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CHANNEL: ${{ steps.gate.outputs.channel }}
+        run: |
+          set -euo pipefail
+          BUILD_ARGS=(
+            --no-daemon --max-workers=2 --build-cache
+            "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g"
+            "-Pkotlin.daemon.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m"
+          )
+          if [[ "$CHANNEL" == "stable" ]]; then
+            ./gradlew "${BUILD_ARGS[@]}" assembleDebug
+            ./gradlew "${BUILD_ARGS[@]}" assembleRelease
+          elif [[ "$CHANNEL" == "canary" ]]; then
+            ./gradlew "${BUILD_ARGS[@]}" assembleDebug
+          else
+            # beta：仅构建 release 产物，不发布 Release/Tag（与 canary 一样只产出产物）
+            ./gradlew "${BUILD_ARGS[@]}" assembleRelease
+          fi
+
+      - name: 上传 PR 构建产物 Upload PR Artifacts
+        if: github.event_name == 'pull_request' && steps.gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.gate.outputs.channel }}-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: 解码签名密钥 Decode Keystore
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false'
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        run: echo "$SIGNING_KEY" | base64 -d > release.jks
+
+      - name: 签名 APK Sign APK
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false'
+        env:
+          STORE_PASS: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIAS }}
+          CHANNEL: ${{ steps.gate.outputs.channel }}
+          V_NAME: ${{ steps.gate.outputs.full_name }}
+          V_CODE: ${{ steps.gate.outputs.code }}
+        run: |
+          set -euo pipefail
+          BTDIR="$ANDROID_SDK_ROOT/build-tools/34.0.0"
+          ZA="$BTDIR/zipalign"
+          AS="$BTDIR/apksigner"
+          RELEASE_IN=$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit || true)
+          if [[ -n "$RELEASE_IN" ]]; then
+            $ZA -f -v -p 4 "$RELEASE_IN" release-aligned.apk
+            $AS sign \
+              --ks release.jks \
+              --ks-pass env:STORE_PASS \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass env:KEY_PASS \
+              --out "XiaoCanPurify-Release-v${V_NAME}-${V_CODE}.apk" \
+              release-aligned.apk
+          fi
+          DEBUG_IN=$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*-debug.apk' -print -quit || true)
+          if [[ -n "$DEBUG_IN" ]]; then
+            $ZA -f -v -p 4 "$DEBUG_IN" debug-aligned.apk
+            $AS sign \
+              --ks release.jks \
+              --ks-pass env:STORE_PASS \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass env:KEY_PASS \
+              --out "XiaoCanPurify-Canary-v${V_NAME}-${V_CODE}.apk" \
+              debug-aligned.apk
+          fi
+
+      - name: 上传 Release 产物 Upload Release Artifact
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.gate.outputs.channel }}-release-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}
+          path: XiaoCanPurify-Release-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}.apk
+          if-no-files-found: ignore
+          compression-level: 0
+
+      - name: 上传 Canary 产物 Upload Canary Artifact
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.gate.outputs.channel }}-canary-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}
+          path: XiaoCanPurify-Canary-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}.apk
+          if-no-files-found: ignore
+          compression-level: 0
+
+      - name: 生成发布说明 Generate Release Body
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false' && steps.gate.outputs.channel == 'stable'
+        id: release_body
+        run: |
+          set -euo pipefail
+          PREV_TAG="${{ steps.gate.outputs.prev_stable_tag }}"
+          CHANNEL="${{ steps.gate.outputs.channel }}"
+          BODY_DELIMITER="release_body_$(git rev-parse HEAD)"
+          echo "body<<$BODY_DELIMITER" >> "$GITHUB_OUTPUT"
+          .github/scripts/generate-release-body.sh "$PREV_TAG" HEAD "$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "$BODY_DELIMITER" >> "$GITHUB_OUTPUT"
+
+      - name: 创建正式版发布 Create Stable Release
+        if: github.event_name != 'pull_request' && steps.gate.outputs.skip == 'false' && steps.gate.outputs.channel == 'stable'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.gate.outputs.full_name }}
+          target_commitish: ${{ github.sha }}
+          name: V ${{ steps.gate.outputs.full_name }}
+          body: ${{ steps.release_body.outputs.body }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          files: |
+            XiaoCanPurify-Canary-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}.apk
+            XiaoCanPurify-Release-v${{ steps.gate.outputs.full_name }}-${{ steps.gate.outputs.code }}.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
