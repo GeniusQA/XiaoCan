@@ -42,6 +42,10 @@ public final class PurifyPrefs {
     public static final String USER_MENU_RAIN = "hide_user_menu_rain";
     public static final String USER_MENU_ELIMINATE = "hide_user_menu_eliminate";
     public static final String USER_MENU_QUALIFY = "hide_user_menu_qualify";
+    // 「我」页面资产行（元宝 / 卡券 / 红包）子项开关
+    public static final String USER_ASSET_YUANBAO = "hide_user_asset_yuanbao";
+    public static final String USER_ASSET_COUPON = "hide_user_asset_coupon";
+    public static final String USER_ASSET_REDPACKET = "hide_user_asset_redpacket";
     public static final String USER_MERCHANT = "hide_user_merchant";
     public static final String USER_VIP_CAROUSEL = "hide_user_vip_carousel";
     public static final String USER_COMMERCE = "hide_user_commerce";

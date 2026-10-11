@@ -109,7 +109,17 @@ public final class UserPagePurifier {
                                 return null;
                             }
                         }
-                        return chain.proceed();
+                        Object result = chain.proceed();
+                        // 渲染后重放资产行子项过滤（计数等异步更新不影响已隐藏状态）
+                        try {
+                            Object fragment = chain.getThisObject();
+                            if (fragment != null) {
+                                Field bf = fragment.getClass().getField("binding");
+                                Object b = bf.get(fragment);
+                                if (b != null) filterAssetItems(b);
+                            }
+                        } catch (Throwable ignored) {}
+                        return result;
                     });
                     MainHook.log("Hooked UserV2Fragment.renderState");
                     break;
@@ -148,6 +158,7 @@ public final class UserPagePurifier {
             } else {
                 filterMenuItems(binding);
             }
+            filterAssetItems(binding);
             if (PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT)) {
                 hideBindingLayout(binding, "layoutUserMerchant");
             }
@@ -185,6 +196,16 @@ public final class UserPagePurifier {
             {PurifyPrefs.USER_MENU_RAIN, "红包雨"},
             {PurifyPrefs.USER_MENU_ELIMINATE, "有奖消消乐"},
             {PurifyPrefs.USER_MENU_QUALIFY, "免单资格"},
+    };
+
+    /**
+     * 资产行（元宝 / 卡券 / 红包）子项开关：文案 -> 开关 key。
+     * 该行不在 layoutMenu 内，按整页根视图精确定位标签文本后隐藏所在子项。
+     */
+    private static final String[][] ASSET_ITEMS = {
+            {PurifyPrefs.USER_ASSET_YUANBAO, "元宝"},
+            {PurifyPrefs.USER_ASSET_COUPON, "卡券"},
+            {PurifyPrefs.USER_ASSET_REDPACKET, "红包"},
     };
 
     /** 仅当活动行的全部子项都被勾选隐藏时，才整行隐藏（避免留下空行）。 */
@@ -237,6 +258,66 @@ public final class UserPagePurifier {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /**
+     * 隐藏资产行（元宝 / 卡券 / 红包）中被勾选的子项。
+     * 标签文本是精确文案（可带括号计数，如「元宝(1.3w)」），
+     * 命中后向上找最近的可点击父容器整体隐藏，避免只藏文字留下图标。
+     */
+    private static void filterAssetItems(Object binding) {
+        View root = getBindingRoot(binding);
+        if (root == null) return;
+        for (String[] item : ASSET_ITEMS) {
+            if (!PurifyPrefs.hide(item[0])) continue;
+            View label = findLabelView(root, item[1]);
+            if (label == null) continue;
+            View target = enclosingClickableItem(label);
+            if (target != null && target.getVisibility() != View.GONE) {
+                target.setVisibility(View.GONE);
+                MainHook.log("Hidden user asset item: " + item[1]);
+            }
+        }
+    }
+
+    /** 查找文本精确等于关键词（或「关键词(计数)」）的 TextView。 */
+    private static View findLabelView(View parent, String keyword) {
+        if (parent instanceof android.widget.TextView) {
+            String text = normalize(((android.widget.TextView) parent).getText().toString());
+            if (matchesAssetText(text, keyword)) return parent;
+            return null;
+        }
+        if (parent instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View found = findLabelView(group.getChildAt(i), keyword);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static boolean matchesAssetText(String text, String keyword) {
+        if (text.equals(keyword)) return true;
+        if (text.length() > keyword.length() && text.startsWith(keyword)) {
+            char next = text.charAt(keyword.length());
+            // 允许「元宝(1.3w)」「卡券（108）」这类带计数的写法
+            return next == '(' || next == '（';
+        }
+        return false;
+    }
+
+    /** 从标签向上找最近一个带点击事件的祖先容器作为整项。 */
+    private static View enclosingClickableItem(View label) {
+        View cur = label;
+        while (cur.getParent() instanceof View) {
+            cur = (View) cur.getParent();
+            if (cur.hasOnClickListeners()) {
+                return cur;
+            }
+        }
+        // 没有可点击祖先时退化为标签的直接父容器
+        return label.getParent() instanceof View ? (View) label.getParent() : label;
     }
 
     /**
