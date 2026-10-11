@@ -37,7 +37,12 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.HOME_SECOND_FLOOR, "下拉二楼", "关闭首页下拉进入的第二层活动页，保留普通下拉刷新"},
             }},
             {"「我」页面", new String[][]{
-                    {PurifyPrefs.USER_MENU_ROW, "挑战赛/免费抽奖活动行", "挑战赛、免费抽奖、对接暗号、红包雨、有奖消消乐及免单资格卡"},
+                    {PurifyPrefs.USER_MENU_CHALLENGE, "活动行「挑战赛」", "挑战赛/免费抽奖活动行中的挑战赛入口"},
+                    {PurifyPrefs.USER_MENU_LOTTERY, "活动行「免费抽奖」", "活动行中的免费抽奖入口"},
+                    {PurifyPrefs.USER_MENU_SECRET, "活动行「对接暗号」", "活动行中的对接暗号入口"},
+                    {PurifyPrefs.USER_MENU_RAIN, "活动行「红包雨」", "活动行中的红包雨入口"},
+                    {PurifyPrefs.USER_MENU_ELIMINATE, "活动行「有奖消消乐」", "活动行中的有奖消消乐入口"},
+                    {PurifyPrefs.USER_MENU_QUALIFY, "活动行「免单资格卡」", "活动行中的免单资格卡（全部子项关闭时整行自动隐藏）"},
                     {PurifyPrefs.USER_MERCHANT, "霸王餐入驻 / 0元探店入驻横条", "商家招募推广横条"},
                     {PurifyPrefs.USER_VIP_CAROUSEL, "小蚕会员 SVIP 轮播卡", "「订单全额返利」会员卡与轮播指示器"},
                     {PurifyPrefs.USER_COMMERCE, "电商/生活/出行特惠网格", "电商补贴、生活特惠、出行特惠、电影票、打车券等导购网格"},

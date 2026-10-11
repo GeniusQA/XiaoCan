@@ -35,7 +35,13 @@ public final class PurifyPrefs {
     public static final String HOME_SECOND_FLOOR = "hide_home_second_floor";
 
     // User page
-    public static final String USER_MENU_ROW = "hide_user_menu_row";
+    // 「挑战赛 / 免费抽奖」活动行内的子项开关（各自独立）
+    public static final String USER_MENU_CHALLENGE = "hide_user_menu_challenge";
+    public static final String USER_MENU_LOTTERY = "hide_user_menu_lottery";
+    public static final String USER_MENU_SECRET = "hide_user_menu_secret";
+    public static final String USER_MENU_RAIN = "hide_user_menu_rain";
+    public static final String USER_MENU_ELIMINATE = "hide_user_menu_eliminate";
+    public static final String USER_MENU_QUALIFY = "hide_user_menu_qualify";
     public static final String USER_MERCHANT = "hide_user_merchant";
     public static final String USER_VIP_CAROUSEL = "hide_user_vip_carousel";
     public static final String USER_COMMERCE = "hide_user_commerce";
