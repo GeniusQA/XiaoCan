@@ -124,34 +124,48 @@ public final class LocationCacheHook {
 
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-            if ("onLocationChanged".equals(method.getName()) && args != null && args.length >= 2) {
-                int error = (Integer) args[1];
-                if (error == errorOk()) {
-                    // 定位成功：刷新缓存
-                    cacheSnapshot(args[0]);
+            try {
+                if ("onLocationChanged".equals(method.getName()) && args != null && args.length >= 2) {
+                    int error = (Integer) args[1];
+                    if (error == errorOk()) {
+                        // 定位成功：刷新缓存
+                        cacheSnapshot(args[0]);
+                        return dispatchOriginal(method, args);
+                    }
+                    // 定位失败：有缓存则回放成功回调，屏蔽失败回调
+                    if (hasCache()) {
+                        MainHook.log("LocationCache: location failed(error=" + error + "), replay cached location");
+                        Object cached = buildCachedTencentLocation(args[0] != null ? args[0].getClass() : null);
+                        if (cached != null) {
+                            Object[] replay = args.clone();
+                            replay[0] = cached;
+                            replay[1] = 0;
+                            if (replay.length >= 3) replay[2] = "purify_cache";
+                            return dispatchOriginal(method, replay);
+                        }
+                    }
                     return dispatchOriginal(method, args);
                 }
-                // 定位失败：有缓存则回放成功回调，屏蔽失败回调
-                if (hasCache()) {
-                    MainHook.log("LocationCache: location failed(error=" + error + "), replay cached location");
-                    Object cached = buildCachedTencentLocation(args[0] != null ? args[0].getClass() : null);
-                    if (cached != null) {
-                        Object[] replay = args.clone();
-                        replay[0] = cached;
-                        replay[1] = 0;
-                        if (replay.length >= 3) replay[2] = "purify_cache";
-                        return dispatchOriginal(method, replay);
-                    }
-                }
                 return dispatchOriginal(method, args);
+            } catch (Throwable t) {
+                MainHook.log("LocationCache: Tencent listener invoke error: " + t);
+                // 回调异常绝不能逃逸到宿主的 JNI/平台线程边界，否则进程会被 SIGSEGV(SI_USER) 强杀
+                return dispatchOriginalSafe(method, args);
             }
-            return dispatchOriginal(method, args);
         }
 
         private Object dispatchOriginal(Method method, Object[] args) throws Throwable {
             // 直接用代理方法对象调用真实对象：对 equals/hashCode/toString 等 Object 方法也成立，
             // 否则接口未声明 equals 时 listenerClass.getMethod 会抛 NoSuchMethodException 导致宿主崩溃。
             return method.invoke(original, args);
+        }
+
+        private Object dispatchOriginalSafe(Method method, Object[] args) {
+            try {
+                return method.invoke(original, args);
+            } catch (Throwable ignored) {
+                return null;
+            }
         }
     }
 
@@ -319,46 +333,61 @@ public final class LocationCacheHook {
                 final int fIdx = idx;
                 try {
                     xposed.hook(m).intercept(chain -> {
-                        Object[] args = chain.getArgs().toArray();
-                        if (args[fIdx] != null) {
-                            final Object orig = args[fIdx];
-                            final java.util.concurrent.atomic.AtomicBoolean gotReal =
-                                    new java.util.concurrent.atomic.AtomicBoolean(false);
-                            args[fIdx] = Proxy.newProxyInstance(
-                                    listenerClass.getClassLoader(),
-                                    new Class<?>[]{listenerClass},
-                                    (proxy, method, mArgs) -> {
-                                        if ("onLocationChanged".equals(method.getName())
-                                                && mArgs != null && mArgs.length >= 1
-                                                && mArgs[0] instanceof Location) {
-                                            gotReal.set(true);
-                                            Location loc = (Location) mArgs[0];
-                                            recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
-                                        }
-                                        Method real = method;
-                                        return real.invoke(orig, mArgs);
-                                    });
-                            // 注册后若始终无真实定位（如定位服务整体关闭），延迟注入缓存位置，
-                            // 让直接使用系统定位的页面（如「选择地址」）也能拿到结果。
-                            // 延迟给足 3 秒：网络定位（基站/WiFi）通常 1~3 秒内回调，
-                            // 避免缓存抢在真实定位之前注入导致显示旧位置。
-                            if (hasCache()) {
-                                final Object cached = buildCachedResult(Location.class);
-                                final Method onLoc = safeOnLocationChanged(listenerClass);
-                                if (cached != null && onLoc != null) {
-                                    new android.os.Handler(android.os.Looper.getMainLooper())
-                                            .postDelayed(() -> {
-                                                if (gotReal.get()) return;
-                                                try {
-                                                    onLoc.invoke(orig, cached);
-                                                    MainHook.log("LocationCache: injected cached location to framework listener");
-                                                } catch (Throwable ignored) {
+                        try {
+                            Object[] args = chain.getArgs().toArray();
+                            if (args[fIdx] != null) {
+                                final Object orig = args[fIdx];
+                                final java.util.concurrent.atomic.AtomicBoolean gotReal =
+                                        new java.util.concurrent.atomic.AtomicBoolean(false);
+                                args[fIdx] = Proxy.newProxyInstance(
+                                        listenerClass.getClassLoader(),
+                                        new Class<?>[]{listenerClass},
+                                        (proxy, method, mArgs) -> {
+                                            try {
+                                                if ("onLocationChanged".equals(method.getName())
+                                                        && mArgs != null && mArgs.length >= 1
+                                                        && mArgs[0] instanceof Location) {
+                                                    gotReal.set(true);
+                                                    Location loc = (Location) mArgs[0];
+                                                    recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
                                                 }
-                                            }, 3000L);
+                                                return method.invoke(orig, mArgs);
+                                            } catch (Throwable t) {
+                                                MainHook.log("LocationCache: framework listener callback error: " + t);
+                                                // 回调异常绝不能逃逸到宿主的 JNI/平台线程边界，
+                                                // 否则 ART 会以 SIGSEGV(SI_USER) 强杀进程
+                                                try {
+                                                    return method.invoke(orig, mArgs);
+                                                } catch (Throwable ignored) {
+                                                    return null;
+                                                }
+                                            }
+                                        });
+                                // 注册后若始终无真实定位（如定位服务整体关闭），延迟注入缓存位置，
+                                // 让直接使用系统定位的页面（如「选择地址」）也能拿到结果。
+                                // 延迟给足 3 秒：网络定位（基站/WiFi）通常 1~3 秒内回调，
+                                // 避免缓存抢在真实定位之前注入导致显示旧位置。
+                                if (hasCache()) {
+                                    final Object cached = buildCachedResult(Location.class);
+                                    final Method onLoc = safeOnLocationChanged(listenerClass);
+                                    if (cached != null && onLoc != null) {
+                                        new android.os.Handler(android.os.Looper.getMainLooper())
+                                                .postDelayed(() -> {
+                                                    if (gotReal.get()) return;
+                                                    try {
+                                                        onLoc.invoke(orig, cached);
+                                                        MainHook.log("LocationCache: injected cached location to framework listener");
+                                                    } catch (Throwable ignored) {
+                                                    }
+                                                }, 3000L);
+                                    }
                                 }
                             }
+                            return chain.proceed(args);
+                        } catch (Throwable t) {
+                            MainHook.log("LocationCache: requestLocationUpdates hook error: " + t);
+                            return chain.proceed(chain.getArgs().toArray());
                         }
-                        return chain.proceed(args);
                     });
                 } catch (Throwable ignored) {
                 }
@@ -370,12 +399,17 @@ public final class LocationCacheHook {
                 if ("getLastKnownLocation".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
                     try {
                         xposed.hook(m).intercept(chain -> {
-                            Object result = chain.proceed();
-                            if (result == null && hasCache()) {
-                                MainHook.log("LocationCache: framework getLastKnownLocation null, replay cache");
-                                return buildCachedResult(Location.class);
+                            try {
+                                Object result = chain.proceed();
+                                if (result == null && hasCache()) {
+                                    MainHook.log("LocationCache: framework getLastKnownLocation null, replay cache");
+                                    return buildCachedResult(Location.class);
+                                }
+                                return result;
+                            } catch (Throwable t) {
+                                MainHook.log("LocationCache: getLastKnownLocation hook error: " + t);
+                                return chain.proceed();
                             }
-                            return result;
                         });
                     } catch (Throwable ignored) {
                     }
@@ -391,13 +425,18 @@ public final class LocationCacheHook {
                 if ("isProviderEnabled".equals(m.getName()) && ps.length >= 1 && ps[0] == String.class) {
                     try {
                         xposed.hook(m).intercept(chain -> {
-                            Object result = chain.proceed();
-                            if (Boolean.FALSE.equals(result) && hasCache()
-                                    && allProvidersDisabled((android.location.LocationManager) chain.getThisObject())) {
-                                MainHook.log("LocationCache: framework isProviderEnabled=false -> true (all providers disabled, cache exists)");
-                                return Boolean.TRUE;
+                            try {
+                                Object result = chain.proceed();
+                                if (Boolean.FALSE.equals(result) && hasCache()
+                                        && allProvidersDisabled((android.location.LocationManager) chain.getThisObject())) {
+                                    MainHook.log("LocationCache: framework isProviderEnabled=false -> true (all providers disabled, cache exists)");
+                                    return Boolean.TRUE;
+                                }
+                                return result;
+                            } catch (Throwable t) {
+                                MainHook.log("LocationCache: isProviderEnabled hook error: " + t);
+                                return chain.proceed();
                             }
-                            return result;
                         });
                     } catch (Throwable ignored) {
                     }
