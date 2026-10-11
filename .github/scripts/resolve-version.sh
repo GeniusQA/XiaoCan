@@ -10,6 +10,8 @@ set -euo pipefail
 
 EVENT_NAME="${EVENT_NAME:-workflow_dispatch}"
 CHANNEL="${CHANNEL:-canary}"
+# push / 其他事件未提供渠道输入时，默认走 canary 构建
+if [[ -z "$CHANNEL" ]]; then CHANNEL="canary"; fi
 
 CURRENT_NAME="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=.*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n1)"
 CURRENT_CODE="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=*[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -n1)"

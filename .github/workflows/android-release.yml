@@ -3,6 +3,9 @@ name: Android Build & Release
 run-name: Android Build & ${{ inputs.channel == 'canary' && 'Canary' || inputs.channel == 'beta' && 'Beta' || inputs.channel == 'release' && 'Release' || inputs.channel }}
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       channel:
