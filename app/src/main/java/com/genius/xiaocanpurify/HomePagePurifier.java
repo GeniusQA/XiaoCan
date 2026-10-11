@@ -822,7 +822,7 @@ public final class HomePagePurifier {
     }
 
     /**
-     * 隐藏首页顶部导航栏里的「美团水果券」营销 Tab（常开，不受开关影响）。
+     * 隐藏首页顶部导航栏里的「美团水果神券」营销 Tab（常开，不受开关影响）。
      * 该 Tab 是服务端活动期间动态插入的（附近商家/爆品好价 旁边），
      * 没有固定的 view id，按文案定位后折叠其所在的可点击 Tab 项；
      * 宿主重新渲染后由 GlobalLayout 守卫再次折叠。
@@ -832,7 +832,7 @@ public final class HomePagePurifier {
             View child = group.getChildAt(i);
             if (child instanceof android.widget.TextView
                     && ((android.widget.TextView) child).getText() != null
-                    && ((android.widget.TextView) child).getText().toString().contains("美团水果券")) {
+                    && isCouponTabText(((android.widget.TextView) child).getText().toString())) {
                 View tab = enclosingClickable(child);
                 if (tab != child && isTabItemOnly(tab)) {
                     tab.setVisibility(View.GONE);
@@ -844,7 +844,12 @@ public final class HomePagePurifier {
         }
     }
 
-    /** 校验该可点击节点只包含「美团水果券」这一个 Tab 的内容（防止爬升过头折叠整行）。 */
+    /** 顶部导航水果券营销 Tab 的文案变体：老版「美团水果券」、新版「美团水果神券」。 */
+    private static boolean isCouponTabText(String text) {
+        return text.contains("美团水果") || text.contains("水果神券");
+    }
+
+    /** 校验该可点击节点只包含「美团水果神券」这一个 Tab 的内容（防止爬升过头折叠整行）。 */
     private static boolean isTabItemOnly(View tab) {
         if (!(tab instanceof ViewGroup)) return true;
         StringBuilder sb = new StringBuilder();
