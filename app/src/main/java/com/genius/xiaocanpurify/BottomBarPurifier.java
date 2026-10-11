@@ -105,6 +105,10 @@ public final class BottomBarPurifier {
         return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
     }
 
+    private static boolean hidePlacement() {
+        return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
+    }
+
     /**
      * 捕获宿主原始 Tab 列表（不过滤，页面保持完整）。
      * 隐藏哪个 Tab 由导航项移除 + 导航位置映射完成。
@@ -233,6 +237,7 @@ public final class BottomBarPurifier {
 
             boolean hideVip = hideVip();
             boolean hideBenefit = hideBenefit();
+            boolean hidePlacement = hidePlacement();
 
             // Hide VIP decorations / badges
             if (hideVip) {
@@ -248,8 +253,8 @@ public final class BottomBarPurifier {
                 if (v != null) v.setVisibility(View.GONE);
             }
 
-            if (!hideVip && !hideBenefit) {
-                // 两个开关都关闭：保留宿主原生导航项，不做任何移除
+            if (!hideVip && !hideBenefit && !hidePlacement) {
+                // 三个开关都关闭：保留宿主原生导航项，不做任何移除
                 MainHook.log("BottomBar toggles off: keep native nav items");
                 return;
             }
