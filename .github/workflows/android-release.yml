@@ -41,7 +41,7 @@ jobs:
           CHANNEL: ${{ github.event.inputs.channel }}
         run: |
           set -euo pipefail
-          while IFS= read -r line; do echo "$line" >> "$GITHUB_OUTPUT"; done < <(bash .github/scripts/resolve-version.sh)
+          while IFS= read -r line; do echo "$line" >> "$GITHUB_OUTPUT"; done < <(bash .github/scripts/ci.sh resolve)
 
       - name: 构建摘要 Build Summary
         if: steps.gate.outputs.skip != 'true'
@@ -121,7 +121,7 @@ jobs:
 
       - name: 授权脚本 Grant Permission
         if: steps.gate.outputs.skip != 'true'
-        run: chmod +x gradlew .github/scripts/resolve-version.sh .github/scripts/generate-release-body.sh
+        run: chmod +x gradlew .github/scripts/ci.sh
 
       - name: 构建 Debug 或 Release Build
         if: steps.gate.outputs.skip != 'true'
@@ -223,7 +223,7 @@ jobs:
           CHANNEL="${{ steps.gate.outputs.channel }}"
           BODY_DELIMITER="release_body_$(git rev-parse HEAD)"
           echo "body<<$BODY_DELIMITER" >> "$GITHUB_OUTPUT"
-          .github/scripts/generate-release-body.sh "$PREV_TAG" HEAD "$CHANNEL" >> "$GITHUB_OUTPUT"
+          .github/scripts/ci.sh body "$PREV_TAG" HEAD "$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "$BODY_DELIMITER" >> "$GITHUB_OUTPUT"
 
       - name: 创建正式版发布 Create Stable Release
