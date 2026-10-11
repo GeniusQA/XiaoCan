@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "com.genius.xiaocanpurify"
-    compileSdk = 37
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.genius.xiaocanpurify"
