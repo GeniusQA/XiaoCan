@@ -1,10 +1,10 @@
-<p align="center">
+<div align="center">
   <img src="assets/XiaoCan_LSPosed_logo_512.png" width="128" alt="XiaoCanPurify Logo"/>
-</p>
 
 # 小蚕净化 (XiaoCanPurify)
 
 针对小蚕惠生活 (`com.realtech.xiaocan`) 的现代化 Xposed / LSPosed API 102 净化模块。
+</div>
 
 ## 功能特性
 
