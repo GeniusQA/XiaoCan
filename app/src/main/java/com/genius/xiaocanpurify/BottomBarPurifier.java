@@ -331,6 +331,8 @@ public final class BottomBarPurifier {
     private static int toPagerIndex(Object viewPager2, int tabIndex) {
         int count = pagerItemCount(viewPager2);
         if (count > 0 && tabIndex >= count) {
+            MainHook.log("toPagerIndex: tab " + tabIndex + " clamped to " + (count - 1)
+                    + " (pager count=" + count + ")");
             return count - 1;
         }
         return tabIndex;
@@ -341,11 +343,29 @@ public final class BottomBarPurifier {
         try {
             Method getAdapter = viewPager2.getClass().getMethod("getAdapter");
             Object adapter = getAdapter.invoke(viewPager2);
-            if (adapter == null) return -1;
-            Method getItemCount = adapter.getClass().getMethod("getItemCount");
+            if (adapter == null) {
+                MainHook.log("pagerItemCount: adapter is null");
+                return -1;
+            }
+            // 宿主适配器类可能不可见，沿父类链找 getItemCount 并放开访问
+            Method getItemCount = null;
+            for (Class<?> c = adapter.getClass(); c != null && getItemCount == null; c = c.getSuperclass()) {
+                for (Method m : c.getDeclaredMethods()) {
+                    if ("getItemCount".equals(m.getName()) && m.getParameterTypes().length == 0) {
+                        getItemCount = m;
+                        break;
+                    }
+                }
+            }
+            if (getItemCount == null) {
+                MainHook.log("pagerItemCount: getItemCount not found on " + adapter.getClass().getName());
+                return -1;
+            }
+            getItemCount.setAccessible(true);
             Object n = getItemCount.invoke(adapter);
             return n instanceof Integer ? (Integer) n : -1;
         } catch (Throwable t) {
+            MainHook.log("pagerItemCount failed: " + t);
             return -1;
         }
     }
