@@ -251,10 +251,6 @@ public final class BottomBarPurifier {
                             return chain.proceed();
                         }
                         int navPos = (int) chain.getArg(2);
-                        int page = pageForNavPos(navPos);
-                        if (page < 0) {
-                            return chain.proceed();
-                        }
 
                         Field this$0Field = listenerClass.getDeclaredField("this$0");
                         this$0Field.setAccessible(true);
@@ -269,7 +265,15 @@ public final class BottomBarPurifier {
                         Object viewPager2 = ctx[0];
                         Object navView = ctx[1];
 
-                        if (isUserPage(page)) {
+                        int tabIndex = pageForNavPos(navPos);
+                        if (tabIndex < 0) {
+                            return chain.proceed();
+                        }
+                        // 关键：ViewPager 适配器页数可能少于 tab 列表（如 VIP 页因账号身份缺失），
+                        // 按适配器真实页数收敛，避免 IndexOutOfBoundsException
+                        int page = toPagerIndex(viewPager2, tabIndex);
+
+                        if (isUserPage(tabIndex)) {
                             switchToUserTab(mainActivity, page, viewPager2);
                         } else {
                             try {
@@ -285,7 +289,7 @@ public final class BottomBarPurifier {
                             Method updateTabState = navView.getClass().getMethod("updateTabState", int.class);
                             updateTabState.invoke(navView, navPos);
                         } catch (Throwable ignored) {}
-                        MainHook.log("Nav position " + navPos + " -> page " + page);
+                        MainHook.log("Nav position " + navPos + " -> tab " + tabIndex + " -> page " + page);
                         // 吞掉原生逻辑：其按「导航位置 == 页面索引」处理，会切到错误页面
                         return false;
                     });
@@ -317,6 +321,33 @@ public final class BottomBarPurifier {
         }
         // 超出导航子项数量：可能传入的是页面索引（同步回调），原样返回
         return navPos < tabs.size() ? navPos : -1;
+    }
+
+    /**
+     * tab 列表索引 -> ViewPager 适配器真实页索引。
+     * 适配器页数可能少于 tab 列表（如 VIP 页因账号身份不存在），
+     * USER 恒为最后一个 tab，越界时夹到最后一页。
+     */
+    private static int toPagerIndex(Object viewPager2, int tabIndex) {
+        int count = pagerItemCount(viewPager2);
+        if (count > 0 && tabIndex >= count) {
+            return count - 1;
+        }
+        return tabIndex;
+    }
+
+    /** 读取 ViewPager2 适配器页数；取不到返回 -1（此时不做收敛）。 */
+    private static int pagerItemCount(Object viewPager2) {
+        try {
+            Method getAdapter = viewPager2.getClass().getMethod("getAdapter");
+            Object adapter = getAdapter.invoke(viewPager2);
+            if (adapter == null) return -1;
+            Method getItemCount = adapter.getClass().getMethod("getItemCount");
+            Object n = getItemCount.invoke(adapter);
+            return n instanceof Integer ? (Integer) n : -1;
+        } catch (Throwable t) {
+            return -1;
+        }
     }
 
     private static boolean isUserPage(int pageIndex) {
