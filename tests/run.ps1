@@ -4,7 +4,7 @@ Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
     $sdkLine = Get-Content -LiteralPath 'local.properties' | Where-Object { $_ -like 'sdk.dir=*' }
     $sdk = $sdkLine.Substring(8).Replace('\\', '\').Replace('\:', ':')
-    $android = Join-Path $sdk 'platforms\android-37\android.jar'
+    $android = Join-Path $sdk 'platforms\android-37.0\android.jar'
     $gradle = Get-ChildItem -Path "$env:USERPROFILE\.gradle\wrapper\dists\gradle-9.5.1-bin\*\gradle-9.5.1\bin\gradle.bat" | Select-Object -First 1
     if (!$SkipBuild) {
         & $gradle.FullName :app:compileReleaseJavaWithJavac --offline --console=plain
