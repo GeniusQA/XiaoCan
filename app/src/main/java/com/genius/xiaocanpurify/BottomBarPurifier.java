@@ -19,20 +19,29 @@ public final class BottomBarPurifier {
     private static volatile boolean hideBenefit;
     private static volatile boolean hidePlacement;
 
+    /**
+     * 原始 Tab 列表索引 -> 过滤后索引；被移除项为 -1。
+     * 由 hookTabActionList 在首次拿到宿主原始列表时建立。
+     */
+    private static volatile int[] oldToNew;
+
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         hideVip = PurifyPrefs.hide(PurifyPrefs.TAB_VIP);
         hideBenefit = PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT);
         hidePlacement = PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
         boolean threeTabMode = hideVip && hideBenefit;
 
-        if (threeTabMode) {
+        if (hideVip || hideBenefit) {
+            // 只要隐藏了任意 Tab，就必须同步过滤 Tab 列表，
+            // 否则 nav item 被移除而页面数量不变，后续页面整体前移一位
+            // （表现为点「我的」打开 SVIP 会员页）。
             hookTabActionList(xposed, classLoader);
             hookMainActivitySetupPages(xposed, classLoader);
-            hookOnItemSelectedListener(xposed, classLoader);
+            hookApplyBottomTabTheme(xposed, classLoader);
             hookChangeTabIndex(xposed, classLoader);
         }
-        if (hideVip || hideBenefit) {
-            hookApplyBottomTabTheme(xposed, classLoader);
+        if (threeTabMode) {
+            hookOnItemSelectedListener(xposed, classLoader);
         }
         if (hidePlacement) {
             hookSecondTabPlacement(xposed, classLoader);
@@ -40,43 +49,51 @@ public final class BottomBarPurifier {
     }
 
     /**
-     * Hook MainActivity.getTabActionList() to return only HOME, ORDER, and USER.
+     * Hook MainActivity 的 Tab 列表构建方法：按开关过滤掉被隐藏的 Tab，
+     * 保持「nav item 位置 == ViewPager 页面索引」的对应关系。
      */
     private static void hookTabActionList(XposedInterface xposed, ClassLoader cl) {
         try {
             Class<?> mainActivityClass = Class.forName("com.realtech.xiaocan.MainActivity", false, cl);
-            Class<?> tabActionHome = Class.forName("com.realtech.xiaocan.MainTabAction$HOME", false, cl);
-            Class<?> tabActionOrder = Class.forName("com.realtech.xiaocan.MainTabAction$ORDER", false, cl);
-            Class<?> tabActionUser = Class.forName("com.realtech.xiaocan.MainTabAction$USER", false, cl);
-
-            Object homeInstance = tabActionHome.getField("INSTANCE").get(null);
-            Object orderInstance = null;
-            try {
-                orderInstance = tabActionOrder.getField("INSTANCE").get(null);
-            } catch (Throwable ignored) {
-                orderInstance = tabActionOrder.getField("ORDER").get(null);
-            }
-            Object userInstance = tabActionUser.getField("INSTANCE").get(null);
-
-            final Object fHome = homeInstance;
-            final Object fOrder = orderInstance;
-            final Object fUser = userInstance;
-
             for (Method m : mainActivityClass.getDeclaredMethods()) {
                 if ("getTabActionList".equals(m.getName()) || "tabActionList_delegate$lambda$0".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
-                        List<Object> threeTabs = new ArrayList<>(3);
-                        threeTabs.add(fHome);
-                        threeTabs.add(fOrder);
-                        threeTabs.add(fUser);
-                        return threeTabs;
+                        Object original = chain.proceed();
+                        if (!(original instanceof List)) {
+                            return original;
+                        }
+                        List<?> src = (List<?>) original;
+                        List<Object> kept = new ArrayList<>(src.size());
+                        int[] map = new int[src.size()];
+                        for (int i = 0; i < src.size(); i++) {
+                            Object action = src.get(i);
+                            if (isHiddenAction(action)) {
+                                map[i] = -1;
+                                MainHook.log("Tab filtered out: " + action.getClass().getSimpleName());
+                            } else {
+                                map[i] = kept.size();
+                                kept.add(action);
+                            }
+                        }
+                        oldToNew = map;
+                        MainHook.log("Tab list filtered " + src.size() + " -> " + kept.size());
+                        return kept;
                     });
-                    MainHook.log("Hooked " + m.getName() + " to 3 tabs [HOME, ORDER, USER]");
+                    MainHook.log("Hooked " + m.getName() + " to filtered tab list");
                 }
             }
         } catch (Throwable t) {
             MainHook.log("Failed to hook tabActionList: " + t);
         }
+    }
+
+    private static boolean isHiddenAction(Object action) {
+        if (action == null) return false;
+        String name = action.getClass().getName();
+        if (hideVip && name.endsWith("$VIP")) return true;
+        // 「福利/赚钱」Tab 对应 TASK
+        if (hideBenefit && name.endsWith("$TASK")) return true;
+        return false;
     }
 
     /**
@@ -308,7 +325,9 @@ public final class BottomBarPurifier {
     }
 
     /**
-     * Hook MainActivity.changeTabIndex to map position 4 ("我的" in old layout) to 2.
+     * Hook MainActivity.changeTabIndex：把宿主原始 Tab 索引映射为过滤后的页面索引。
+     * 例如仅隐藏「福利/赚钱」时 [HOME, TASK, ORDER, VIP, USER] -> [HOME, ORDER, VIP, USER]，
+     * 索引 4（我的）应映射为 3，避免打开 SVIP 页。
      */
     private static void hookChangeTabIndex(XposedInterface xposed, ClassLoader cl) {
         try {
@@ -317,10 +336,15 @@ public final class BottomBarPurifier {
                 if ("changeTabIndex".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
                         int index = (int) chain.getArg(0);
-                        if (index == 4) {
-                            MainHook.log("Mapped changeTabIndex from 4 to 2");
-                            return chain.proceed(new Object[]{ 2 });
-                        } else if (index == 2 || index == 3) {
+                        int[] map = oldToNew;
+                        if (map != null && index >= 0 && index < map.length) {
+                            int mapped = map[index];
+                            if (mapped >= 0) {
+                                if (mapped != index) {
+                                    MainHook.log("Mapped changeTabIndex from " + index + " to " + mapped);
+                                }
+                                return chain.proceed(new Object[]{ mapped });
+                            }
                             MainHook.log("Ignored changeTabIndex for removed tab: " + index);
                             return null;
                         }
