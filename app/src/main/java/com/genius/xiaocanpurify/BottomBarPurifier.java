@@ -6,6 +6,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -368,13 +369,28 @@ public final class BottomBarPurifier {
             // viewPager2.setCurrentItem(pageIndex, false)
             // 直接用外层已解析的 viewPager2，避免二次 resolveTabViews 在切换瞬间拿不到 binding 导致切不动
             if (viewPager2 != null) {
-                Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
-                setCurrentItem.invoke(viewPager2, pageIndex, false);
+                try {
+                    Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
+                    setCurrentItem.invoke(viewPager2, pageIndex, false);
+                } catch (InvocationTargetException ite) {
+                    Throwable cause = ite.getCause() != null ? ite.getCause() : ite;
+                    MainHook.log("setCurrentItem(" + pageIndex + ") threw: "
+                            + android.util.Log.getStackTraceString(cause));
+                    // 兜底：走宿主自己的 changeTabIndex 切换路径
+                    try {
+                        Method changeTab = mainActivity.getClass().getMethod("changeTabIndex", int.class);
+                        changeTab.invoke(mainActivity, pageIndex);
+                        MainHook.log("changeTabIndex(" + pageIndex + ") fallback ok");
+                    } catch (Throwable t2) {
+                        MainHook.log("changeTabIndex(" + pageIndex + ") fallback failed: "
+                                + android.util.Log.getStackTraceString(t2));
+                    }
+                }
             } else {
                 MainHook.log("switchToUserTab: viewPager2 is null, cannot switch");
             }
         } catch (Throwable t) {
-            MainHook.log("Failed to switch to user tab: " + t);
+            MainHook.log("Failed to switch to user tab: " + android.util.Log.getStackTraceString(t));
         }
     }
 }
