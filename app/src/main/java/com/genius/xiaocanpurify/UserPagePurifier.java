@@ -125,6 +125,7 @@ public final class UserPagePurifier {
                                         hideBindingLayout(b, "layoutMenu");
                                     } else {
                                         filterMenuItems(b);
+                                        collapseMenuIfEmpty(b);
                                     }
                                     filterAssetItems(b);
                                     if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
@@ -171,6 +172,7 @@ public final class UserPagePurifier {
                 hideBindingLayout(binding, "layoutMenu");
             } else {
                 filterMenuItems(binding);
+                collapseMenuIfEmpty(binding);
             }
             filterAssetItems(binding);
             if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
@@ -266,6 +268,31 @@ public final class UserPagePurifier {
         }
     }
 
+    /**
+     * 活动行过滤后若已没有任何可见子项（如服务端当期未下发未被隐藏的入口，
+     * 或剩余入口的活动已结束），把整行收起，避免留下空白板块。
+     * 只做「空则收起」，不反向强制显示，避免覆盖宿主自身的隐藏意图。
+     */
+    private static void collapseMenuIfEmpty(Object binding) {
+        View root = getLayoutRoot(binding, "layoutMenu");
+        // 仅在能精确定位 layoutMenu 时才收起；禁止兜底到整页根视图，
+        // 否则页面早期渲染子视图未挂载时会把整个页面误隐藏
+        if (!(root instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) root;
+        if (group.getVisibility() == View.GONE) return;
+        if (!hasVisibleChild(group)) {
+            group.setVisibility(View.GONE);
+            MainHook.log("layoutMenu empty after filter: collapsed");
+        }
+    }
+
+    private static boolean hasVisibleChild(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            if (group.getChildAt(i).getVisibility() == View.VISIBLE) return true;
+        }
+        return false;
+    }
+
     private static View getLayoutRoot(Object binding, String fieldName) {
         try {
             Field field = binding.getClass().getField(fieldName);
@@ -359,10 +386,15 @@ public final class UserPagePurifier {
         if (cur.getParent() != rootGroup || cur == rootGroup) return;
         String text = subtreeText(cur);
         boolean looksLikeOrder = text.contains("全部订单") || text.contains("待上传") || text.contains("上传凭证");
+        // 排除列表必须包含资产行关键词：订单行与资产行（元宝/卡券/红包）常在同一张卡片，
+        // 否则隐藏订单板块会把资产行一起整块 GONE，资产子项开关全部关闭也无法恢复显示
         boolean hasOtherSection = text.contains("可提现蚕豆")
                 || text.contains("累计团员")
                 || text.contains("信用极好")
-                || text.contains("免费抽奖");
+                || text.contains("免费抽奖")
+                || text.contains("元宝")
+                || text.contains("卡券")
+                || text.contains("红包");
         if (looksLikeOrder && !hasOtherSection && cur.getVisibility() != View.GONE) {
             out.add(cur);
         }
