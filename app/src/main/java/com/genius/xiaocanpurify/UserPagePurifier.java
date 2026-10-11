@@ -331,6 +331,8 @@ public final class UserPagePurifier {
             View target = enclosingExclusiveContainer(label, item[1]);
             if (target != null && target.getVisibility() != View.GONE) {
                 target.setVisibility(View.GONE);
+                // 清掉行内等分权重，让同行剩余入口重新铺满，UI 不留空洞
+                collapseLayoutParams(target);
                 MainHook.log("Hidden user asset item: " + item[1]);
             }
         }
@@ -419,13 +421,21 @@ public final class UserPagePurifier {
 
     /** 订单板块排除文案：出现即说明子树混有资产行等其它板块，不能整块折叠。 */
     private static boolean subtreeHasOtherSection(String text) {
-        return text.contains("可提现蚕豆")
-                || text.contains("累计团员")
-                || text.contains("信用极好")
-                || text.contains("免费抽奖")
-                || text.contains("元宝")
-                || text.contains("卡券")
-                || text.contains("红包");
+        return subtreeHasOtherSection(text, null);
+    }
+
+    /**
+     * 板块排除文案检查。keyword 非空时，与当前关键词互为子串的排除词豁免：
+     * 「红包雨」子树必含「红包」、「元宝」子树必含「元宝」，
+     * 否则会把入口自身误判成其它板块，导致永不隐藏或只藏文字留下图标。
+     */
+    private static boolean subtreeHasOtherSection(String text, String keyword) {
+        String[] keys = {"可提现蚕豆", "累计团员", "信用极好", "免费抽奖", "元宝", "卡券", "红包"};
+        for (String key : keys) {
+            if (keyword != null && !isExclusionKeyword(keyword, key)) continue;
+            if (text.contains(key)) return true;
+        }
+        return false;
     }
 
     /** 查找文本包含关键词的第一个 TextView（区别于 findLabelView 的精确匹配）。 */
@@ -519,7 +529,7 @@ public final class UserPagePurifier {
         for (String[] item : ASSET_ITEMS) {
             if (isExclusionKeyword(keyword, item[1]) && text.contains(item[1])) return true;
         }
-        return subtreeHasOtherSection(text)
+        return subtreeHasOtherSection(text, keyword)
                 || text.contains("全部订单") || text.contains("待上传");
     }
 
