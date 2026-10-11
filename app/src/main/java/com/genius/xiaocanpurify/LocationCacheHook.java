@@ -149,8 +149,9 @@ public final class LocationCacheHook {
         }
 
         private Object dispatchOriginal(Method method, Object[] args) throws Throwable {
-            Method real = listenerClass.getMethod(method.getName(), method.getParameterTypes());
-            return real.invoke(original, args);
+            // 直接用代理方法对象调用真实对象：对 equals/hashCode/toString 等 Object 方法也成立，
+            // 否则接口未声明 equals 时 listenerClass.getMethod 会抛 NoSuchMethodException 导致宿主崩溃。
+            return method.invoke(original, args);
         }
     }
 
@@ -331,7 +332,7 @@ public final class LocationCacheHook {
                                             Location loc = (Location) mArgs[0];
                                             recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
                                         }
-                                        Method real = listenerClass.getMethod(method.getName(), method.getParameterTypes());
+                                        Method real = method;
                                         return real.invoke(orig, mArgs);
                                     });
                         }
