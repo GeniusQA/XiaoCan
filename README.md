@@ -67,12 +67,12 @@
 
 ## 回归测试
 
-本地运行 `powershell -File tests/run.ps1`, 需准备 JDK 17、Gradle 9.5.1 和 Android SDK 35.
+本地运行 `powershell -File tests/run.ps1`, 需准备 JDK 17、Gradle 9.5.1 和 Android SDK 37.
 测试使用 JVM 接口替身调用生产 hook, 与真机验证分别记录.
 
 ## 构建与安装
 
-- 编译环境：Microsoft JDK 17, Gradle 9.5.1, Android SDK 35 (compileSdk=35, minSdk=26)
+- 编译环境：Microsoft JDK 17, Gradle 9.5.1, Android SDK 37 (compileSdk=37, minSdk=26, targetSdk=35)
 - 产物路径：`XiaoCanPurify-1.0.0-release.apk`
 - 安装步骤：
   1. 将生成的 APK 安装到设备。
