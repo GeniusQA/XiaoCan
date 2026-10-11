@@ -305,7 +305,8 @@ public final class BottomBarPurifier {
         }
         int kept = 0;
         for (int i = 0; i < tabs.size(); i++) {
-            if (isHiddenAction(tabs.get(i))) {
+            Object action = tabs.get(i);
+            if (action == null || isHiddenAction(action)) {
                 continue;
             }
             if (kept == navPos) {

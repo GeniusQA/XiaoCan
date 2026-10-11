@@ -175,7 +175,7 @@ public final class LocationCacheHook {
 
             Map<String, String> strSnap = new LinkedHashMap<>();
             Map<String, Double> dblSnap = new LinkedHashMap<>();
-            for (Method m : collectLocationInterfaces(tencentLocation.getClass())) {
+            for (Method m : tencentLocation.getClass().getMethods()) {
                 if (!m.getDeclaringClass().getName().contains("TencentLocation")
                         && !m.getDeclaringClass().getName().contains("android.location")) {
                     continue;
@@ -277,7 +277,7 @@ public final class LocationCacheHook {
         if (iface == null) return null;
         final Class<?> locationIface = iface;
 
-        Class<?>[] interfaces = collectInterfaces(locationIface).toArray(new Class<?>[0]);
+        Class<?>[] interfaces = collectLocationInterfaces(locationIface).toArray(new Class<?>[0]);
         return Proxy.newProxyInstance(locationIface.getClassLoader(), interfaces,
                 (proxy, method, args) -> {
                     String name = method.getName();
