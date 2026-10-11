@@ -249,65 +249,44 @@ public final class BottomBarPurifier {
                             // 无隐藏：导航位置 == 页面索引，走宿主原生逻辑
                             return chain.proceed();
                         }
-                        try {
-                            // 取出导航子项位置（优先取第 3 个参数，否则扫描 int 参数兜底）
-                            Object[] args = chain.getArgs();
-                            int navPos = -1;
-                            if (args != null && args.length > 2 && args[2] instanceof Integer) {
-                                navPos = (Integer) args[2];
-                            } else if (args != null) {
-                                for (Object a : args) {
-                                    if (a instanceof Integer) { navPos = (Integer) a; break; }
-                                }
-                            }
-                            if (navPos < 0) {
-                                return chain.proceed();
-                            }
-
-                            int page = pageForNavPos(navPos);
-                            if (page < 0) {
-                                return chain.proceed();
-                            }
-
-                            Field this$0Field = listenerClass.getDeclaredField("this$0");
-                            this$0Field.setAccessible(true);
-                            Activity mainActivity = (Activity) this$0Field.get(chain.getThisObject());
-                            if (mainActivity == null) {
-                                return chain.proceed();
-                            }
-                            Object[] ctx = resolveTabViews(mainActivity);
-                            if (ctx == null) {
-                                return chain.proceed();
-                            }
-                            Object viewPager2 = ctx[0];
-                            Object navView = ctx[1];
-
-                            if (isUserPage(page)) {
-                                switchToUserTab(mainActivity, page);
-                            } else {
-                                try {
-                                    Method setCurrentItem = viewPager2.getClass()
-                                            .getMethod("setCurrentItem", int.class, boolean.class);
-                                    setCurrentItem.invoke(viewPager2, page, false);
-                                } catch (Throwable ignored) {
-                                    // 部分 ViewPager 实现只有 setCurrentItem(int)
-                                    viewPager2.getClass().getMethod("setCurrentItem", int.class)
-                                            .invoke(viewPager2, page);
-                                }
-                            }
-                            try {
-                                Method updateTabState = navView.getClass().getMethod("updateTabState", int.class);
-                                updateTabState.invoke(navView, navPos);
-                            } catch (Throwable ignored) {}
-                            MainHook.log("Nav position " + navPos + " -> page " + page);
-                            // 吞掉原生逻辑：其按「导航位置 == 页面索引」处理，会切到错误页面。
-                            // 返回类型需与被 hook 方法一致（void 返回 null，boolean 返回 true），
-                            // 否则会因返回类型不匹配导致整次点击被吞、导航卡死。
-                            return hookResult(m);
-                        } catch (Throwable t) {
-                            MainHook.log("onItemSelected mapping failed, fallback to native: " + t);
+                        int navPos = (int) chain.getArg(2);
+                        int page = pageForNavPos(navPos);
+                        if (page < 0) {
                             return chain.proceed();
                         }
+
+                        Field this$0Field = listenerClass.getDeclaredField("this$0");
+                        this$0Field.setAccessible(true);
+                        Activity mainActivity = (Activity) this$0Field.get(chain.getThisObject());
+                        if (mainActivity == null) {
+                            return chain.proceed();
+                        }
+                        Object[] ctx = resolveTabViews(mainActivity);
+                        if (ctx == null) {
+                            return chain.proceed();
+                        }
+                        Object viewPager2 = ctx[0];
+                        Object navView = ctx[1];
+
+                        if (isUserPage(page)) {
+                            switchToUserTab(mainActivity, page, viewPager2);
+                        } else {
+                            try {
+                                Method setCurrentItem = viewPager2.getClass()
+                                        .getMethod("setCurrentItem", int.class, boolean.class);
+                                setCurrentItem.invoke(viewPager2, page, false);
+                            } catch (Throwable t) {
+                                MainHook.log("Failed to switch page: " + t);
+                                return chain.proceed();
+                            }
+                        }
+                        try {
+                            Method updateTabState = navView.getClass().getMethod("updateTabState", int.class);
+                            updateTabState.invoke(navView, navPos);
+                        } catch (Throwable ignored) {}
+                        MainHook.log("Nav position " + navPos + " -> page " + page);
+                        // 吞掉原生逻辑：其按「导航位置 == 页面索引」处理，会切到错误页面
+                        return false;
                     });
                     MainHook.log("Hooked MainActivity$setUpPages$2.onItemSelected");
                     break;
@@ -316,14 +295,6 @@ public final class BottomBarPurifier {
         } catch (Throwable t) {
             MainHook.log("Failed to hook MainActivity$setUpPages$2.onItemSelected: " + t);
         }
-    }
-
-    /** 按被 hook 方法的返回类型返回替换值：void 方法返回 null，boolean 方法返回 true。 */
-    private static Object hookResult(Method m) {
-        Class<?> rt = m.getReturnType();
-        if (rt == void.class || rt == Void.class) return null;
-        if (rt == boolean.class || rt == Boolean.class) return Boolean.TRUE;
-        return null;
     }
 
     /** 导航子项位置 -> 原始页面索引；无法计算时返回 -1。 */
@@ -347,7 +318,8 @@ public final class BottomBarPurifier {
         return navPos < tabs.size() ? navPos : -1;
     }
 
-    private static boolean isUserPage(int pageIndex) {        List<?> tabs = originalTabs;
+    private static boolean isUserPage(int pageIndex) {
+        List<?> tabs = originalTabs;
         if (tabs == null || pageIndex < 0 || pageIndex >= tabs.size()) {
             return false;
         }
@@ -373,7 +345,7 @@ public final class BottomBarPurifier {
         }
     }
 
-    private static void switchToUserTab(Activity mainActivity, int pageIndex) {
+    private static void switchToUserTab(Activity mainActivity, int pageIndex, Object viewPager2) {
         try {
             // Track source
             try {
@@ -394,11 +366,12 @@ public final class BottomBarPurifier {
             } catch (Throwable ignored) {}
 
             // viewPager2.setCurrentItem(pageIndex, false)
-            Object[] ctx = resolveTabViews(mainActivity);
-            if (ctx != null) {
-                Object viewPager2 = ctx[0];
+            // 直接用外层已解析的 viewPager2，避免二次 resolveTabViews 在切换瞬间拿不到 binding 导致切不动
+            if (viewPager2 != null) {
                 Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
                 setCurrentItem.invoke(viewPager2, pageIndex, false);
+            } else {
+                MainHook.log("switchToUserTab: viewPager2 is null, cannot switch");
             }
         } catch (Throwable t) {
             MainHook.log("Failed to switch to user tab: " + t);
