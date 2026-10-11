@@ -80,7 +80,10 @@ public final class PurifyPrefs {
         if (module == null) return;
         try {
             remote = module.getRemotePreferences(PREFS_NAME);
-            MainHook.log("Remote preferences loaded: " + PREFS_NAME);
+            MainHook.log("Remote preferences loaded: " + PREFS_NAME
+                    + " (tab_vip=" + hide(TAB_VIP)
+                    + ", tab_benefit=" + hide(TAB_BENEFIT)
+                    + ", tab_placement=" + hide(TAB_PLACEMENT) + ")");
         } catch (Throwable t) {
             remote = null;
             MainHook.log("Remote preferences unavailable, using defaults: " + t);

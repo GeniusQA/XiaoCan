@@ -75,6 +75,9 @@ public class MainActivity extends Activity {
     private volatile SharedPreferences remotePrefs;
     private final Map<String, Switch> switches = new LinkedHashMap<>();
     private boolean refreshing;
+    /** 服务未连接时写入失败的设置，等服务绑定后补写，避免用户改动静默丢失。 */
+    private final Map<String, Boolean> pendingRemoteWrites = new LinkedHashMap<>();
+    private TextView syncBadge;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -122,6 +125,12 @@ public class MainActivity extends Activity {
         statusDesc.setTextColor(Color.parseColor("#555555"));
         statusDesc.setPadding(0, dp2px(6), 0, 0);
         statusCard.addView(statusDesc);
+
+        syncBadge = new TextView(this);
+        syncBadge.setTextSize(12);
+        syncBadge.setPadding(0, dp2px(6), 0, 0);
+        statusCard.addView(syncBadge);
+        updateSyncStatus();
         layout.addView(statusCard);
 
         // Settings toggles
@@ -134,7 +143,7 @@ public class MainActivity extends Activity {
         layout.addView(settingsTitle);
 
         TextView settingsHint = new TextView(this);
-        settingsHint.setText("开关默认开启 = 隐藏对应入口（保持净化）。关闭开关即恢复展示该功能入口；修改后需强制停止并重启小蚕霸王餐生效。广告与弹窗拦截始终开启，不受开关影响。");
+        settingsHint.setText("开关默认开启 = 隐藏对应入口（保持净化）。关闭开关即恢复展示该功能入口；修改后需强制停止并重启小蚕霸王餐生效。广告与弹窗拦截始终开启，不受开关影响。若状态卡提示「设置未同步」，说明改动没有写进宿主，请先启动一次小蚕再回到本页重新设置。");
         settingsHint.setTextSize(12);
         settingsHint.setTextColor(Color.parseColor("#999999"));
         settingsHint.setPadding(dp2px(14), 0, dp2px(14), dp2px(8));
@@ -193,10 +202,14 @@ public class MainActivity extends Activity {
                     } catch (Throwable ignored) {
                     }
                     remotePrefs = prefs;
+                    flushPendingRemoteWrites();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            if (!isFinishing()) refreshSwitches();
+                            if (!isFinishing()) {
+                                refreshSwitches();
+                                updateSyncStatus();
+                            }
                         }
                     });
                 }
@@ -204,6 +217,12 @@ public class MainActivity extends Activity {
                 @Override
                 public void onServiceDied(XposedService service) {
                     remotePrefs = null;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!isFinishing()) updateSyncStatus();
+                        }
+                    });
                 }
             });
         } catch (Throwable ignored) {
@@ -304,15 +323,63 @@ public class MainActivity extends Activity {
     }
 
     private void setHide(String key, boolean hide) {
-        localPrefs.edit().putBoolean(key, hide).apply();
+        localPrefs.edit().putBoolean(key, hide).commit();
+
+        boolean synced = false;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
-                rp.edit().putBoolean(key, hide).apply();
+                // commit(): 立刻落盘，避免用户切回小蚕时写入还没生效
+                synced = rp.edit().putBoolean(key, hide).commit();
             } catch (Throwable ignored) {
             }
         }
-        android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW"));
+        if (synced) {
+            pendingRemoteWrites.remove(key);
+        } else {
+            // 服务未连接/写入失败：排队，等服务绑定后补写
+            pendingRemoteWrites.put(key, hide);
+        }
+        android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
+                + " remoteSynced=" + synced);
+        updateSyncStatus();
+    }
+
+    private void flushPendingRemoteWrites() {
+        SharedPreferences rp = remotePrefs;
+        if (rp == null || pendingRemoteWrites.isEmpty()) return;
+        try {
+            SharedPreferences.Editor editor = rp.edit();
+            for (Map.Entry<String, Boolean> entry : pendingRemoteWrites.entrySet()) {
+                editor.putBoolean(entry.getKey(), entry.getValue());
+            }
+            if (editor.commit()) {
+                pendingRemoteWrites.clear();
+                android.util.Log.i("XiaoCanPurify", "Flushed pending settings to remote prefs");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void updateSyncStatus() {
+        final TextView badge = syncBadge;
+        if (badge == null) return;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing()) return;
+                if (remotePrefs == null) {
+                    badge.setText("⚠ 设置未同步：LSPosed 服务未连接。此状态下的改动只存本地，小蚕仍按默认「隐藏」执行，请重启小蚕后重新打开本页再改。");
+                    badge.setTextColor(Color.parseColor("#E64545"));
+                } else if (!pendingRemoteWrites.isEmpty()) {
+                    badge.setText("⚠ 仍有 " + pendingRemoteWrites.size() + " 项设置待同步到宿主。");
+                    badge.setTextColor(Color.parseColor("#E6A23C"));
+                } else {
+                    badge.setText("● 设置已同步到宿主（改动后强制停止并重启小蚕生效）");
+                    badge.setTextColor(Color.parseColor("#07C160"));
+                }
+            }
+        });
     }
 
     private LinearLayout createCard() {

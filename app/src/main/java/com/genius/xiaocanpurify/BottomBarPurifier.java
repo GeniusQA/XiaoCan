@@ -15,37 +15,41 @@ import io.github.libxposed.api.XposedInterface;
 public final class BottomBarPurifier {
     private BottomBarPurifier() {}
 
-    private static volatile boolean hideVip;
-    private static volatile boolean hideBenefit;
-    private static volatile boolean hidePlacement;
-
     /**
      * 原始 Tab 列表索引 -> 过滤后索引；被移除项为 -1。
-     * 由 hookTabActionList 在首次拿到宿主原始列表时建立。
+     * 由 hookTabActionList 在过滤时建立；null 表示未过滤（索引即原索引）。
      */
     private static volatile int[] oldToNew;
 
+    /**
+     * 全部 hook 都装上，开关值在**调用时**实时读取。
+     * 这样设置改动不再依赖进程启动时的一次性读取，
+     * 避免因 RemotePreferences 未同步而长期停留在默认「隐藏」状态。
+     */
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
-        hideVip = PurifyPrefs.hide(PurifyPrefs.TAB_VIP);
-        hideBenefit = PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT);
-        hidePlacement = PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
-        boolean threeTabMode = hideVip && hideBenefit;
+        // 隐藏任意 Tab 时必须同步过滤 Tab 列表，否则 nav item 被移除而页面数量不变，
+        // 后续页面整体前移一位（表现为点「我的」打开 SVIP 会员页）。
+        hookTabActionList(xposed, classLoader);
+        hookMainActivitySetupPages(xposed, classLoader);
+        hookApplyBottomTabTheme(xposed, classLoader);
+        hookChangeTabIndex(xposed, classLoader);
+        hookOnItemSelectedListener(xposed, classLoader);
+        hookSecondTabPlacement(xposed, classLoader);
+        MainHook.log("BottomBar toggles (live): vip=" + PurifyPrefs.hide(PurifyPrefs.TAB_VIP)
+                + " benefit=" + PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT)
+                + " placement=" + PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT));
+    }
 
-        if (hideVip || hideBenefit) {
-            // 只要隐藏了任意 Tab，就必须同步过滤 Tab 列表，
-            // 否则 nav item 被移除而页面数量不变，后续页面整体前移一位
-            // （表现为点「我的」打开 SVIP 会员页）。
-            hookTabActionList(xposed, classLoader);
-            hookMainActivitySetupPages(xposed, classLoader);
-            hookApplyBottomTabTheme(xposed, classLoader);
-            hookChangeTabIndex(xposed, classLoader);
-        }
-        if (threeTabMode) {
-            hookOnItemSelectedListener(xposed, classLoader);
-        }
-        if (hidePlacement) {
-            hookSecondTabPlacement(xposed, classLoader);
-        }
+    private static boolean hideVip() {
+        return PurifyPrefs.hide(PurifyPrefs.TAB_VIP);
+    }
+
+    private static boolean hideBenefit() {
+        return PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT);
+    }
+
+    private static boolean hidePlacement() {
+        return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
     }
 
     /**
@@ -60,6 +64,11 @@ public final class BottomBarPurifier {
                     xposed.hook(m).intercept(chain -> {
                         Object original = chain.proceed();
                         if (!(original instanceof List)) {
+                            return original;
+                        }
+                        if (!hideVip() && !hideBenefit()) {
+                            // 两个开关都关闭：保持宿主原生 Tab 列表
+                            oldToNew = null;
                             return original;
                         }
                         List<?> src = (List<?>) original;
@@ -90,9 +99,9 @@ public final class BottomBarPurifier {
     private static boolean isHiddenAction(Object action) {
         if (action == null) return false;
         String name = action.getClass().getName();
-        if (hideVip && name.endsWith("$VIP")) return true;
+        if (hideVip() && name.endsWith("$VIP")) return true;
         // 「福利/赚钱」Tab 对应 TASK
-        if (hideBenefit && name.endsWith("$TASK")) return true;
+        if (hideBenefit() && name.endsWith("$TASK")) return true;
         return false;
     }
 
@@ -106,11 +115,14 @@ public final class BottomBarPurifier {
                 String mName = m.getName();
                 if ("getSecondTabPlacementContent".equals(mName) || "getSecondTabPlacementMatchValue".equals(mName)) {
                     xposed.hook(m).intercept(chain -> {
+                        if (!hidePlacement()) {
+                            return chain.proceed();
+                        }
                         MainHook.log("Intercepted " + mName + ", returning null to keep pure Order tab");
                         return null;
                     });
                 } else if ("isSecondTabPlacementAction".equals(mName)) {
-                    xposed.hook(m).intercept(chain -> false);
+                    xposed.hook(m).intercept(chain -> hidePlacement() ? false : chain.proceed());
                 }
             }
             MainHook.log("Hooked second tab placement overrides");
@@ -166,68 +178,73 @@ public final class BottomBarPurifier {
             Object binding = getBinding.invoke(activity);
             if (binding == null) return;
 
-            Field navViewField = binding.getClass().getField("navView");
-            ViewGroup navView = (ViewGroup) navViewField.get(binding);
-
-            Field nbiVipField = binding.getClass().getField("nbiVip");
-            View nbiVip = (View) nbiVipField.get(binding);
-
-            Field nbiBenefitField = binding.getClass().getField("nbiBenefit");
-            View nbiBenefit = (View) nbiBenefitField.get(binding);
-
-            Field nbiTdField = binding.getClass().getField("nbiTd");
-            View nbiTd = (View) nbiTdField.get(binding);
+            boolean hideVip = hideVip();
+            boolean hideBenefit = hideBenefit();
 
             // Hide VIP decorations / badges
             if (hideVip) {
-                try {
-                    Field lyActiveVip = binding.getClass().getField("lyActiveVip");
-                    View v = (View) lyActiveVip.get(binding);
-                    if (v != null) v.setVisibility(View.GONE);
-                } catch (Throwable ignored) {}
-
-                try {
-                    Field tvVipExpire = binding.getClass().getField("tvVipExpireTag");
-                    View v = (View) tvVipExpire.get(binding);
-                    if (v != null) v.setVisibility(View.GONE);
-                } catch (Throwable ignored) {}
+                View v = getBindingView(binding, "lyActiveVip");
+                if (v != null) v.setVisibility(View.GONE);
+                View expire = getBindingView(binding, "tvVipExpireTag");
+                if (expire != null) expire.setVisibility(View.GONE);
             }
 
             // Hide floating red packet icon on main activity
             if (PurifyPrefs.hide(PurifyPrefs.FLOATING_WINDOW)) {
-                try {
-                    Field ivFloatingWindowField = binding.getClass().getField("ivFloatingWindow");
-                    View v = (View) ivFloatingWindowField.get(binding);
-                    if (v != null) v.setVisibility(View.GONE);
-                } catch (Throwable ignored) {}
+                View v = getBindingView(binding, "ivFloatingWindow");
+                if (v != null) v.setVisibility(View.GONE);
             }
 
+            if (!hideVip && !hideBenefit) {
+                // 两个开关都关闭：保留宿主原生导航项，不做任何移除
+                MainHook.log("BottomBar toggles off: keep native nav items");
+                return;
+            }
+
+            View navViewRaw = getBindingView(binding, "navView");
+            if (!(navViewRaw instanceof ViewGroup)) return;
+            ViewGroup navView = (ViewGroup) navViewRaw;
+
+            View nbiVip = getBindingView(binding, "nbiVip");
+            View nbiBenefit = getBindingView(binding, "nbiBenefit");
+
             boolean removed = false;
-            if (navView != null) {
-                if (hideVip && nbiVip != null) {
-                    nbiVip.setVisibility(View.GONE);
-                    navView.removeView(nbiVip);
-                    removed = true;
-                }
-                if (hideBenefit && nbiBenefit != null) {
-                    nbiBenefit.setVisibility(View.GONE);
-                    navView.removeView(nbiBenefit);
-                    removed = true;
-                }
-                if (hideVip && hideBenefit && nbiTd != null) {
+            if (hideVip && nbiVip != null && nbiVip.getParent() == navView) {
+                nbiVip.setVisibility(View.GONE);
+                navView.removeView(nbiVip);
+                removed = true;
+            }
+            if (hideBenefit && nbiBenefit != null && nbiBenefit.getParent() == navView) {
+                nbiBenefit.setVisibility(View.GONE);
+                navView.removeView(nbiBenefit);
+                removed = true;
+            }
+            if (hideVip && hideBenefit) {
+                View nbiTd = getBindingView(binding, "nbiTd");
+                if (nbiTd != null) {
                     try {
                         Method setItemKey = nbiTd.getClass().getMethod("setItemKey", String.class);
                         setItemKey.invoke(nbiTd, "order");
                     } catch (Throwable ignored) {}
                 }
-                if (removed) {
-                    Method initMethod = navView.getClass().getMethod("init");
-                    initMethod.invoke(navView);
-                    MainHook.log("navView purged and re-initialized");
-                }
+            }
+            if (removed) {
+                Method initMethod = navView.getClass().getMethod("init");
+                initMethod.invoke(navView);
+                MainHook.log("navView purged and re-initialized");
             }
         } catch (Throwable t) {
             MainHook.log("Failed to purge extra tabs: " + t);
+        }
+    }
+
+    private static View getBindingView(Object binding, String fieldName) {
+        try {
+            Field field = binding.getClass().getField(fieldName);
+            Object value = field.get(binding);
+            return value instanceof View ? (View) value : null;
+        } catch (Throwable t) {
+            return null;
         }
     }
 
@@ -243,6 +260,10 @@ public final class BottomBarPurifier {
             for (Method m : listenerClass.getDeclaredMethods()) {
                 if ("onItemSelected".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
+                        if (!(hideVip() && hideBenefit())) {
+                            // 非三 Tab 模式：位置与页面索引一致，走宿主原生逻辑
+                            return chain.proceed();
+                        }
                         int currentPos = (int) chain.getArg(2);
                         Field this$0Field = listenerClass.getDeclaredField("this$0");
                         this$0Field.setAccessible(true);
