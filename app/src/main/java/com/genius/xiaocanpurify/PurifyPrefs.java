@@ -70,8 +70,6 @@ public final class PurifyPrefs {
 
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
-    // 进店按钮开关语义与其他净化项相反：默认关闭 = 按钮显示，开启后才隐藏
-    public static final String DETAIL_ENTER_SHOP = "hide_detail_enter_shop";
 
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";

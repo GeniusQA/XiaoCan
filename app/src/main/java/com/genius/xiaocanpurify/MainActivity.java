@@ -61,7 +61,6 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.USER_BQT, "BQT 营销模块", "BQT 容器营销模块"},
             }},
             {"详情页 / 订单页", new String[][]{
-                    {PurifyPrefs.DETAIL_ENTER_SHOP, "隐藏「进店看餐品/进店逛逛」按钮", "活动详情底部进店按钮；默认关闭（按钮显示），开启后隐藏"},
                     {PurifyPrefs.DETAIL_SHARE, "「分享赚豆」浮动入口", "详情页右下角分享赚豆浮标"},
                     {PurifyPrefs.ORDER_CHALLENGE, "霸王餐挑战", "订单页挑战横条与挑战弹窗"},
                     {PurifyPrefs.ORDER_FREE, "免费单入口", "免费单邀请条与标签提示"},
@@ -330,9 +329,8 @@ public class MainActivity extends Activity {
     }
 
     private boolean getHide(String key) {
-        // 隐藏桌面图标、进店按钮开关默认关闭（false），其余净化开关默认隐藏（true）
-        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
-                || PurifyPrefs.DETAIL_ENTER_SHOP.equals(key) ? false : true;
+        // 隐藏桌面图标默认关闭（false），其余净化开关默认隐藏（true）
+        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key) ? false : true;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
