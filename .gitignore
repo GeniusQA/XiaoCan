@@ -6,3 +6,8 @@ app/build/
 local.properties
 work/
 xiaocan.apk
+
+# 本地签名密钥（私钥，切勿提交/推送）
+signing/
+*.jks
+*.keystore
