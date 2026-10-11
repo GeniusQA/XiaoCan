@@ -105,10 +105,6 @@ public final class BottomBarPurifier {
         return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
     }
 
-    private static boolean hidePlacement() {
-        return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
-    }
-
     /**
      * 捕获宿主原始 Tab 列表（不过滤，页面保持完整）。
      * 隐藏哪个 Tab 由导航项移除 + 导航位置映射完成。
