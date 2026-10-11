@@ -90,8 +90,15 @@ public class MainActivity extends Activity {
 
         localPrefs = getSharedPreferences(PurifyPrefs.PREFS_NAME, MODE_PRIVATE);
         registerServiceListener();
-        // 对齐桌面图标状态，避免重装后组件默认启用而偏好记录为隐藏导致不一致
-        setLauncherIconEnabled(!getHide(PurifyPrefs.HIDE_DESKTOP_ICON));
+        // 对齐桌面图标状态：仅当本地已有明确记录时执行。
+        // 此时 LSPosed 服务尚未绑定（异步），getHide 可能读到默认值，
+        // 若直接对齐会把已隐藏的图标误恢复，等服务绑定后 syncLauncherIconState 再最终对齐。
+        if (localPrefs.contains(PurifyPrefs.HIDE_DESKTOP_ICON)) {
+            try {
+                setLauncherIconEnabled(!localPrefs.getBoolean(PurifyPrefs.HIDE_DESKTOP_ICON, false));
+            } catch (Throwable ignored) {
+            }
+        }
 
         ScrollView scrollView = new ScrollView(this);
         scrollView.setBackgroundColor(Color.parseColor("#F6F7F9"));
@@ -210,6 +217,8 @@ public class MainActivity extends Activity {
                     }
                     remotePrefs = prefs;
                     flushPendingRemoteWrites();
+                    // 服务绑定后按最终配置对齐桌面图标（覆盖 onCreate 时的临时状态）
+                    syncLauncherIconState();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -327,6 +336,13 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
             }
         }
+        // 服务未绑定（如刚从 LSPosed 打开本页）：回落到本地镜像，避免读到默认值
+        if (localPrefs != null && localPrefs.contains(key)) {
+            try {
+                return localPrefs.getBoolean(key, def);
+            } catch (Throwable ignored) {
+            }
+        }
         return def;
     }
 
@@ -356,6 +372,10 @@ public class MainActivity extends Activity {
         android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
                 + " remoteSynced=" + synced);
         updateSyncStatus();
+    }
+
+    private void syncLauncherIconState() {
+        setLauncherIconEnabled(!getHide(PurifyPrefs.HIDE_DESKTOP_ICON));
     }
 
     private void setLauncherIconEnabled(boolean enabled) {
