@@ -81,9 +81,19 @@ public final class PopupBlocker {
             StringBuilder sb = new StringBuilder();
             collectText(decor, sb);
             String text = sb.toString();
-            return text.contains("愉悦推")
+            if (text.contains("愉悦推")
                     || text.contains("读取您的应用列表")
-                    || text.contains("小蚕卫士");
+                    || text.contains("小蚕卫士")) {
+                return true;
+            }
+            // 抽奖页（免费开红包）中奖弹窗：命中后同时布防外跳窗口，
+            // 拦下弹窗「即将自动跳转领取」触发的微信小程序自动拉起
+            if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
+                    && (text.contains("即将自动跳转") || text.contains("大额出行福利券"))) {
+                EnrollmentJumpGuard.armNow();
+                return true;
+            }
+            return false;
         } catch (Throwable t) {
             return false;
         }
@@ -328,7 +338,9 @@ public final class PopupBlocker {
                 || t.contains("ops_popup")
                 || t.contains("invite")
                 || t.contains("withdraw")
-                || t.contains("withdrawal");
+                || t.contains("withdrawal")
+                || t.contains("lottery")
+                || t.contains("coupon");
     }
 
     private static boolean isMarketingDialogInfo(Object dialogInfo) {

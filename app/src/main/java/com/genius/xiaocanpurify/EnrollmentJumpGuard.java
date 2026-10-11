@@ -17,6 +17,11 @@ final class EnrollmentJumpGuard {
 
     private EnrollmentJumpGuard() {}
 
+    /** 供弹窗拦截等外部场景布防：命中后 30 秒内拦截自动外跳/小程序拉起。 */
+    static void armNow() {
+        WINDOW.arm(SystemClock.uptimeMillis());
+    }
+
     static void install(XposedInterface xposed, ClassLoader cl) {
         hookSubmissionStart(xposed, cl);
         hookLaunchDialogs(xposed, cl);
@@ -192,8 +197,10 @@ final class EnrollmentJumpGuard {
             target = resolved.activityInfo.packageName;
         }
         // Auth/payment targets are not store launches and must remain usable.
+        // 微信仅用于小程序/优惠券拉起，布防窗口内同样视为自动外跳目标。
         return "com.sankuai.meituan".equals(target) || "com.sankuai.meituan.takeoutnew".equals(target)
                 || "me.ele".equals(target) || "com.jingdong.app.mall".equals(target)
-                || "com.taobao.taobao".equals(target) || "com.dianping.v1".equals(target);
+                || "com.taobao.taobao".equals(target) || "com.dianping.v1".equals(target)
+                || "com.tencent.mm".equals(target);
     }
 }

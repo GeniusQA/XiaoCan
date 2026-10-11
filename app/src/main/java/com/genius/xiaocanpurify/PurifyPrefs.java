@@ -63,6 +63,8 @@ public final class PurifyPrefs {
 
     // Global
     public static final String FLOATING_WINDOW = "hide_floating_window";
+    // 抽奖活动（免费开红包）中奖弹窗 + 微信小程序自动外跳拦截
+    public static final String LOTTERY_POPUP = "hide_lottery_coupon_popup";
 
     // Module UI
     public static final String HIDE_DESKTOP_ICON = "hide_desktop_icon";

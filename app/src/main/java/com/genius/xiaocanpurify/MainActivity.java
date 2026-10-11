@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
             }},
             {"全局", new String[][]{
                     {PurifyPrefs.FLOATING_WINDOW, "浮动红包小窗", "主页/我的页悬浮红包小图标"},
+                    {PurifyPrefs.LOTTERY_POPUP, "抽奖中奖弹窗与自动外跳", "「免费开红包」等抽奖页「恭喜您获得大额出行福利券」弹窗，并拦截其触发的微信小程序自动跳转"},
             }},
             {"模块界面", new String[][]{
                     {PurifyPrefs.HIDE_DESKTOP_ICON, "隐藏桌面图标", "关闭后从桌面移除本模块图标；仍可在 LSPosed 模块列表中打开设置页重新开启"},
