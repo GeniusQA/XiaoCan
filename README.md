@@ -62,6 +62,7 @@
 
 - **隐藏桌面图标**: 设置页新增「模块界面 - 隐藏桌面图标」开关, 关闭后从桌面移除本模块图标 (LAUNCHER 移入 `activity-alias`, 通过 `setComponentEnabledSetting` 切换); 可随时从 LSPosed 模块列表右下角按钮重新进入设置页开启.
 - **修复从 LSPosed 进入设置页误恢复桌面图标**: 服务绑定是异步的, 进入设置页瞬间远程配置尚未就绪, `onCreate` 的图标对齐逻辑读到默认值会把已隐藏的图标误恢复; 现改为仅在本地有明确记录时对齐、`getHide` 增加本地配置兜底、服务绑定后按最终值再对齐一次.
+- **修复底部导航点击卡首页**: `onItemSelected` 拦截后固定返回 `false`, 但宿主监听方法为 void 返回类型, 返回类型不匹配使每次点击被框架吞掉、导航卡死在首页; 现按被 hook 方法的真实返回类型返回 (void 返回 null, boolean 返回 true), 并对整段映射逻辑加异常兜底, 失败时回退原生逻辑.
 - **CI 脚本整合**: `.github/scripts` 下 `resolve-version.sh` 与 `generate-release-body.sh` 合并为单个 `ci.sh` (子命令 `resolve` / `body`), workflow 引用同步更新.
 - **定位缓存**: 新增 `LocationCacheHook`, 无 GPS 时默认使用历史缓存定位加载商家活动数据, 解决「必须先开 GPS 才能定位」的问题; 可在设置页「定位」分组关闭.
 - **修复底部导航错位**: 仅隐藏「会员」或仅隐藏「福利/赚钱」时, 由于只移除了导航项而未同步过滤页面列表, ViewPager 页面整体前移一位, 点击「我的」会打开 SVIP 会员页; 现改为任意隐藏组合都过滤 `MainTabAction` 列表, 并按过滤结果动态映射 `changeTabIndex` 索引.
