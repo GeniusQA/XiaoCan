@@ -1,4 +1,4 @@
-package io.github.jessire.xiaocanpurify;
+package com.genius.xiaocanpurify;
 
 import java.util.Collection;
 import java.util.Locale;

@@ -1,4 +1,4 @@
-package io.github.jessire.xiaocanpurify;
+package com.genius.xiaocanpurify;
 
 import android.view.View;
 import android.view.ViewGroup;

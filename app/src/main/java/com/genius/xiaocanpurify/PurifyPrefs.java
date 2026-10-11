@@ -1,4 +1,4 @@
-package io.github.jessire.xiaocanpurify;
+package com.genius.xiaocanpurify;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;

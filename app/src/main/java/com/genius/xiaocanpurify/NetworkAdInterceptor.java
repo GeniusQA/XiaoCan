@@ -1,4 +1,4 @@
-package io.github.jessire.xiaocanpurify;
+package com.genius.xiaocanpurify;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;

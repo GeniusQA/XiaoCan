@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.jessire.xiaocanpurify"
+    namespace = "com.genius.xiaocanpurify"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.github.jessire.xiaocanpurify"
+        applicationId = "com.genius.xiaocanpurify"
         minSdk = 26
         targetSdk = 35
         versionCode = 4

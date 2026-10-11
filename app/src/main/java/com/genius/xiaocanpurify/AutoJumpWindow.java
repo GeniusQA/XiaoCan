@@ -1,4 +1,4 @@
-package io.github.jessire.xiaocanpurify;
+package com.genius.xiaocanpurify;
 
 final class AutoJumpWindow {
     private long armedAt = -1;

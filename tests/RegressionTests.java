@@ -45,7 +45,7 @@ public final class RegressionTests {
     }
 
     private static void install(String owner, String name) throws Exception {
-        Method m = Class.forName("io.github.jessire.xiaocanpurify." + owner)
+        Method m = Class.forName("com.genius.xiaocanpurify." + owner)
                 .getDeclaredMethod(name, XposedInterface.class, ClassLoader.class);
         m.setAccessible(true);
         m.invoke(null, xposed, loader);
@@ -73,7 +73,7 @@ public final class RegressionTests {
 
     private static void refresh() throws Throwable {
         HomeBinding binding = new HomeBinding();
-        Class<?> home = Class.forName("io.github.jessire.xiaocanpurify.HomePagePurifier");
+        Class<?> home = Class.forName("com.genius.xiaocanpurify.HomePagePurifier");
         Method enforce = home.getDeclaredMethod("enforceHome", Object.class);
         enforce.setAccessible(true);
         enforce.invoke(null, binding);
@@ -104,7 +104,7 @@ public final class RegressionTests {
     }
 
     private static void popup() throws Throwable {
-        Method marketing = Class.forName("io.github.jessire.xiaocanpurify.PopupBlocker").getDeclaredMethod("isMarketingTag", String.class);
+        Method marketing = Class.forName("com.genius.xiaocanpurify.PopupBlocker").getDeclaredMethod("isMarketingTag", String.class);
         marketing.setAccessible(true);
         if (!Boolean.TRUE.equals(marketing.invoke(null, "home_up_7743"))) throw new AssertionError("Observed HomeUp campaign still enters popup queue");
         if (!Boolean.FALSE.equals(marketing.invoke(null, "payment_confirmation"))) throw new AssertionError("Payment prompt must remain available");
@@ -115,7 +115,7 @@ public final class RegressionTests {
         call(show, new com.realtech.promotion.dialog.BasePopup(), true);
     }
 
-    private static void policies() { io.github.jessire.xiaocanpurify.PolicyTests.run(); }
+    private static void policies() { com.genius.xiaocanpurify.PolicyTests.run(); }
 
     private static void taobaoPrompt() throws Throwable {
         install("PopupBlocker", "hookTaobaoInstallPrompt");
@@ -168,7 +168,7 @@ public final class RegressionTests {
         call(load, null, false, new Object(), "ad-slot", ad);
         if (ad.getVisibility() != 8 || ad.getLayoutParams().height != 0) throw new AssertionError("Detail ad remains visible or reserves space");
         var binding = new com.realtech.promotion.databinding.LayoutPromotionDetailContentBinding();
-        Method clean = Class.forName("io.github.jessire.xiaocanpurify.DetailPagePurifier").getDeclaredMethod("cleanBinding", Object.class);
+        Method clean = Class.forName("com.genius.xiaocanpurify.DetailPagePurifier").getDeclaredMethod("cleanBinding", Object.class);
         clean.setAccessible(true);
         clean.invoke(null, binding);
         if (binding.ivShare.getVisibility() != 8 || binding.flTobidContainer.getVisibility() != 8) throw new AssertionError("Share-earn/ad still visible");
