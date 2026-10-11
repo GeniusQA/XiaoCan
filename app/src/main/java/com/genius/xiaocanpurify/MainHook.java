@@ -179,6 +179,13 @@ public final class MainHook extends XposedModule {
             log("FlutterPageGuard install error: " + t);
         }
 
+        try {
+            LocationCacheHook.install(xposed, classLoader);
+            log("LocationCacheHook installed successfully.");
+        } catch (Throwable t) {
+            log("LocationCacheHook install error: " + t);
+        }
+
         log("All XiaoCanPurify hooks successfully initialized!");
     }
 

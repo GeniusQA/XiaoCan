@@ -50,6 +50,9 @@ public final class PurifyPrefs {
     // Global
     public static final String FLOATING_WINDOW = "hide_floating_window";
 
+    // Location
+    public static final String LOCATION_CACHE = "location_cache";
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 
@@ -87,5 +90,18 @@ public final class PurifyPrefs {
             } catch (Throwable ignored) {}
         }
         return local == null || local;
+    }
+
+    /**
+     * Feature switch (default ON), independent of the "hide" semantics above.
+     */
+    public static boolean enabled(String key) {
+        SharedPreferences prefs = remote;
+        if (prefs != null) {
+            try {
+                return prefs.getBoolean(key, true);
+            } catch (Throwable ignored) {}
+        }
+        return true;
     }
 }

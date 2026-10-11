@@ -58,6 +58,9 @@ public class MainActivity extends Activity {
             {"全局", new String[][]{
                     {PurifyPrefs.FLOATING_WINDOW, "浮动红包小窗", "主页/我的页悬浮红包小图标"},
             }},
+            {"定位", new String[][]{
+                    {PurifyPrefs.LOCATION_CACHE, "无 GPS 时使用缓存定位", "成功定位一次后缓存位置；之后不开定位服务也默认用该位置加载商家活动数据（开启定位后自动刷新）"},
+            }},
     };
 
     private SharedPreferences localPrefs;
