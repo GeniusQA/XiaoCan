@@ -16,23 +16,24 @@ public final class BottomBarPurifier {
     private BottomBarPurifier() {}
 
     /**
-     * 原始 Tab 列表索引 -> 过滤后索引；被移除项为 -1。
-     * 由 hookTabActionList 在过滤时建立；null 表示未过滤（索引即原索引）。
+     * 宿主原始 Tab 列表（[HOME, TASK, ORDER, VIP, USER]），
+     * 由 hookTabActionList 捕获，仅用于建立「导航位置 -> 页面索引」映射。
      */
-    private static volatile int[] oldToNew;
+    private static volatile List<?> originalTabs;
 
     /**
      * 全部 hook 都装上，开关值在**调用时**实时读取。
      * 这样设置改动不再依赖进程启动时的一次性读取，
      * 避免因 RemotePreferences 未同步而长期停留在默认「隐藏」状态。
+     *
+     * 架构说明：ViewPager 始终保留宿主全部页面（含被隐藏的福利/会员页），
+     * 只移除底部导航项。这样「我的-邀新赚钱」等跳转福利页的入口仍然可用；
+     * 导航点击通过 hookOnItemSelectedListener 做位置映射。
      */
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
-        // 隐藏任意 Tab 时必须同步过滤 Tab 列表，否则 nav item 被移除而页面数量不变，
-        // 后续页面整体前移一位（表现为点「我的」打开 SVIP 会员页）。
         hookTabActionList(xposed, classLoader);
         hookMainActivitySetupPages(xposed, classLoader);
         hookApplyBottomTabTheme(xposed, classLoader);
-        hookChangeTabIndex(xposed, classLoader);
         hookOnItemSelectedListener(xposed, classLoader);
         hookSecondTabPlacement(xposed, classLoader);
         MainHook.log("BottomBar toggles (live): vip=" + PurifyPrefs.hide(PurifyPrefs.TAB_VIP)
@@ -53,8 +54,8 @@ public final class BottomBarPurifier {
     }
 
     /**
-     * Hook MainActivity 的 Tab 列表构建方法：按开关过滤掉被隐藏的 Tab，
-     * 保持「nav item 位置 == ViewPager 页面索引」的对应关系。
+     * 捕获宿主原始 Tab 列表（不过滤，页面保持完整）。
+     * 隐藏哪个 Tab 由导航项移除 + 导航位置映射完成。
      */
     private static void hookTabActionList(XposedInterface xposed, ClassLoader cl) {
         try {
@@ -63,32 +64,12 @@ public final class BottomBarPurifier {
                 if ("getTabActionList".equals(m.getName()) || "tabActionList_delegate$lambda$0".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
                         Object original = chain.proceed();
-                        if (!(original instanceof List)) {
-                            return original;
+                        if (original instanceof List) {
+                            originalTabs = (List<?>) original;
                         }
-                        if (!hideVip() && !hideBenefit()) {
-                            // 两个开关都关闭：保持宿主原生 Tab 列表
-                            oldToNew = null;
-                            return original;
-                        }
-                        List<?> src = (List<?>) original;
-                        List<Object> kept = new ArrayList<>(src.size());
-                        int[] map = new int[src.size()];
-                        for (int i = 0; i < src.size(); i++) {
-                            Object action = src.get(i);
-                            if (isHiddenAction(action)) {
-                                map[i] = -1;
-                                MainHook.log("Tab filtered out: " + action.getClass().getSimpleName());
-                            } else {
-                                map[i] = kept.size();
-                                kept.add(action);
-                            }
-                        }
-                        oldToNew = map;
-                        MainHook.log("Tab list filtered " + src.size() + " -> " + kept.size());
-                        return kept;
+                        return original;
                     });
-                    MainHook.log("Hooked " + m.getName() + " to filtered tab list");
+                    MainHook.log("Hooked " + m.getName() + " to capture original tab list");
                 }
             }
         } catch (Throwable t) {
@@ -205,6 +186,13 @@ public final class BottomBarPurifier {
             if (!(navViewRaw instanceof ViewGroup)) return;
             ViewGroup navView = (ViewGroup) navViewRaw;
 
+            // 先让 navView 完成自身初始化，再移除导航项，
+            // 避免 init() 重建子项时把已移除的项带回来
+            try {
+                Method initMethod = navView.getClass().getMethod("init");
+                initMethod.invoke(navView);
+            } catch (Throwable ignored) {}
+
             View nbiVip = getBindingView(binding, "nbiVip");
             View nbiBenefit = getBindingView(binding, "nbiBenefit");
 
@@ -229,9 +217,7 @@ public final class BottomBarPurifier {
                 }
             }
             if (removed) {
-                Method initMethod = navView.getClass().getMethod("init");
-                initMethod.invoke(navView);
-                MainHook.log("navView purged and re-initialized");
+                MainHook.log("navView purged (pages kept intact)");
             }
         } catch (Throwable t) {
             MainHook.log("Failed to purge extra tabs: " + t);
@@ -249,10 +235,9 @@ public final class BottomBarPurifier {
     }
 
     /**
-     * Hook MainActivity$setUpPages$2.onItemSelected to handle tab clicks cleanly:
-     * 0 -> Home (viewPager2 item 0)
-     * 1 -> Order (viewPager2 item 1)
-     * 2 -> User ("我的", viewPager2 item 2)
+     * Hook MainActivity$setUpPages$2.onItemSelected（导航项点击回调，arg2 = 导航子项位置）。
+     * 页面列表保持宿主原始 5 项，导航项被移除后「子项位置 != 页面索引」，
+     * 这里把导航位置映射回原始页面索引后再切换页面。
      */
     private static void hookOnItemSelectedListener(XposedInterface xposed, ClassLoader cl) {
         try {
@@ -260,45 +245,48 @@ public final class BottomBarPurifier {
             for (Method m : listenerClass.getDeclaredMethods()) {
                 if ("onItemSelected".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
-                        if (!(hideVip() && hideBenefit())) {
-                            // 非三 Tab 模式：位置与页面索引一致，走宿主原生逻辑
+                        if (!hideVip() && !hideBenefit()) {
+                            // 无隐藏：导航位置 == 页面索引，走宿主原生逻辑
                             return chain.proceed();
                         }
-                        int currentPos = (int) chain.getArg(2);
+                        int navPos = (int) chain.getArg(2);
+                        int page = pageForNavPos(navPos);
+                        if (page < 0) {
+                            return chain.proceed();
+                        }
+
                         Field this$0Field = listenerClass.getDeclaredField("this$0");
                         this$0Field.setAccessible(true);
                         Activity mainActivity = (Activity) this$0Field.get(chain.getThisObject());
-                        if (mainActivity != null) {
-                            Method getBinding = mainActivity.getClass().getMethod("getBinding");
-                            Object binding = getBinding.invoke(mainActivity);
-                            if (binding != null) {
-                                Field vpField = binding.getClass().getField("viewPager2");
-                                Object viewPager2 = vpField.get(binding);
-                                Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
+                        if (mainActivity == null) {
+                            return chain.proceed();
+                        }
+                        Object[] ctx = resolveTabViews(mainActivity);
+                        if (ctx == null) {
+                            return chain.proceed();
+                        }
+                        Object viewPager2 = ctx[0];
+                        Object navView = ctx[1];
 
-                                Field navViewField = binding.getClass().getField("navView");
-                                Object navView = navViewField.get(binding);
-                                Method updateTabState = navView.getClass().getMethod("updateTabState", int.class);
-
-                                if (currentPos == 0) {
-                                    setCurrentItem.invoke(viewPager2, 0, false);
-                                    updateTabState.invoke(navView, 0);
-                                    MainHook.log("Switched to Home tab (position 0)");
-                                    return false;
-                                } else if (currentPos == 1) {
-                                    setCurrentItem.invoke(viewPager2, 1, false);
-                                    updateTabState.invoke(navView, 1);
-                                    MainHook.log("Switched to Order tab (position 1)");
-                                    return false;
-                                } else if (currentPos == 2) {
-                                    switchToUserTab(mainActivity);
-                                    updateTabState.invoke(navView, 2);
-                                    MainHook.log("Switched to User tab (position 2)");
-                                    return false;
-                                }
+                        if (isUserPage(page)) {
+                            switchToUserTab(mainActivity, page);
+                        } else {
+                            try {
+                                Method setCurrentItem = viewPager2.getClass()
+                                        .getMethod("setCurrentItem", int.class, boolean.class);
+                                setCurrentItem.invoke(viewPager2, page, false);
+                            } catch (Throwable t) {
+                                MainHook.log("Failed to switch page: " + t);
+                                return chain.proceed();
                             }
                         }
-                        return chain.proceed();
+                        try {
+                            Method updateTabState = navView.getClass().getMethod("updateTabState", int.class);
+                            updateTabState.invoke(navView, navPos);
+                        } catch (Throwable ignored) {}
+                        MainHook.log("Nav position " + navPos + " -> page " + page);
+                        // 吞掉原生逻辑：其按「导航位置 == 页面索引」处理，会切到错误页面
+                        return false;
                     });
                     MainHook.log("Hooked MainActivity$setUpPages$2.onItemSelected");
                     break;
@@ -309,7 +297,54 @@ public final class BottomBarPurifier {
         }
     }
 
-    private static void switchToUserTab(Activity mainActivity) {
+    /** 导航子项位置 -> 原始页面索引；无法计算时返回 -1。 */
+    private static int pageForNavPos(int navPos) {
+        List<?> tabs = originalTabs;
+        if (tabs == null || navPos < 0) {
+            return -1;
+        }
+        int kept = 0;
+        for (int i = 0; i < tabs.size(); i++) {
+            if (isHiddenAction(tabs.get(i))) {
+                continue;
+            }
+            if (kept == navPos) {
+                return i;
+            }
+            kept++;
+        }
+        // 超出导航子项数量：可能传入的是页面索引（同步回调），原样返回
+        return navPos < tabs.size() ? navPos : -1;
+    }
+
+    private static boolean isUserPage(int pageIndex) {
+        List<?> tabs = originalTabs;
+        if (tabs == null || pageIndex < 0 || pageIndex >= tabs.size()) {
+            return false;
+        }
+        return tabs.get(pageIndex).getClass().getName().endsWith("$USER");
+    }
+
+    /** 返回 [viewPager2, navView]，取不到时返回 null。 */
+    private static Object[] resolveTabViews(Activity mainActivity) {
+        try {
+            Method getBinding = mainActivity.getClass().getMethod("getBinding");
+            Object binding = getBinding.invoke(mainActivity);
+            if (binding == null) {
+                return null;
+            }
+            Object viewPager2 = binding.getClass().getField("viewPager2").get(binding);
+            Object navView = binding.getClass().getField("navView").get(binding);
+            if (viewPager2 == null || navView == null) {
+                return null;
+            }
+            return new Object[]{viewPager2, navView};
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void switchToUserTab(Activity mainActivity, int pageIndex) {
         try {
             // Track source
             try {
@@ -329,54 +364,15 @@ public final class BottomBarPurifier {
                 }
             } catch (Throwable ignored) {}
 
-            // viewPager2.setCurrentItem(2, false)
-            Method getBinding = mainActivity.getClass().getMethod("getBinding");
-            Object binding = getBinding.invoke(mainActivity);
-            if (binding != null) {
-                Field vpField = binding.getClass().getField("viewPager2");
-                Object viewPager2 = vpField.get(binding);
-                if (viewPager2 != null) {
-                    Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
-                    setCurrentItem.invoke(viewPager2, 2, false);
-                }
+            // viewPager2.setCurrentItem(pageIndex, false)
+            Object[] ctx = resolveTabViews(mainActivity);
+            if (ctx != null) {
+                Object viewPager2 = ctx[0];
+                Method setCurrentItem = viewPager2.getClass().getMethod("setCurrentItem", int.class, boolean.class);
+                setCurrentItem.invoke(viewPager2, pageIndex, false);
             }
         } catch (Throwable t) {
             MainHook.log("Failed to switch to user tab: " + t);
-        }
-    }
-
-    /**
-     * Hook MainActivity.changeTabIndex：把宿主原始 Tab 索引映射为过滤后的页面索引。
-     * 例如仅隐藏「福利/赚钱」时 [HOME, TASK, ORDER, VIP, USER] -> [HOME, ORDER, VIP, USER]，
-     * 索引 4（我的）应映射为 3，避免打开 SVIP 页。
-     */
-    private static void hookChangeTabIndex(XposedInterface xposed, ClassLoader cl) {
-        try {
-            Class<?> mainActivityClass = Class.forName("com.realtech.xiaocan.MainActivity", false, cl);
-            for (Method m : mainActivityClass.getDeclaredMethods()) {
-                if ("changeTabIndex".equals(m.getName())) {
-                    xposed.hook(m).intercept(chain -> {
-                        int index = (int) chain.getArg(0);
-                        int[] map = oldToNew;
-                        if (map != null && index >= 0 && index < map.length) {
-                            int mapped = map[index];
-                            if (mapped >= 0) {
-                                if (mapped != index) {
-                                    MainHook.log("Mapped changeTabIndex from " + index + " to " + mapped);
-                                }
-                                return chain.proceed(new Object[]{ mapped });
-                            }
-                            MainHook.log("Ignored changeTabIndex for removed tab: " + index);
-                            return null;
-                        }
-                        return chain.proceed();
-                    });
-                    MainHook.log("Hooked MainActivity.changeTabIndex");
-                    break;
-                }
-            }
-        } catch (Throwable t) {
-            MainHook.log("Failed to hook MainActivity.changeTabIndex: " + t);
         }
     }
 }
