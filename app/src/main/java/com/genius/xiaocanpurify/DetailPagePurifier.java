@@ -51,9 +51,27 @@ final class DetailPagePurifier {
 
     private static void cleanBinding(Object binding) {
         if (binding == null) return;
-        // ToBid ad slot is pure advertising and stays blocked regardless of toggles.
-        try { collapse(binding.getClass().getField("flTobidContainer").get(binding)); }
-        catch (ReflectiveOperationException ignored) {}
+        // ToBid 广告容器通常是纯广告，应当屏蔽；但活动详情底部「进店看餐品/进店逛逛」
+        // 按钮有时就嵌在这个容器里，整块 GONE 会把按钮一起干掉（按钮由 DETAIL_ENTER_SHOP
+        // 开关单独控制）。因此：只有该容器【不含】进店按钮时才整块折叠；
+        // 含进店按钮时则保留容器（ToBid 广告加载已被 loadPromotionDetailBotAdA 拦截）。
+        try {
+            Object tobid = binding.getClass().getField("flTobidContainer").get(binding);
+            if (tobid instanceof View) {
+                boolean hostsEnterShop = false;
+                if (tobid instanceof ViewGroup) {
+                    StringBuilder sb = new StringBuilder();
+                    collectText((ViewGroup) tobid, sb);
+                    String t = sb.toString();
+                    hostsEnterShop = t.contains("进店看餐品") || t.contains("进店逛逛");
+                }
+                if (!hostsEnterShop) {
+                    collapse(tobid);
+                } else {
+                    MainHook.log("flTobidContainer hosts enter-shop button: keep visible");
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {}
         if (PurifyPrefs.hide(PurifyPrefs.DETAIL_SHARE)) {
             try { collapse(binding.getClass().getField("ivShare").get(binding)); }
             catch (ReflectiveOperationException ignored) {}
