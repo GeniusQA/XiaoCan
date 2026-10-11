@@ -259,13 +259,25 @@ public final class UserPagePurifier {
         }
         if (root == null) return;
         for (String[] item : MENU_ITEMS) {
-            if (!PurifyPrefs.hide(item[0])) continue;
             View target = findItemView(root, normalize(item[1]));
-            if (target != null) {
+            if (target == null) continue;
+            if (PurifyPrefs.hide(item[0])) {
                 target.setVisibility(View.GONE);
                 collapseLayoutParams(target);
                 MainHook.log("Hidden user menu item: " + item[1]);
+            } else if (target.getVisibility() == View.GONE) {
+                // 开关已关闭但视图仍是历史隐藏态（宿主复用视图不会自动恢复）
+                target.setVisibility(View.VISIBLE);
+                restoreLayoutParams(target);
+                MainHook.log("Restored user menu item: " + item[1]);
             }
+        }
+        // 开关从「全隐藏」退回部分隐藏时，恢复之前被 collapseMenuIfEmpty 收起的整行；
+        // hasVisibleChild 校验避免覆盖宿主自身的隐藏意图
+        if (root instanceof ViewGroup && root.getVisibility() == View.GONE
+                && hasVisibleChild((ViewGroup) root)) {
+            root.setVisibility(View.VISIBLE);
+            MainHook.log("Restored layoutMenu after toggles off");
         }
     }
 
@@ -324,17 +336,24 @@ public final class UserPagePurifier {
         View root = getBindingRoot(binding);
         if (root == null) return;
         for (String[] item : ASSET_ITEMS) {
-            if (!PurifyPrefs.hide(item[0])) continue;
             View label = findLabelView(root, item[1]);
             if (label == null) continue;
             // 向上爬到「子树不含其它入口文案」的最大安全容器：防止整行容器
             // 可点击时把元宝/卡券/红包同行其它入口一起隐藏
             View target = enclosingExclusiveContainer(label, item[1]);
-            if (target != null && target.getVisibility() != View.GONE) {
-                target.setVisibility(View.GONE);
-                // 清掉行内等分权重，让同行剩余入口重新铺满，UI 不留空洞
-                collapseLayoutParams(target);
-                MainHook.log("Hidden user asset item: " + item[1]);
+            if (target == null) continue;
+            if (PurifyPrefs.hide(item[0])) {
+                if (target.getVisibility() != View.GONE) {
+                    target.setVisibility(View.GONE);
+                    // 清掉行内等分权重，让同行剩余入口重新铺满，UI 不留空洞
+                    collapseLayoutParams(target);
+                    MainHook.log("Hidden user asset item: " + item[1]);
+                }
+            } else if (target.getVisibility() == View.GONE) {
+                // 开关已关闭但视图仍是历史隐藏态，恢复显示并还原权重
+                target.setVisibility(View.VISIBLE);
+                restoreLayoutParams(target);
+                MainHook.log("Restored user asset item: " + item[1]);
             }
         }
     }
@@ -559,13 +578,31 @@ public final class UserPagePurifier {
         return text == null ? "" : text.replace(" ", "").replace("\u00a0", "");
     }
 
-    /** 行内等分布局：隐藏子项后清掉权重，避免留下空白占位。 */
+    /** 行内等分布局：隐藏子项后清掉权重，避免留下空白占位；原权重缓存供恢复用。 */
+    private static final java.util.WeakHashMap<View, Float> SAVED_WEIGHTS = new java.util.WeakHashMap<>();
+
     private static void collapseLayoutParams(View view) {
         try {
             android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
             if (lp instanceof android.widget.LinearLayout.LayoutParams) {
-                ((android.widget.LinearLayout.LayoutParams) lp).weight = 0f;
+                android.widget.LinearLayout.LayoutParams llp = (android.widget.LinearLayout.LayoutParams) lp;
+                if (!SAVED_WEIGHTS.containsKey(view)) SAVED_WEIGHTS.put(view, llp.weight);
+                llp.weight = 0f;
                 view.setLayoutParams(lp);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 恢复开关关闭前缓存的原有权重，让行内等分布局还原。 */
+    private static void restoreLayoutParams(View view) {
+        try {
+            android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                Float weight = SAVED_WEIGHTS.get(view);
+                if (weight != null) {
+                    ((android.widget.LinearLayout.LayoutParams) lp).weight = weight;
+                    view.setLayoutParams(lp);
+                }
             }
         } catch (Throwable ignored) {}
     }
