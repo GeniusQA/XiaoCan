@@ -37,9 +37,48 @@ public final class BottomBarPurifier {
         hookApplyBottomTabTheme(xposed, classLoader);
         hookOnItemSelectedListener(xposed, classLoader);
         hookSecondTabPlacement(xposed, classLoader);
+        hookOnPageSelectedGuard(xposed, classLoader);
         MainHook.log("BottomBar toggles (live): vip=" + PurifyPrefs.hide(PurifyPrefs.TAB_VIP)
                 + " benefit=" + PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT)
                 + " placement=" + PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT));
+    }
+
+    /**
+     * 保护宿主的 OnPageChangeCallback.onPageSelected：
+     * 导航项被移除后，宿主回调可能用「可见导航数」的列表按页面下标取值，
+     * 切到靠后的页面（如「我的」）时抛 IndexOutOfBoundsException，
+     * 异常会中断 setCurrentItem 的滚动导致页面切不动。这里吞掉越界异常，
+     * 导航高亮由 hookOnItemSelectedListener 里的 updateTabState 自行纠正。
+     */
+    private static void hookOnPageSelectedGuard(XposedInterface xposed, ClassLoader cl) {
+        int guarded = 0;
+        for (int i = 0; i < 12; i++) {
+            Class<?> c;
+            try {
+                c = Class.forName("com.realtech.xiaocan.MainActivity$setUpPages$" + i, false, cl);
+            } catch (Throwable t) {
+                continue;
+            }
+            for (Method m : c.getDeclaredMethods()) {
+                Class<?>[] ps = m.getParameterTypes();
+                if ("onPageSelected".equals(m.getName()) && ps.length == 1 && ps[0] == int.class) {
+                    try {
+                        xposed.hook(m).intercept(chain -> {
+                            try {
+                                return chain.proceed();
+                            } catch (IndexOutOfBoundsException e) {
+                                MainHook.log("Suppressed onPageSelected OOB: " + e);
+                                return null;
+                            }
+                        });
+                        guarded++;
+                        MainHook.log("Guarded onPageSelected in " + c.getName());
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        }
+        MainHook.log("onPageSelected guard installed: " + guarded);
     }
 
     private static boolean hideVip() {
