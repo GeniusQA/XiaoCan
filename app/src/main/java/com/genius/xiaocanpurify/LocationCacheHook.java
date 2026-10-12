@@ -301,14 +301,23 @@ public final class LocationCacheHook {
      * 逆地理接口，网络层捕获到地址后调用此方法补齐展示。
      */
     public static void broadcastAddressToModule(String address) {
-        if (address == null || address.isEmpty()) return;
+        if (address == null || address.isEmpty()) {
+            MainHook.log("LocationCache: address push skipped (empty)");
+            return;
+        }
         try {
             // 用内存坐标：prefs 是异步写入，逆地理响应返回时可能还没落盘
             double[] ll = lastLatLng;
             if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) ll = cachedLatLng();
-            if (ll[0] == 0.0 && ll[1] == 0.0) return;
+            if (ll[0] == 0.0 && ll[1] == 0.0) {
+                MainHook.log("LocationCache: address push skipped (no coords)");
+                return;
+            }
             android.content.Context ctx = currentApplication();
-            if (ctx == null) return;
+            if (ctx == null) {
+                MainHook.log("LocationCache: address push skipped (no ctx)");
+                return;
+            }
             long time = lastLocationTime > 0 ? lastLocationTime : cachedTime();
             if (time <= 0) time = System.currentTimeMillis();
             android.content.Intent i = new android.content.Intent(
@@ -320,7 +329,8 @@ public final class LocationCacheHook {
             i.putExtra("address", address);
             ctx.sendBroadcast(i);
             MainHook.log("LocationCache: address pushed to module: " + address);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: address push failed: " + t);
         }
     }
 

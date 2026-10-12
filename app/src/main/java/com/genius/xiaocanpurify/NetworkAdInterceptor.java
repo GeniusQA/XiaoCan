@@ -176,6 +176,7 @@ public final class NetworkAdInterceptor {
                 .compile("\"formatted_addresses\"\\s*:\\s*\\{[^{}]*?\"recommend\"\\s*:\\s*\"([^\"]{4,80})\"")
                 .matcher(body);
         if (m.find()) {
+            MainHook.log("ADDR[extract] recommend=" + m.group(1));
             return m.group(1);
         }
         // 2) 紧邻 standard_address 之前的字段值——后端扁平结构里 App「当前地址」
