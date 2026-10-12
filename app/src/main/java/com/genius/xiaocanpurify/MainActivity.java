@@ -369,6 +369,7 @@ public class MainActivity extends Activity {
             long latBits = xp.getLong("lat", 0L);
             long lngBits = xp.getLong("lng", 0L);
             long time = xp.getLong("time", 0L);
+            android.util.Log.w("LocCache", "XSharedPrefs lat=" + latBits + " lng=" + lngBits);
             if (latBits != 0L || lngBits != 0L) {
                 String snap = xp.getString("snapshot", "");
                 StringBuilder sb = new StringBuilder();
@@ -378,7 +379,8 @@ public class MainActivity extends Activity {
                 sb.append("<string name=\"snapshot\">").append(snap == null ? "" : snap).append("</string>");
                 return sb.toString();
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            android.util.Log.w("LocCache", "XSharedPrefs error: " + t);
         }
         try {
             Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + TARGET_PREFS_XML});
@@ -388,10 +390,13 @@ public class MainActivity extends Activity {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
+                android.util.Log.w("LocCache", "su read ok len=" + sb.length());
                 return sb.toString();
             }
             p.destroy();
-        } catch (Throwable ignored) {
+            android.util.Log.w("LocCache", "su timeout");
+        } catch (Throwable t) {
+            android.util.Log.w("LocCache", "su error: " + t);
         }
         return null;
     }
