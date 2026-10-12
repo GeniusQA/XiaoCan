@@ -626,9 +626,7 @@ public final class UserPagePurifier {
         embeddedRowView = row;
         MainHook.log("EmbedEntry: embedded ok, entry=" + entry.getWidth() + "x" + entry.getHeight()
                 + " slot=" + slot.getClass().getSimpleName()
-                + " slotLp=" + slot.getLayoutParams().height
-                + " card=" + (card == null ? "null" : card.getClass().getSimpleName()
-                        + "/" + card.getLayoutParams().height));
+                + " slotLp=" + slot.getLayoutParams().height);
         return true;
     }
 
