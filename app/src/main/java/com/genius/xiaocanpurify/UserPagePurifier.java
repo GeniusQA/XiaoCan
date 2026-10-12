@@ -457,11 +457,17 @@ public final class UserPagePurifier {
         }
         if (entry == null) return false;
         if (embeddedSnapshotView != null && embeddedEntryView == entry) {
-            // 宿主重渲染可能复位活动行可见性：重新收起，避免与快照重复展示
+            // 宿主重渲染会不断复位活动行/原入口的可见性：全部重新压回隐藏态
+            boolean reset = false;
             if (embeddedRowView != null && embeddedRowView.getVisibility() != View.GONE) {
                 embeddedRowView.setVisibility(View.GONE);
-                MainHook.log("EmbedEntry: re-collapsed menu row after host re-render");
+                reset = true;
             }
+            if (embeddedEntryView != null && embeddedEntryView.getVisibility() != View.GONE) {
+                embeddedEntryView.setVisibility(View.GONE);
+                reset = true;
+            }
+            if (reset) MainHook.log("EmbedEntry: re-collapsed row & entry after host re-render");
             return true;
         }
         // 入口实例变化（宿主重渲染）：清旧快照后重嵌
@@ -608,13 +614,12 @@ public final class UserPagePurifier {
             }
         }
 
-        // 行容器/卡片若高度装不下入口时改为 wrap（记录原值供还原）
-        ensureWrapHeight(slot, entry.getHeight() + dp(slot, 8), true);
-        View card = enclosingBeanCard(slot);
-        if (card != null) {
-            ensureWrapHeight(card, entry.getHeight() + dp(slot, 8), false);
-        }
+        // 强制行容器高度容纳入口（原值记录供还原）；WRAP 高度下 ConstraintLayout
+        // 对无 bottom 约束的子项不参与父容器测高，必须显式定高
+        forceHeight(slot, entry.getHeight() + dp(slot, 12));
 
+        // 原入口一并隐藏：宿主不再复位行可见性（与全隐藏收起的稳定路径一致）
+        entry.setVisibility(View.GONE);
         row.setVisibility(View.GONE);
         embeddedSnapshotView = snap;
         embeddedEntryView = entry;
@@ -627,24 +632,16 @@ public final class UserPagePurifier {
         return true;
     }
 
-    /**
-     * 视图高度装不下 needed 时改为 WRAP_CONTENT，原高度记录供还原。
-     * allowMatch 为 true 时 MATCH_PARENT 也转换（行容器需要自适应内容才能长高）。
-     */
-    private static void ensureWrapHeight(View v, int needed, boolean allowMatch) {
+    /** 强制视图固定高度（原值记录供还原）。 */
+    private static void forceHeight(View v, int h) {
         try {
             android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
-            if (lp == null) return;
-            boolean fixedTooSmall = lp.height > 0 && lp.height < needed;
-            boolean match = allowMatch
-                    && lp.height == android.view.ViewGroup.LayoutParams.MATCH_PARENT;
-            if (fixedTooSmall || match) {
-                if (!SAVED_CARD_HEIGHTS.containsKey(v)) {
-                    SAVED_CARD_HEIGHTS.put(v, lp.height);
-                }
-                lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-                v.setLayoutParams(lp);
+            if (lp == null || lp.height == h) return;
+            if (!SAVED_CARD_HEIGHTS.containsKey(v)) {
+                SAVED_CARD_HEIGHTS.put(v, lp.height);
             }
+            lp.height = h;
+            v.setLayoutParams(lp);
         } catch (Throwable ignored) {}
     }
 
@@ -691,6 +688,10 @@ public final class UserPagePurifier {
             }
         } catch (Throwable ignored) {}
         embeddedSnapshotView = null;
+        if (embeddedEntryView != null) {
+            // 恢复原入口显示（嵌入期间被隐藏）
+            embeddedEntryView.setVisibility(View.VISIBLE);
+        }
         embeddedEntryView = null;
         embeddedSlotView = null;
         embeddedLeftColView = null;
