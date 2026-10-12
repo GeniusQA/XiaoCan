@@ -283,9 +283,11 @@ public final class LocationCacheHook {
             cv.put("lng", ll[1]);
             cv.put("time", cachedTime());
             cv.put("address", address == null ? "" : address);
-            ctx.getContentResolver().insert(
-                    android.net.Uri.parse("content://" + "com.genius.xiaocanpurify.cache" + "/loc"), cv);
-        } catch (Throwable ignored) {
+            android.net.Uri res = ctx.getContentResolver().insert(
+                    android.net.Uri.parse("content://com.genius.xiaocanpurify.cache/loc"), cv);
+            MainHook.log("LocationCache: mirrored to module provider, uri=" + res);
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: mirror failed: " + t);
         }
     }
 
