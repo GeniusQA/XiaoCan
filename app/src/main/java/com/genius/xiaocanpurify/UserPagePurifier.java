@@ -616,7 +616,19 @@ public final class UserPagePurifier {
 
         // 强制行容器高度容纳入口（原值记录供还原）；WRAP 高度下 ConstraintLayout
         // 对无 bottom 约束的子项不参与父容器测高，必须显式定高
-        forceHeight(slot, entry.getHeight() + dp(slot, 12));
+        int origSlotH = slot.getHeight();
+        int forcedH = entry.getHeight() + dp(slot, 12);
+        forceHeight(slot, forcedH);
+        // 固定高度的祖先容器逐级同步增高，避免卡片内兄弟内容被压缩重叠
+        int delta = Math.max(0, forcedH - origSlotH);
+        ViewGroup anc = slot.getParent() instanceof ViewGroup ? (ViewGroup) slot.getParent() : null;
+        for (int i = 0; i < 3 && anc != null && delta > 0; i++) {
+            ViewGroup.LayoutParams alp = anc.getLayoutParams();
+            if (alp != null && alp.height > 0) {
+                forceHeight(anc, alp.height + delta);
+            }
+            anc = anc.getParent() instanceof ViewGroup ? (ViewGroup) anc.getParent() : null;
+        }
 
         // 原入口一并隐藏：宿主不再复位行可见性（与全隐藏收起的稳定路径一致）
         entry.setVisibility(View.GONE);
