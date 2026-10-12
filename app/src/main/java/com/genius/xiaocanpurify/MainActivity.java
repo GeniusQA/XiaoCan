@@ -228,6 +228,7 @@ public class MainActivity extends Activity {
                         public void run() {
                             if (!isFinishing()) {
                                 refreshSwitches();
+                                refreshLocationInfo();
                                 updateSyncStatus();
                             }
                         }
@@ -277,7 +278,81 @@ public class MainActivity extends Activity {
                 }
             }
             parent.addView(card);
+            if ("定位".equals(groupName)) {
+                // 定位分组下追加缓存位置信息卡（POI 地址 + 经纬度 + 缓存时间）
+                parent.addView(createLocationInfoCard());
+            }
         }
+    }
+
+    private TextView locationInfoText;
+
+    private LinearLayout createLocationInfoCard() {
+        LinearLayout card = createCard();
+        TextView title = new TextView(this);
+        title.setText("缓存位置信息");
+        title.setTextSize(14);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(Color.parseColor("#222222"));
+        card.addView(title);
+
+        locationInfoText = new TextView(this);
+        locationInfoText.setTextSize(11);
+        locationInfoText.setTextColor(Color.parseColor("#666666"));
+        locationInfoText.setPadding(0, dp2px(4), 0, 0);
+        card.addView(locationInfoText);
+        refreshLocationInfo();
+        return card;
+    }
+
+    /** 从远程偏好读取 hook 侧镜像的缓存位置（lat \u0001 lng \u0001 time [\u0001 address]）并展示。 */
+    private void refreshLocationInfo() {
+        TextView view = locationInfoText;
+        if (view == null) return;
+        SharedPreferences rp = remotePrefs;
+        if (rp == null) {
+            view.setText("缓存位置信息不可用：LSPosed 服务未连接。");
+            return;
+        }
+        String raw;
+        try {
+            raw = rp.getString("loc_cache_info", null);
+        } catch (Throwable t) {
+            raw = null;
+        }
+        if (raw == null || raw.isEmpty()) {
+            view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
+            return;
+        }
+        try {
+            String[] parts = raw.split("\u0001");
+            double lat = Double.parseDouble(parts[0]);
+            double lng = Double.parseDouble(parts[1]);
+            long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
+            String address = parts.length > 3 ? parts[3] : "";
+            StringBuilder sb = new StringBuilder();
+            sb.append("经纬度：").append(String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
+            if (time > 0) {
+                sb.append("\n缓存时间：").append(
+                        new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
+                                .format(new java.util.Date(time)));
+            }
+            sb.append("\nPOI 地址：");
+            if (address == null || address.isEmpty()) {
+                sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
+            } else {
+                sb.append(address);
+            }
+            view.setText(sb.toString());
+        } catch (Throwable t) {
+            view.setText("缓存位置信息解析失败：" + t.getClass().getSimpleName());
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshLocationInfo();
     }
 
     private View createSwitchRow(final String key, String itemTitle, String itemDesc) {

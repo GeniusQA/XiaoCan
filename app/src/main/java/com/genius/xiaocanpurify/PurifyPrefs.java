@@ -128,6 +128,18 @@ public final class PurifyPrefs {
     }
 
     /**
+     * Hook 侧向远程偏好写入镜像数据（如定位缓存快照），供模块设置页展示。
+     * 写入失败静默忽略——镜像数据仅供 UI 展示，不影响净化功能。
+     */
+    public static void putRemoteString(String key, String value) {
+        SharedPreferences prefs = remote;
+        if (prefs == null || value == null) return;
+        try {
+            prefs.edit().putString(key, value).apply();
+        } catch (Throwable ignored) {}
+    }
+
+    /**
      * Opt-in switch (default OFF): entry stays visible unless the user
      * explicitly enables hiding in the module UI (e.g. detail enter-shop button).
      */

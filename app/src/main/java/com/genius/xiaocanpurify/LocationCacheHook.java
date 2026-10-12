@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.location.Location;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -54,6 +55,7 @@ public final class LocationCacheHook {
         }
         hookTencentLocationManager(xposed, cl);
         hookFrameworkCapture(xposed);
+        hookSearchAddressCapture(xposed, cl);
     }
 
     // ---------------------------------------------------------------- Tencent SDK layer
@@ -222,11 +224,16 @@ public final class LocationCacheHook {
             Map<String, String> strSnap = new LinkedHashMap<>();
             Map<String, Double> dblSnap = new LinkedHashMap<>();
             for (Method m : tencentLocation.getClass().getMethods()) {
-                if (!m.getDeclaringClass().getName().contains("TencentLocation")
-                        && !m.getDeclaringClass().getName().contains("android.location")) {
-                    continue;
-                }
+                // 不能限定 declaringClass 含 "TencentLocation"：SDK 内部实现类多为混淆短名，
+                // 会把 getAddress 等地址字段全部漏掉——离线回放时 App 拿不到地址文字，
+                // 只能退去打 Web 逆地理接口兜底，返回与 SDK 自带地址不同的 POI 标签。
+                // 因此对任意实现类的无参 getter 一律采集（跳过 Object 自身方法）。
+                if (m.getDeclaringClass() == Object.class) continue;
                 if (m.getParameterTypes().length != 0) continue;
+                if (m.getName().startsWith("wait")
+                        || m.getName().startsWith("notify")
+                        || m.getName().startsWith("hashCode")
+                        || m.getName().startsWith("getClass")) continue;
                 try {
                     Object v = m.invoke(tencentLocation);
                     if (v == null) continue;
@@ -254,8 +261,36 @@ public final class LocationCacheHook {
             e.apply();
             cacheValid = true;
             MainHook.log("LocationCache: cached location " + lat + "," + lng);
+            mirrorToRemote();
         } catch (Throwable t) {
             MainHook.log("LocationCache: cacheSnapshot failed: " + t);
+        }
+    }
+
+    /** 远程镜像 key：模块设置页据此展示缓存位置的地址与经纬度。 */
+    private static final String REMOTE_LOC_INFO = "loc_cache_info";
+
+    /**
+     * 把缓存位置镜像写入 libxposed 远程偏好（宿主私有 SharedPreferences 设置页读不到）。
+     * 格式：lat \u0001 lng \u0001 timeMillis [\u0001 address]；地址取回放时实际使用的
+     * 快照 getAddress，与离线展示的 POI 标签保持一致。
+     */
+    private static void mirrorToRemote() {
+        try {
+            SharedPreferences p = getPrefs();
+            if (p == null) return;
+            double[] ll = cachedLatLng();
+            if (ll[0] == 0.0 && ll[1] == 0.0) return;
+            String address = readStrSnapshot().get("getAddress");
+            StringBuilder sb = new StringBuilder()
+                    .append(ll[0]).append('\u0001')
+                    .append(ll[1]).append('\u0001')
+                    .append(cachedTime());
+            if (address != null && !address.isEmpty()) {
+                sb.append('\u0001').append(address);
+            }
+            PurifyPrefs.putRemoteString(REMOTE_LOC_INFO, sb.toString());
+        } catch (Throwable ignored) {
         }
     }
 
@@ -382,6 +417,175 @@ public final class LocationCacheHook {
                     if (rt == String.class) return "";
                     return null;
                 });
+    }
+
+    // ---------------------------------------------------------------- Search address capture
+
+    /**
+     * 「选择地址」页搜索选点捕获：用户在 LocationSearchActivity 搜索并点击
+     * 某个地址（搜索建议 / 历史搜索条目都会走 pickLocation），把该位置的
+     * 经纬度 + 地址文案写入定位缓存并镜像到远程偏好。
+     * 效果：不开 GPS 时回放的是用户搜索确认过的位置，而不是上次 GPS 定位点。
+     */
+    private static void hookSearchAddressCapture(XposedInterface xposed, ClassLoader cl) {
+        String[] classNames = {"com.realtech.location.search.LocationSearchActivity"};
+        for (String cn : classNames) {
+            try {
+                Class<?> cls = Class.forName(cn, false, cl);
+                int hooked = 0;
+                for (Method m : cls.getDeclaredMethods()) {
+                    if (!"pickLocation".equals(m.getName())) continue;
+                    final boolean isStatic = java.lang.reflect.Modifier.isStatic(m.getModifiers());
+                    try {
+                        xposed.hook(m).intercept(chain -> {
+                            try {
+                                SearchScan scan = new SearchScan();
+                                for (Object arg : chain.getArgs()) {
+                                    if (isStatic && arg instanceof android.content.Context) continue;
+                                    scan.scan(arg, 0);
+                                }
+                                scan.commitIfPlausible();
+                            } catch (Throwable ignored) {
+                            }
+                            return chain.proceed();
+                        });
+                        hooked++;
+                    } catch (Throwable ignored) {
+                    }
+                }
+                if (hooked > 0) {
+                    MainHook.log("LocationCache: hooked " + cn + ".pickLocation x" + hooked);
+                } else {
+                    MainHook.log("LocationCache: pickLocation not found in " + cn);
+                }
+            } catch (Throwable t) {
+                MainHook.log("LocationCache: search capture unavailable: " + cn);
+            }
+        }
+    }
+
+    /** pickLocation 参数扫描器：聚合一次调用里的数值/字符串，命中合理经纬度后写入缓存。 */
+    private static final class SearchScan {
+        private double latHint = Double.NaN;
+        private double lngHint = Double.NaN;
+        private double latRange = Double.NaN;
+        private double lngRange = Double.NaN;
+        private String addressHint;
+        private String titleHint;
+        private final StringBuilder plainStrings = new StringBuilder();
+
+        void scan(Object obj, int depth) {
+            if (obj == null || depth > 3) return;
+            if (obj instanceof Number) {
+                double v = ((Number) obj).doubleValue();
+                assignCoordinate(v, null);
+                return;
+            }
+            if (obj instanceof Character || obj instanceof Boolean) return;
+            if (obj instanceof CharSequence) {
+                collectString(null, obj.toString());
+                return;
+            }
+            Class<?> c = obj.getClass();
+            if (c.isPrimitive() || c.isArray() || c.getName().startsWith("android.")
+                    || c.getName().startsWith("java.")) return;
+            for (Class<?> k = c; k != null && k != Object.class; k = k.getSuperclass()) {
+                for (Field f : k.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                    try {
+                        f.setAccessible(true);
+                        Object v = f.get(obj);
+                        if (v == null) continue;
+                        String name = f.getName();
+                        if (v instanceof Number) {
+                            assignCoordinate(((Number) v).doubleValue(), name);
+                        } else if (v instanceof CharSequence) {
+                            collectString(name, v.toString());
+                        } else if (!(v instanceof Boolean) && !(v instanceof Character)) {
+                            scan(v, depth + 1);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+        }
+
+        private void assignCoordinate(double v, String name) {
+            if (Double.isNaN(v) || Double.isInfinite(v)) return;
+            String n = name == null ? "" : name.toLowerCase(java.util.Locale.US);
+            if (n.contains("lat") && (v > -90 && v < 90)) {
+                if (Double.isNaN(latHint) || Math.abs(v) > 1) latHint = v;
+            } else if ((n.contains("lng") || n.contains("lon")) && (v > -180 && v < 180)) {
+                if (Double.isNaN(lngHint) || Math.abs(v) > 1) lngHint = v;
+            } else if (v > 17 && v < 55 && Double.isNaN(latRange)) {
+                latRange = v; // 中国大陆纬度范围兜底
+            } else if (v > 73 && v < 137 && Double.isNaN(lngRange)) {
+                lngRange = v; // 中国大陆经度范围兜底
+            }
+        }
+
+        private void collectString(String name, String value) {
+            if (value == null || value.isEmpty()) return;
+            String n = name == null ? "" : name.toLowerCase(java.util.Locale.US);
+            if (n.contains("address")) {
+                if (addressHint == null || value.length() > addressHint.length()) addressHint = value;
+            } else if (n.contains("title") || n.contains("name")) {
+                if (titleHint == null || value.length() > titleHint.length()) titleHint = value;
+            } else if (value.length() >= 6 && value.length() <= 200
+                    && !value.matches("[0-9.\\-Ee]+")) {
+                if (plainStrings.length() < 4000) {
+                    if (plainStrings.length() > 0) plainStrings.append('\u0001');
+                    plainStrings.append(value);
+                }
+            }
+        }
+
+        /** 扫描结束后择优写入：命名命中 > 中国范围数值兜底；地址 > 标题 > 最长普通字符串。 */
+        void commitIfPlausible() {
+            double lat = !Double.isNaN(latHint) ? latHint : latRange;
+            double lng = !Double.isNaN(lngHint) ? lngHint : lngRange;
+            if (Double.isNaN(lat) || Double.isNaN(lng)) return;
+            String address = addressHint != null ? addressHint
+                    : (titleHint != null ? titleHint : null);
+            if (address == null) {
+                String best = null;
+                for (String s : plainStrings.toString().split("\u0001")) {
+                    if (best == null || s.length() > best.length()) best = s;
+                }
+                address = best;
+            }
+            cacheExternalLocation(lat, lng, address);
+        }
+    }
+
+    /**
+     * 把「搜索选点」得到的位置写入定位缓存（与 GPS 缓存同格式、互相同步镜像）。
+     * 写入的快照携带地址文案，离线回放时 App 直接展示同一 POI 标签。
+     */
+    public static void cacheExternalLocation(double lat, double lng, String address) {
+        if (Double.isNaN(lat) || Double.isInfinite(lat) || Double.isNaN(lng) || Double.isInfinite(lng)) return;
+        if (lat == 0.0 && lng == 0.0) return;
+        try {
+            Map<String, String> str = new HashMap<>();
+            if (address != null && !address.isEmpty()) str.put("getAddress", address);
+            Map<String, Double> dbl = new HashMap<>();
+            dbl.put("getLatitude", lat);
+            dbl.put("getLongitude", lng);
+            SharedPreferences p = getPrefs();
+            if (p == null) return;
+            p.edit()
+                    .putLong(KEY_TIME, System.currentTimeMillis())
+                    .putString(KEY_SNAPSHOT, joinMap(str))
+                    .putString(KEY_SNAPSHOT_DBL, joinMap2(dbl))
+                    .putLong(KEY_LAT, Double.doubleToRawLongBits(lat))
+                    .putLong(KEY_LNG, Double.doubleToRawLongBits(lng))
+                    .apply();
+            cacheValid = true;
+            MainHook.log("LocationCache: cached searched location " + lat + "," + lng
+                    + (address != null && !address.isEmpty() ? " addr=" + address : ""));
+            mirrorToRemote();
+        } catch (Throwable ignored) {
+        }
     }
 
     // ---------------------------------------------------------------- Framework passive capture
@@ -608,6 +812,7 @@ public final class LocationCacheHook {
                     .apply();
             cacheValid = true;
             MainHook.log("LocationCache: cached framework location " + lat + "," + lng);
+            mirrorToRemote();
         } catch (Throwable ignored) {
         }
     }
