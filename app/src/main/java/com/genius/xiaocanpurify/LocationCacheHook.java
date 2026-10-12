@@ -339,6 +339,26 @@ public final class LocationCacheHook {
         }
     }
 
+    /**
+     * 把网络层捕获的 POI 地址注入定位缓存快照（getAddress 字段）。
+     * App 自己的逆地理与本模块捕获的是同一次定位，GPS 关闭回放时
+     * 位置对象直接携带该地址，App 展示与模块缓存完全一致。
+     */
+    public static void injectAddressIntoSnapshot(String address) {
+        if (address == null || address.isEmpty()) return;
+        try {
+            SharedPreferences p = getPrefs();
+            if (p == null) return;
+            Map<String, String> snap = readStrSnapshot();
+            if (address.equals(snap.get("getAddress"))) return;
+            snap.put("getAddress", address);
+            p.edit().putString(KEY_SNAPSHOT, joinMap(snap)).apply();
+            MainHook.log("LocationCache: address injected into snapshot: " + address);
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: inject address failed: " + t);
+        }
+    }
+
     private static java.util.List<Class<?>> collectLocationInterfaces(Class<?> cls) {
         java.util.List<Class<?>> out = new java.util.ArrayList<>();
         collectInterfaces(cls, out);
