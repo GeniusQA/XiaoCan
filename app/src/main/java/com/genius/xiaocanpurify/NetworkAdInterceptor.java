@@ -160,11 +160,20 @@ public final class NetworkAdInterceptor {
 
     /** 响应载荷须含中文地址特征才算逆地理结果，再择优提取地址字段。 */
     private static String extractAddressText(String s) {
-        if (!CN_ADDR.matcher(s).find()) return null;
         // 网关 RPC 会把逆地理 JSON 作为字符串嵌入响应，且可能多层转义（\\\"address\\\"），
         // 把「任意数量反斜杠+引号」统一归一为裸引号后再匹配
         String body = s.replaceAll("\\\\+\"", "\"");
-        java.util.regex.Matcher m = JSON_ADDR_KEY.matcher(body);
+        // 1) formatted_addresses.recommend：App「当前地址」展示的就是这个推荐地址
+        //    （形如「成华区水碾河社区西北(双桥路南六街南)」，不含「市」字），
+        //    该字段只有逆地理响应才有，不会误抓门店列表
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"formatted_addresses\"\\s*:\\s*\\{[^{}]*?\"recommend\"\\s*:\\s*\"([^\"]{4,80})\"")
+                .matcher(body);
+        if (m.find()) {
+            return m.group(1);
+        }
+        // 2) 标准地址兜底（standard_address / address）
+        m = JSON_ADDR_KEY.matcher(body);
         while (m.find()) {
             String v = m.group(1);
             if (CN_ADDR.matcher(v).find()) return v;
