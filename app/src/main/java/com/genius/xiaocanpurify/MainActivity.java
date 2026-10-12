@@ -22,6 +22,9 @@ import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
 public class MainActivity extends Activity {
+    /** 被 hook 的目标 App 包名（小蚕）。 */
+    private static final String TARGET_PKG = "com.realtech.xiaocan";
+
     private static final Object[][] GROUPS = {
             {"底部导航栏", new String[][]{
                     {PurifyPrefs.TAB_VIP, "隐藏「会员」Tab", "移除底部会员（SVIP）标签，仅保留首页/订单/我"},
@@ -306,31 +309,27 @@ public class MainActivity extends Activity {
         return card;
     }
 
-    /** 从远程偏好读取 hook 侧镜像的缓存位置（lat \u0001 lng \u0001 time [\u0001 address]）并展示。 */
+    /**
+     * 读取 hook 侧写入目标 App 私有 SharedPreferences(purify_loc_cache) 的缓存位置并展示。
+     * 注意：不能依赖 RemotePreferences 镜像(loc_cache_info)——目标 App 进程反向写回
+     * 模块进程的 remote 偏好经常静默失败；而 XSharedPreferences 直接读目标 App 私有文件，
+     * 是 LSPosed 模块读目标偏好的标准可靠通道。
+     */
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
-        SharedPreferences rp = remotePrefs;
-        if (rp == null) {
-            view.setText("缓存位置信息不可用：LSPosed 服务未连接。");
-            return;
-        }
-        String raw;
         try {
-            raw = rp.getString("loc_cache_info", null);
-        } catch (Throwable t) {
-            raw = null;
-        }
-        if (raw == null || raw.isEmpty()) {
-            view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
-            return;
-        }
-        try {
-            String[] parts = raw.split("\u0001");
-            double lat = Double.parseDouble(parts[0]);
-            double lng = Double.parseDouble(parts[1]);
-            long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
-            String address = parts.length > 3 ? parts[3] : "";
+            io.github.libxposed.api.XSharedPreferences xp =
+                    new io.github.libxposed.api.XSharedPreferences(TARGET_PKG, "purify_loc_cache");
+            xp.reload();
+            double lat = Double.longBitsToDouble(xp.getLong("lat", 0L));
+            double lng = Double.longBitsToDouble(xp.getLong("lng", 0L));
+            long time = xp.getLong("time", 0L);
+            String address = parseSnapshotAddress(xp.getString("snapshot", null));
+            if (lat == 0.0 && lng == 0.0) {
+                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
+                return;
+            }
             StringBuilder sb = new StringBuilder();
             sb.append("经纬度：").append(String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
             if (time > 0) {
@@ -345,9 +344,22 @@ public class MainActivity extends Activity {
                 sb.append(address);
             }
             view.setText(sb.toString());
+            return;
         } catch (Throwable t) {
-            view.setText("缓存位置信息解析失败：" + t.getClass().getSimpleName());
+            view.setText("缓存位置信息读取失败：" + t.getClass().getSimpleName());
         }
+    }
+
+    /** 从 snapshot 字符串（k\u0002v 以 \u0001 连接）解析 getAddress 字段。 */
+    private static String parseSnapshotAddress(String snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) return "";
+        for (String kv : snapshot.split("\u0001")) {
+            int i = kv.indexOf('\u0002');
+            if (i > 0 && "getAddress".equals(kv.substring(0, i))) {
+                return kv.substring(i + 1);
+            }
+        }
+        return "";
     }
 
     @Override
