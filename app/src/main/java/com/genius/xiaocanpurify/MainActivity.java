@@ -323,20 +323,16 @@ public class MainActivity extends Activity {
         TextView view = locationInfoText;
         if (view == null) return;
         new Thread(() -> {
-            final String text;
+            String text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
             try {
                 String xml = readFileViaSu(TARGET_PREFS_XML);
-                if (xml == null || xml.isEmpty()) {
-                    text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
-                } else {
+                if (xml != null && !xml.isEmpty()) {
                     double lat = Double.longBitsToDouble(parseLongAttr(xml, "lat"));
                     double lng = Double.longBitsToDouble(parseLongAttr(xml, "lng"));
                     long time = parseLongAttr(xml, "time");
                     String snapshot = matchAttr(xml, "name=\"snapshot\"", "string");
                     String address = parseSnapshotAddress(snapshot);
-                    if (lat == 0.0 && lng == 0.0) {
-                        text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
-                    } else {
+                    if (!(lat == 0.0 && lng == 0.0)) {
                         StringBuilder sb = new StringBuilder();
                         sb.append("经纬度：").append(
                                 String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
