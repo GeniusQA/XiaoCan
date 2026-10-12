@@ -728,6 +728,9 @@ public final class LocationCacheHook {
                                                     if (!isGpsActuallyEnabled()) {
                                                         // GPS 关闭：屏蔽降级网络定位，改为回放缓存；
                                                         // 无缓存则丢弃回调（宿主按定位失败处理）
+                                                        MainHook.log("LocationCache: framework fix blocked (gps-off judged), provider="
+                                                                + loc.getProvider() + " lat=" + loc.getLatitude()
+                                                                + " lng=" + loc.getLongitude());
                                                         if (handled.compareAndSet(false, true)
                                                                 && hasCache() && onLoc != null) {
                                                             try {
@@ -886,7 +889,13 @@ public final class LocationCacheHook {
             android.location.LocationManager manager = (android.location.LocationManager) lm;
             PROVIDER_CHECKING.set(Boolean.TRUE);
             try {
-                return manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER);
+                boolean gps = manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER);
+                boolean net = manager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER);
+                if (!gps) {
+                    MainHook.log("LocationCache: isGpsActuallyEnabled=false (gps=" + gps + " network=" + net
+                            + " thread=" + Thread.currentThread().getName() + ")");
+                }
+                return gps;
             } finally {
                 PROVIDER_CHECKING.remove();
             }
