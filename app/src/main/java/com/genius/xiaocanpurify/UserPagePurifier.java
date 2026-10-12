@@ -326,13 +326,9 @@ public final class UserPagePurifier {
             MainHook.log("CenterMenu diag: entry=" + entry.getClass().getSimpleName()
                     + " parent=" + (parent == null ? "null" : parent.getClass().getSimpleName())
                     + " siblings=" + (parent == null ? -1 : parent.getChildCount()));
-            if (parent instanceof android.widget.LinearLayout) {
-                int visibleSiblings = 0;
-                for (int i = 0; i < parent.getChildCount(); i++) {
-                    View c = parent.getChildAt(i);
-                    if (c != null && c.getVisibility() == View.VISIBLE) visibleSiblings++;
-                }
-                if (visibleSiblings == 1) {
+            if (parent != null) {
+                if (parent instanceof android.widget.LinearLayout) {
+                    // 线性布局父容器：gravity 居中
                     try {
                         android.view.ViewGroup.LayoutParams lp = entry.getLayoutParams();
                         if (lp instanceof android.widget.LinearLayout.LayoutParams) {
@@ -349,26 +345,44 @@ public final class UserPagePurifier {
                             MainHook.log("Centered single menu entry (parent gravity)");
                         }
                     } catch (Throwable ignored) {}
+                } else {
+                    // RecyclerView 等容器：布局完成后按剩余空间平移居中（视觉居中，不改布局参数）
+                    final View fEntry = entry;
+                    final ViewGroup fParent = parent;
+                    fParent.post(() -> {
+                        try {
+                            int pw = fParent.getWidth();
+                            int iw = fEntry.getWidth();
+                            if (pw > 0 && iw > 0 && iw < pw) {
+                                fEntry.setTranslationX((pw - iw) / 2f);
+                                CENTERED_CHILDREN.put(fEntry, fParent);
+                                MainHook.log("Centered single menu entry (translationX="
+                                        + ((pw - iw) / 2f) + ")");
+                            }
+                        } catch (Throwable ignored) {}
+                    });
                 }
             }
         } else if (visibleEntries != 1 && !CENTERED_CHILDREN.isEmpty()) {
-            // 入口恢复多个：还原之前被居中的子项的等分布局与父容器默认对齐
+            // 入口恢复多个：还原之前被居中的子项（RecyclerView 路径复位平移，
+            // LinearLayout 路径恢复权重/宽度与默认对齐）
             for (java.util.Map.Entry<View, ViewGroup> e : CENTERED_CHILDREN.entrySet()) {
                 View child = e.getKey();
                 ViewGroup parent = e.getValue();
                 if (child == null || parent == null) continue;
-                restoreLayoutParams(child);
-                Integer w = SAVED_WIDTHS.get(child);
-                if (w != null) {
-                    android.view.ViewGroup.LayoutParams lp = child.getLayoutParams();
-                    if (lp instanceof android.widget.LinearLayout.LayoutParams) {
-                        ((android.widget.LinearLayout.LayoutParams) lp).width = w;
-                        child.setLayoutParams(lp);
-                    }
-                }
                 if (parent instanceof android.widget.LinearLayout) {
+                    restoreLayoutParams(child);
+                    Integer w = SAVED_WIDTHS.get(child);
+                    if (w != null) {
+                        android.view.ViewGroup.LayoutParams lp = child.getLayoutParams();
+                        if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                            ((android.widget.LinearLayout.LayoutParams) lp).width = w;
+                            child.setLayoutParams(lp);
+                        }
+                    }
                     ((android.widget.LinearLayout) parent).setGravity(android.view.Gravity.START);
                 }
+                child.setTranslationX(0f);
                 MainHook.log("Restored menu entry layout after entries back");
             }
             CENTERED_CHILDREN.clear();
