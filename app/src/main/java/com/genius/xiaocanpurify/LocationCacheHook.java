@@ -282,8 +282,11 @@ public final class LocationCacheHook {
             }
             android.content.Intent i = new android.content.Intent(
                     "com.genius.xiaocanpurify.ACTION_LOC_CACHE");
-            // 显式广播（setPackage）可绕过 Android 11+ 包可见性限制
+            // 显式广播（setPackage）可绕过 Android 11+ 包可见性限制；
+            // FLAG_INCLUDE_STOPPED_PACKAGES 使模块 App 处于 stopped 状态（刚安装/更新）也能收到，
+            // 无需用户先打开一次设置页
             i.setPackage("com.genius.xiaocanpurify");
+            i.addFlags(android.content.Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             i.putExtra("lat", lat);
             i.putExtra("lng", lng);
             i.putExtra("time", System.currentTimeMillis());
@@ -323,6 +326,8 @@ public final class LocationCacheHook {
             android.content.Intent i = new android.content.Intent(
                     "com.genius.xiaocanpurify.ACTION_LOC_CACHE");
             i.setPackage("com.genius.xiaocanpurify");
+            // 模块 App 处于 stopped 状态（刚安装/更新未打开过）也能收到，用户无感
+            i.addFlags(android.content.Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
             i.putExtra("lat", ll[0]);
             i.putExtra("lng", ll[1]);
             i.putExtra("time", time);
