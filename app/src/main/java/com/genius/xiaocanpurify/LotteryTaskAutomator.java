@@ -36,7 +36,7 @@ public final class LotteryTaskAutomator {
     private LotteryTaskAutomator() {}
 
     /** 同一任务的重复触发去重窗口（performClick 与 onTouchEvent 会连击两次）。 */
-    private static int lastTriggerType = TYPE_NONE;
+    private static int lastTriggerType = 0; // TYPE_NONE == 0
     private static long lastTriggerMs = 0L;
 
     public static void install(XposedInterface xposed, ClassLoader classLoader) {

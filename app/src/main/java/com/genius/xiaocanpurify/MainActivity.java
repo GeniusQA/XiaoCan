@@ -15,6 +15,8 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import de.robv.android.xposed.XSharedPreferences;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -320,8 +322,8 @@ public class MainActivity extends Activity {
         TextView view = locationInfoText;
         if (view == null) return;
         try {
-            io.github.libxposed.api.XSharedPreferences xp =
-                    new io.github.libxposed.api.XSharedPreferences(TARGET_PKG, "purify_loc_cache");
+            de.robv.android.xposed.XSharedPreferences xp =
+                    new de.robv.android.xposed.XSharedPreferences(TARGET_PKG, "purify_loc_cache");
             xp.reload();
             double lat = Double.longBitsToDouble(xp.getLong("lat", 0L));
             double lng = Double.longBitsToDouble(xp.getLong("lng", 0L));
