@@ -303,6 +303,9 @@ public final class UserPagePurifier {
 
     /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
     private static final java.util.WeakHashMap<View, ViewGroup> CENTERED_CHILDREN = new java.util.WeakHashMap<>();
+    /** 被居中子项挂的布局监听，还原时移除。 */
+    private static final java.util.WeakHashMap<View, View.OnLayoutChangeListener> CENTERED_LISTENERS =
+            new java.util.WeakHashMap<>();
     private static final java.util.WeakHashMap<View, Integer> SAVED_WIDTHS = new java.util.WeakHashMap<>();
 
     /**
@@ -346,21 +349,37 @@ public final class UserPagePurifier {
                         }
                     } catch (Throwable ignored) {}
                 } else {
-                    // RecyclerView 等容器：布局完成后按剩余空间平移居中（视觉居中，不改布局参数）
+                    // RecyclerView 等容器：GONE 兄弟仍占位，可见项的布局位置（getLeft）
+                    // 不为 0——必须以实际位置为基准平移。挂布局监听保持每次布局后都居中
                     final View fEntry = entry;
                     final ViewGroup fParent = parent;
+                    View.OnLayoutChangeListener l = (v, l2, t2, r2, b2, ol2, ot2, or2, ob2) -> {
+                        try {
+                            if (!CENTERED_CHILDREN.containsKey(v)) return;
+                            ViewGroup p = v.getParent() instanceof ViewGroup
+                                    ? (ViewGroup) v.getParent() : null;
+                            if (p == null) return;
+                            int pw = p.getWidth();
+                            int iw = v.getWidth();
+                            if (pw > 0 && iw > 0) {
+                                float tx = (pw - iw) / 2f - v.getLeft();
+                                if (Math.abs(v.getTranslationX() - tx) > 0.5f) {
+                                    v.setTranslationX(tx);
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                    };
+                    fEntry.addOnLayoutChangeListener(l);
+                    CENTERED_LISTENERS.put(fEntry, l);
+                    CENTERED_CHILDREN.put(fEntry, fParent);
                     fParent.post(() -> {
                         try {
-                            int pw = fParent.getWidth();
-                            int iw = fEntry.getWidth();
-                            if (pw > 0 && iw > 0 && iw < pw) {
-                                fEntry.setTranslationX((pw - iw) / 2f);
-                                CENTERED_CHILDREN.put(fEntry, fParent);
-                                MainHook.log("Centered single menu entry (translationX="
-                                        + ((pw - iw) / 2f) + ")");
+                            if (CENTERED_CHILDREN.containsKey(fEntry)) {
+                                l.onLayoutChange(fEntry, 0, 0, 0, 0, 0, 0, 0, 0);
                             }
                         } catch (Throwable ignored) {}
                     });
+                    MainHook.log("Centered single menu entry (recycler translate)");
                 }
             }
         } else if (visibleEntries != 1 && !CENTERED_CHILDREN.isEmpty()) {
@@ -383,6 +402,11 @@ public final class UserPagePurifier {
                     ((android.widget.LinearLayout) parent).setGravity(android.view.Gravity.START);
                 }
                 child.setTranslationX(0f);
+                View.OnLayoutChangeListener l = CENTERED_LISTENERS.get(child);
+                if (l != null) {
+                    child.removeOnLayoutChangeListener(l);
+                    CENTERED_LISTENERS.remove(child);
+                }
                 MainHook.log("Restored menu entry layout after entries back");
             }
             CENTERED_CHILDREN.clear();
