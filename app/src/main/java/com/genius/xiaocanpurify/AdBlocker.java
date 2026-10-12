@@ -384,15 +384,14 @@ public final class AdBlocker {
                     new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
         } catch (Throwable ignored) {
         }
-        View decor = null;
+        final View decor;
         try {
             decor = activity.getWindow().getDecorView();
         } catch (Throwable ignored) {
+            return;
         }
         hideNow(activity, decor);
-        if (decor != null) {
-            decor.postDelayed(() -> hideNow(activity, decor), 150);
-        }
+        decor.postDelayed(() -> hideNow(activity, decor), 150);
     }
 
     private static void hideNow(Activity activity, View decor) {
