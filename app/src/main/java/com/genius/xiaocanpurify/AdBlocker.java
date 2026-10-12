@@ -349,64 +349,39 @@ public final class AdBlocker {
     }
 
     /**
-     * 隐藏宿主启动页 WelComeActivity 的开屏内容：该页只是展示开屏广告后立刻跳转主页，
-     * 这里把窗口内容设为透明/隐藏，使其不渲染（应用照常进入主页）。
+     * 跳过宿主启动页 WelComeActivity：该页只是展示开屏广告、等待若干秒后跳转主页。
+     * 这里在 onCreate 后立即 finish 并直接启动 MainActivity（LAUNCH_SINGLE_TASK，无多实例风险），
+     * 既不展示广告也不会出现等待期的黑屏。
      */
     private static void hookSplashActivity(XposedInterface xposed, ClassLoader cl) {
         try {
             Class<?> splash = Class.forName("com.realtech.xiaocan.WelComeActivity", false, cl);
+            Class<?> main = Class.forName("com.realtech.xiaocan.MainActivity", false, cl);
             for (Method m : splash.getDeclaredMethods()) {
-                String n = m.getName();
-                if (("onCreate".equals(n) && m.getParameterTypes().length == 1)
-                        || ("onResume".equals(n) && m.getParameterTypes().length == 0)
-                        || ("onWindowFocusChanged".equals(n) && m.getParameterTypes().length == 1)) {
+                if ("onCreate".equals(m.getName()) && m.getParameterTypes().length == 1) {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
-                            hideSplashContent((Activity) chain.getThisObject());
-                        } catch (Throwable ignored) {
+                            Activity a = (Activity) chain.getThisObject();
+                            if (a != null && !a.isFinishing()) {
+                                android.content.Intent it = new android.content.Intent(a, main);
+                                // REORDER_TO_FRONT：若宿主自身稍后也启动主页，仅前置已有实例
+                                it.addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                                a.startActivity(it);
+                                a.finish();
+                                MainHook.log("WelComeActivity skipped, entering MainActivity");
+                            }
+                        } catch (Throwable t) {
+                            MainHook.log("Splash skip failed: " + t);
                         }
                         return result;
                     });
+                    MainHook.log("Hooked WelComeActivity to skip splash");
+                    break;
                 }
             }
-            MainHook.log("Hooked WelComeActivity splash hiding");
         } catch (Throwable t) {
             MainHook.log("Failed to hook WelComeActivity: " + t);
-        }
-    }
-
-    /** 把启动页窗口背景设为透明并隐藏内容视图（延迟再兜底一次，防广告异步填充）。 */
-    private static void hideSplashContent(Activity activity) {
-        if (activity == null || activity.isFinishing()) return;
-        try {
-            activity.getWindow().setBackgroundDrawable(
-                    new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
-        } catch (Throwable ignored) {
-        }
-        final View decor;
-        try {
-            decor = activity.getWindow().getDecorView();
-        } catch (Throwable ignored) {
-            return;
-        }
-        hideNow(activity, decor);
-        decor.postDelayed(() -> hideNow(activity, decor), 150);
-    }
-
-    private static void hideNow(Activity activity, View decor) {
-        if (activity == null || activity.isFinishing()) return;
-        try {
-            if (decor instanceof ViewGroup) {
-                ViewGroup g = (ViewGroup) decor;
-                for (int i = 0; i < g.getChildCount(); i++) {
-                    View child = g.getChildAt(i);
-                    if (child != null) child.setVisibility(View.GONE);
-                }
-            }
-            View content = activity.findViewById(android.R.id.content);
-            if (content != null) content.setVisibility(View.GONE);
-        } catch (Throwable ignored) {
         }
     }
 
