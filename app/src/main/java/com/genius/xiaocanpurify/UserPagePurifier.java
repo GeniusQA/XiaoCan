@@ -456,7 +456,14 @@ public final class UserPagePurifier {
             return false;
         }
         if (entry == null) return false;
-        if (embeddedSnapshotView != null && embeddedEntryView == entry) return true;
+        if (embeddedSnapshotView != null && embeddedEntryView == entry) {
+            // 宿主重渲染可能复位活动行可见性：重新收起，避免与快照重复展示
+            if (embeddedRowView != null && embeddedRowView.getVisibility() != View.GONE) {
+                embeddedRowView.setVisibility(View.GONE);
+                MainHook.log("EmbedEntry: re-collapsed menu row after host re-render");
+            }
+            return true;
+        }
         // 入口实例变化（宿主重渲染）：清旧快照后重嵌
         restoreEmbeddedEntry(row);
 
@@ -601,26 +608,37 @@ public final class UserPagePurifier {
             }
         }
 
-        // 行容器/卡片若为固定高度且装不下入口时改为 wrap（记录原值供还原）
-        ensureWrapHeight(slot, entry.getHeight() + dp(slot, 8));
+        // 行容器/卡片若高度装不下入口时改为 wrap（记录原值供还原）
+        ensureWrapHeight(slot, entry.getHeight() + dp(slot, 8), true);
         View card = enclosingBeanCard(slot);
         if (card != null) {
-            ensureWrapHeight(card, entry.getHeight() + dp(slot, 8));
+            ensureWrapHeight(card, entry.getHeight() + dp(slot, 8), false);
         }
 
         row.setVisibility(View.GONE);
         embeddedSnapshotView = snap;
         embeddedEntryView = entry;
         embeddedRowView = row;
-        MainHook.log("EmbedEntry: single menu entry embedded into withdraw card, row collapsed");
+        MainHook.log("EmbedEntry: embedded ok, entry=" + entry.getWidth() + "x" + entry.getHeight()
+                + " slot=" + slot.getClass().getSimpleName()
+                + " slotLp=" + slot.getLayoutParams().height
+                + " card=" + (card == null ? "null" : card.getClass().getSimpleName()
+                        + "/" + card.getLayoutParams().height));
         return true;
     }
 
-    /** 视图为固定高度且小于 needed 时改为 WRAP_CONTENT，原高度记录供还原。 */
-    private static void ensureWrapHeight(View v, int needed) {
+    /**
+     * 视图高度装不下 needed 时改为 WRAP_CONTENT，原高度记录供还原。
+     * allowMatch 为 true 时 MATCH_PARENT 也转换（行容器需要自适应内容才能长高）。
+     */
+    private static void ensureWrapHeight(View v, int needed, boolean allowMatch) {
         try {
             android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
-            if (lp != null && lp.height > 0 && lp.height < needed) {
+            if (lp == null) return;
+            boolean fixedTooSmall = lp.height > 0 && lp.height < needed;
+            boolean match = allowMatch
+                    && lp.height == android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+            if (fixedTooSmall || match) {
                 if (!SAVED_CARD_HEIGHTS.containsKey(v)) {
                     SAVED_CARD_HEIGHTS.put(v, lp.height);
                 }
