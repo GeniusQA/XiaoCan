@@ -163,22 +163,31 @@ public final class NetworkAdInterceptor {
         // 网关 RPC 会把逆地理 JSON 作为字符串嵌入响应，且可能多层转义（\\\"address\\\"），
         // 把「任意数量反斜杠+引号」统一归一为裸引号后再匹配
         String body = s.replaceAll("\\\\+\"", "\"");
-        // 1) formatted_addresses.recommend：App「当前地址」展示的就是这个推荐地址
-        //    （形如「成华区水碾河社区西北(双桥路南六街南)」，不含「市」字），
-        //    该字段只有逆地理响应才有，不会误抓门店列表
+        // 仅处理「用户定位逆地理」响应：含 standard_address 标志（门店列表没有该字段）
+        if (!body.contains("standard_address")) return null;
+        // 1) formatted_addresses.recommend（腾讯标准结构的推荐展示地址）
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"formatted_addresses\"\\s*:\\s*\\{[^{}]*?\"recommend\"\\s*:\\s*\"([^\"]{4,80})\"")
                 .matcher(body);
         if (m.find()) {
             return m.group(1);
         }
-        // 2) 标准地址兜底（standard_address / address）
-        m = JSON_ADDR_KEY.matcher(body);
-        while (m.find()) {
+        // 2) 紧邻 standard_address 之前的字段值——后端扁平结构里 App「当前地址」
+        //    展示的字段（键名不固定），值形如「成华区水碾河社区西北(双桥路南六街南)」
+        m = java.util.regex.Pattern
+                .compile("\"([^\"]{4,80})\"\\s*,\\s*\"standard_address\"")
+                .matcher(body);
+        if (m.find()) {
             String v = m.group(1);
-            if (CN_ADDR.matcher(v).find()) return v;
+            boolean cnLike = v.matches(".*[\\u4e00-\\u9fa5].*")
+                    && (v.contains("区") || v.contains("路") || v.contains("街") || v.contains("社区"));
+            if (cnLike) return v;
         }
-        m = MAP_ADDR_KEY.matcher(body);
+        // 3) recommend 字段兜底
+        m = java.util.regex.Pattern.compile("\"recommend\"\\s*:\\s*\"([^\"]{4,80})\"").matcher(body);
+        if (m.find()) return m.group(1);
+        // 4) standard_address / address 兜底
+        m = JSON_ADDR_KEY.matcher(body);
         while (m.find()) {
             String v = m.group(1);
             if (CN_ADDR.matcher(v).find()) return v;
@@ -354,6 +363,12 @@ public final class NetworkAdInterceptor {
                         MainHook.log("ADDR[probe] " + url + " => "
                                 + body.substring(Math.max(0, am.start() - 40),
                                         Math.min(body.length(), am.start() + 140)));
+                        // 结构诊断：逆地理响应里 standard_address 前的完整字段结构
+                        int sa = body.indexOf("standard_address");
+                        if (sa > 0) {
+                            MainHook.log("ADDR[ctx] " + body.substring(Math.max(0, sa - 500),
+                                    Math.min(body.length(), sa + 120)));
+                        }
                         String addr = extractAddressText(body);
                         if (addr != null) {
                             LocationCacheHook.broadcastAddressToModule(addr);
