@@ -22,6 +22,7 @@ public final class AdBlocker {
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         hookSplashAdFactory(xposed, classLoader);
         hookSplashAdUtils(xposed, classLoader);
+        hookSplashActivity(xposed, classLoader);
         hookSilentTaskEngine(xposed, classLoader);
         hookFeedAndBannerAds(xposed, classLoader);
         hookUserCommerceGrid(xposed, classLoader);
@@ -345,6 +346,69 @@ public final class AdBlocker {
             MainHook.log("Hooked WMBannerView.loadAd");
         } catch (Throwable ignored) {}
 
+    }
+
+    /**
+     * 隐藏宿主启动页 WelComeActivity 的开屏内容：该页只是展示开屏广告后立刻跳转主页，
+     * 这里把窗口内容设为透明/隐藏，使其不渲染（应用照常进入主页）。
+     */
+    private static void hookSplashActivity(XposedInterface xposed, ClassLoader cl) {
+        try {
+            Class<?> splash = Class.forName("com.realtech.xiaocan.WelComeActivity", false, cl);
+            for (Method m : splash.getDeclaredMethods()) {
+                String n = m.getName();
+                if (("onCreate".equals(n) && m.getParameterTypes().length == 1)
+                        || ("onResume".equals(n) && m.getParameterTypes().length == 0)
+                        || ("onWindowFocusChanged".equals(n) && m.getParameterTypes().length == 1)) {
+                    xposed.hook(m).intercept(chain -> {
+                        Object result = chain.proceed();
+                        try {
+                            hideSplashContent((Activity) chain.getThisObject());
+                        } catch (Throwable ignored) {
+                        }
+                        return result;
+                    });
+                }
+            }
+            MainHook.log("Hooked WelComeActivity splash hiding");
+        } catch (Throwable t) {
+            MainHook.log("Failed to hook WelComeActivity: " + t);
+        }
+    }
+
+    /** 把启动页窗口背景设为透明并隐藏内容视图（延迟再兜底一次，防广告异步填充）。 */
+    private static void hideSplashContent(Activity activity) {
+        if (activity == null || activity.isFinishing()) return;
+        try {
+            activity.getWindow().setBackgroundDrawable(
+                    new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+        } catch (Throwable ignored) {
+        }
+        View decor = null;
+        try {
+            decor = activity.getWindow().getDecorView();
+        } catch (Throwable ignored) {
+        }
+        hideNow(activity, decor);
+        if (decor != null) {
+            decor.postDelayed(() -> hideNow(activity, decor), 150);
+        }
+    }
+
+    private static void hideNow(Activity activity, View decor) {
+        if (activity == null || activity.isFinishing()) return;
+        try {
+            if (decor instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) decor;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    View child = g.getChildAt(i);
+                    if (child != null) child.setVisibility(View.GONE);
+                }
+            }
+            View content = activity.findViewById(android.R.id.content);
+            if (content != null) content.setVisibility(View.GONE);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void hookAdActivities(XposedInterface xposed) {
