@@ -139,6 +139,9 @@ public final class BottomBarPurifier {
         if (hideVip() && name.endsWith("$VIP")) return true;
         // 「福利/赚钱」Tab 对应 TASK
         if (hideBenefit() && name.endsWith("$TASK")) return true;
+        // 「订单」Tab：移除后必须同步从可见集合剔除，
+        // 否则 pageForNavPos 映射错位——点「我的」会算到订单页
+        if (hideOrder() && name.endsWith("$ORDER")) return true;
         // 营销位（0元到店/抖音补贴等）活动期间会动态替换 Tab 列表中的原生 Tab，
         // 类名不固定，无法用 $TASK/$ORDER 后缀识别。开启开关时按隐藏处理，
         // 否则第二个导航项会映射到营销页——其内容已被置空，表现为空白页面。
@@ -378,9 +381,9 @@ public final class BottomBarPurifier {
                         Object navView = ctx[1];
 
                         int tabIndex = pageForNavPos(navPos);
-                        MainHook.log("NavItemSelected navPos=" + navPos + " tabIndex=" + tabIndex);
-                        // 订单 Tab：重定向到 MyOrderActivity（与「我的-全部订单」同一页）
-                        if (tabIndex >= 0
+                        // 订单 Tab：重定向到 MyOrderActivity（与「我的-全部订单」同一页）。
+                        // 目标页是「我的」时绝不重定向（订单 Tab 隐藏后映射易错位，双保险）
+                        if (tabIndex >= 0 && !isUserPage(tabIndex)
                                 && OrderTabRedirect.tryRedirect(mainActivity, navView, navPos, tabIndex)) {
                             return false;
                         }
