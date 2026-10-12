@@ -304,6 +304,10 @@ public final class UserPagePurifier {
                 centerSingleMenuEntry((ViewGroup) root);
             }
         }
+        // 免单资格横幅位于 layoutMenu 内，宿主每次重渲染都会复位其可见性，逐次重藏
+        if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
+            hideFreeOrderQualifyCard(binding);
+        }
     }
 
     /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
