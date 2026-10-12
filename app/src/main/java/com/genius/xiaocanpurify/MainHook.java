@@ -186,6 +186,13 @@ public final class MainHook extends XposedModule {
             log("LocationCacheHook install error: " + t);
         }
 
+        try {
+            LotteryTaskAutomator.install(xposed, classLoader);
+            log("LotteryTaskAutomator installed successfully.");
+        } catch (Throwable t) {
+            log("LotteryTaskAutomator install error: " + t);
+        }
+
         log("All XiaoCanPurify hooks successfully initialized!");
     }
 
