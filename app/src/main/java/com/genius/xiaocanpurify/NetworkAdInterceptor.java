@@ -122,11 +122,15 @@ public final class NetworkAdInterceptor {
     private static final java.util.regex.Pattern CN_ADDR = java.util.regex.Pattern.compile(
             "[\\u4e00-\\u9fa5]{2,6}[市州][\\u4e00-\\u9fa5]{2,8}(?:[区县]|路|街|镇|街道)");
 
+    /**
+     * 仅匹配「用户定位逆地理」的地址字段（standard_address/address/formatted_addresses）。
+     * 刻意排除 name/title——网关 RPC 的门店列表里也有 name+地址，会把商家地址误当用户位置。
+     */
     private static final java.util.regex.Pattern JSON_ADDR_KEY = java.util.regex.Pattern.compile(
-            "\"(?:address|addr|poi_name|formatted_addresses|recommend|name|title)\"\\s*:\\s*\"([^\"]{4,80})\"");
+            "\"(?:standard_address|address|formatted_addresses)\"\\s*:\\s*\"([^\"]{4,80})\"");
 
     private static final java.util.regex.Pattern MAP_ADDR_KEY = java.util.regex.Pattern.compile(
-            "(?:address|addr|poi_name|formatted_addresses|recommend|name|title)=([^,}\\)]{4,80})");
+            "(?:standard_address|address|formatted_addresses)=([^,}\\)]{4,80})");
 
     /** 把 MethodChannel.Result 包一层代理：success() 载荷含中文地址时提取并推送。 */
     private static Object wrapFlutterResult(Class<?> resultInterface, Object result) {
@@ -157,12 +161,14 @@ public final class NetworkAdInterceptor {
     /** 响应载荷须含中文地址特征才算逆地理结果，再择优提取地址字段。 */
     private static String extractAddressText(String s) {
         if (!CN_ADDR.matcher(s).find()) return null;
-        java.util.regex.Matcher m = JSON_ADDR_KEY.matcher(s);
+        // 网关 RPC 会把逆地理 JSON 作为字符串嵌入响应，引号是转义的（\"address\"），先反转义
+        String body = s.replace("\\\"", "\"");
+        java.util.regex.Matcher m = JSON_ADDR_KEY.matcher(body);
         while (m.find()) {
             String v = m.group(1);
             if (CN_ADDR.matcher(v).find()) return v;
         }
-        m = MAP_ADDR_KEY.matcher(s);
+        m = MAP_ADDR_KEY.matcher(body);
         while (m.find()) {
             String v = m.group(1);
             if (CN_ADDR.matcher(v).find()) return v;
