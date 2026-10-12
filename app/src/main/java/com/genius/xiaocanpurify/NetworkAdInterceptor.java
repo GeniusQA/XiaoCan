@@ -12,7 +12,18 @@ import io.github.libxposed.api.XposedInterface;
 public final class NetworkAdInterceptor {
     private static final Map<Object, Boolean> INJECTED_BUILDERS = new WeakHashMap<>();
 
+    /** RPC 探针窗口截止时间：红包任务点击后临时记录宿主全部请求，用于发现领奖上报接口。 */
+    private static volatile long DISCOVERY_UNTIL = 0L;
+
     private NetworkAdInterceptor() {}
+
+    static void armDiscovery(long durationMs) {
+        DISCOVERY_UNTIL = android.os.SystemClock.uptimeMillis() + durationMs;
+    }
+
+    static boolean discoveryActive() {
+        return android.os.SystemClock.uptimeMillis() < DISCOVERY_UNTIL;
+    }
 
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         hookOkHttp(xposed, classLoader);
@@ -72,6 +83,9 @@ public final class NetworkAdInterceptor {
                                 String s = ((service == null ? "" : service) + " "
                                         + (serverName == null ? "" : serverName) + " "
                                         + (path == null ? "" : path)).toLowerCase(Locale.ROOT);
+                                if (discoveryActive()) {
+                                    MainHook.log("RPC[discover][flutter] " + s);
+                                }
                                 Object data = argumentMethod.invoke(call, "data");
                                 if (isBlockedFlutterService(s) || WithdrawAdPolicy.isAdPlacement(s, data)) {
                                     MainHook.log(isDiscoveryName(s)
@@ -153,6 +167,15 @@ public final class NetworkAdInterceptor {
                 Method urlMethod = request.getClass().getMethod("url");
                 Object httpUrl = urlMethod.invoke(request);
                 String urlStr = httpUrl != null ? httpUrl.toString().toLowerCase(Locale.ROOT) : "";
+                if (discoveryActive()) {
+                    String mn = "";
+                    try {
+                        Object m = request.getClass().getMethod("header", String.class)
+                                .invoke(request, "methodname");
+                        mn = m != null ? m.toString() : "";
+                    } catch (Throwable ignored) {}
+                    MainHook.log("RPC[discover][okhttp] " + mn + " " + urlStr);
+                }
 
                 // Check methodname header for blocked RPC calls
                 try {
@@ -237,7 +260,14 @@ public final class NetworkAdInterceptor {
                 Method peekMethod = response.getClass().getMethod("peekBody", long.class);
                 Object peeked = peekMethod.invoke(response, 1048576L);
                 String body = (String) peeked.getClass().getMethod("string").invoke(peeked);
-                if (body == null || body.isEmpty() || !PopupMarkers.contains(body)) {
+                if (body == null || body.isEmpty()) {
+                    return response;
+                }
+                if (discoveryActive() && body.length() > 2) {
+                    MainHook.log("RESP[discover] " + url + " => "
+                            + body.substring(0, Math.min(body.length(), 300)));
+                }
+                if (!PopupMarkers.contains(body)) {
                     return response;
                 }
                 MainHook.log("Popup marker in response: " + url);

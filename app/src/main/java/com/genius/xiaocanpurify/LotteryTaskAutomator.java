@@ -24,6 +24,8 @@ import io.github.libxposed.api.XposedInterface;
 public final class LotteryTaskAutomator {
     /** 服务端要求浏览 10s，留 1s 余量对齐其计时起点。 */
     private static final long PAGE_DWELL_MS = 11000L;
+    /** 红包任务点击后的 RPC 探针窗口。 */
+    private static final long DISCOVERY_MS = 20000L;
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static WeakReference<Activity> lastTaskActivity = new WeakReference<>(null);
@@ -35,10 +37,19 @@ public final class LotteryTaskAutomator {
             Method performClick = View.class.getMethod("performClick");
             xposed.hook(performClick).intercept(chain -> {
                 View view = chain.getThisObject() instanceof View ? (View) chain.getThisObject() : null;
-                if (view != null && isBrowseTaskClick(view)) {
-                    lastTaskActivity = new WeakReference<>(activityOf(view));
-                    MainHook.log("LotteryTaskAutomator: browse task click captured");
-                    scheduleAutoBack();
+                if (view != null) {
+                    int type = taskTypeOf(view);
+                    if (type == TYPE_MALL || type == TYPE_BROWSE) {
+                        lastTaskActivity = new WeakReference<>(activityOf(view));
+                        MainHook.log("LotteryTaskAutomator: browse task click captured (type=" + type + ")");
+                        scheduleAutoBack(type == TYPE_MALL);
+                    } else if (type == TYPE_REDPACK) {
+                        // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
+                        // 观察宿主点击后与返回时的上报接口，用于后续直接领奖
+                        EnrollmentJumpGuard.armNow();
+                        NetworkAdInterceptor.armDiscovery(DISCOVERY_MS);
+                        MainHook.log("LotteryTaskAutomator: red packet task click, jump blocked, RPC discovery armed");
+                    }
                 }
                 return chain.proceed();
             });
@@ -48,30 +59,40 @@ public final class LotteryTaskAutomator {
         }
     }
 
-    /** 点击的按钮文案为「立即浏览」，且向上所在卡片包含「看商城优惠」任务标题。 */
-    private static boolean isBrowseTaskClick(View view) {
-        if (!PurifyPrefs.enabled(PurifyPrefs.LOTTERY_TASK_AUTO)) return false;
-        if (!subtreeText(view).contains("立即浏览")) return false;
+    private static final int TYPE_NONE = 0;
+    private static final int TYPE_MALL = 1;    // 看商城优惠（跳外部页，需校验目标页）
+    private static final int TYPE_BROWSE = 2;  // 浏览霸王餐/福利页（站内页，直接返回）
+    private static final int TYPE_REDPACK = 3; // 领取美团/饿了么红包（拦跳转+探针）
+
+    /** 点击的按钮为「立即浏览/立即前往」，按所在卡片标题识别任务类型。 */
+    private static int taskTypeOf(View view) {
+        if (!PurifyPrefs.enabled(PurifyPrefs.LOTTERY_TASK_AUTO)) return TYPE_NONE;
+        String buttonText = subtreeText(view);
+        if (!buttonText.contains("立即浏览") && !buttonText.contains("立即前往")) return TYPE_NONE;
         View parent = view;
         for (int i = 0; i < 8 && parent != null; i++) {
             parent = parent.getParent() instanceof View ? (View) parent.getParent() : null;
-            if (parent != null && subtreeText(parent).contains("看商城优惠")) {
-                return true;
-            }
+            if (parent == null) break;
+            String card = subtreeText(parent);
+            if (card.contains("看商城优惠")) return TYPE_MALL;
+            if (card.contains("外卖霸王餐") || card.contains("浏览福利页")) return TYPE_BROWSE;
+            if (card.contains("领取美团红包") || card.contains("领取饿了么红包")) return TYPE_REDPACK;
         }
-        return false;
+        return TYPE_NONE;
     }
 
-    private static void scheduleAutoBack() {
+    private static void scheduleAutoBack(boolean verifyTargetPage) {
         MAIN.postDelayed(() -> {
             Activity activity = lastTaskActivity.get();
             if (activity == null || activity.isFinishing()) return;
-            String text = subtreeText(activity.getWindow() != null
-                    ? activity.getWindow().getDecorView() : null);
-            // 仅当当前页面确实是抖音补贴页时才自动返回，避免误触
-            if (!text.contains("超值补贴") && !text.contains("抖音电商") && !text.contains("抖音补贴")) {
-                MainHook.log("LotteryTaskAutomator: target page not detected, skip auto-back");
-                return;
+            if (verifyTargetPage) {
+                String text = subtreeText(activity.getWindow() != null
+                        ? activity.getWindow().getDecorView() : null);
+                // 仅当当前页面确实是目标页时才自动返回，避免误触
+                if (!text.contains("超值补贴") && !text.contains("抖音电商") && !text.contains("抖音补贴")) {
+                    MainHook.log("LotteryTaskAutomator: target page not detected, skip auto-back");
+                    return;
+                }
             }
             MainHook.log("LotteryTaskAutomator: dwell done, dispatching back");
             activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));

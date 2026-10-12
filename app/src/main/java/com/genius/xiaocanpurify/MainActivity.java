@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
             {"全局", new String[][]{
                     {PurifyPrefs.FLOATING_WINDOW, "浮动红包小窗", "主页/我的页悬浮红包小图标"},
                     {PurifyPrefs.LOTTERY_POPUP, "抽奖中奖弹窗与自动外跳", "「免费开红包」等抽奖页「恭喜您获得大额出行福利券」弹窗，并拦截其触发的微信小程序自动跳转"},
-                    {PurifyPrefs.LOTTERY_TASK_AUTO, "自动完成「看商城优惠」浏览任务", "免费抽奖页点击「立即浏览」后自动停留10秒并返回，直接获得抽奖次数"},
+                    {PurifyPrefs.LOTTERY_TASK_AUTO, "自动完成免费抽奖浏览任务", "「看商城优惠/霸王餐/福利页」任务点击后自动停留10秒并返回；「领取美团/饿了么红包」任务拦截小程序外跳（发奖依赖服务端校验，若未到账请反馈日志）"},
             }},
             {"模块界面", new String[][]{
                     {PurifyPrefs.HIDE_DESKTOP_ICON, "隐藏桌面图标", "关闭后从桌面移除本模块图标；仍可在 LSPosed 模块列表中打开设置页重新开启"},
