@@ -108,15 +108,11 @@ public final class OrderTabRedirect {
 
     /**
      * 在订单 Tab 被选中时拦截，启动 MyOrderActivity 并返回 true（表示已处理）。
-     * 非订单 Tab 或功能未开启时返回 false，交由调用方走原生逻辑。
+     * 该行为默认直接生效（订单 Tab 即「我的-全部订单」页），非订单 Tab 返回 false 走原生逻辑。
      */
     public static boolean tryRedirect(Activity mainActivity, Object navView, int navPos, int tabIndex) {
-        boolean enabled = PurifyPrefs.enabled(PurifyPrefs.ORDER_TAB_REDIRECT);
         String navTitle = navItemTitle(navView, navPos);
         boolean isOrderTab = (tabIndex == ORDER_TAB_INDEX) || navTitle.contains("订单");
-        MainHook.log("tryRedirect: enabled=" + enabled + " tabIndex=" + tabIndex + " want=" + ORDER_TAB_INDEX
-                + " navTitle='" + navTitle + "' isOrder=" + isOrderTab);
-        if (!enabled) return false;
         if (!isOrderTab) return false;
         if (mainActivity == null) return false;
         try {
