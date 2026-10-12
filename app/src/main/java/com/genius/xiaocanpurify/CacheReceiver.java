@@ -19,12 +19,15 @@ public class CacheReceiver extends BroadcastReceiver {
         double lng = intent.getDoubleExtra("lng", 0d);
         long time = intent.getLongExtra("time", 0L);
         String addr = intent.getStringExtra("address");
-        context.getSharedPreferences(INBOX_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putLong("lat", Double.doubleToRawLongBits(lat))
-                .putLong("lng", Double.doubleToRawLongBits(lng))
-                .putLong("time", time)
-                .putString("address", addr == null ? "" : addr)
-                .apply();
+        android.content.SharedPreferences.Editor e =
+                context.getSharedPreferences(INBOX_PREFS, Context.MODE_PRIVATE).edit()
+                        .putLong("lat", Double.doubleToRawLongBits(lat))
+                        .putLong("lng", Double.doubleToRawLongBits(lng))
+                        .putLong("time", time);
+        // 仅当新地址非空时覆盖：framework 定位无 POI 地址，避免清空腾讯 SDK 已缓存的地址
+        if (addr != null && !addr.isEmpty()) {
+            e.putString("address", addr);
+        }
+        e.apply();
     }
 }
