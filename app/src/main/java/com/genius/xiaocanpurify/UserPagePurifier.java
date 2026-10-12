@@ -496,10 +496,12 @@ public final class UserPagePurifier {
             return false;
         }
         ViewGroup slot = (ViewGroup) withdraw.getParent();
-        if (!(slot instanceof android.widget.LinearLayout)
-                || ((android.widget.LinearLayout) slot).getOrientation()
-                        != android.widget.LinearLayout.HORIZONTAL) {
-            MainHook.log("EmbedEntry: slot not horizontal LinearLayout ("
+        boolean linear = slot instanceof android.widget.LinearLayout
+                && ((android.widget.LinearLayout) slot).getOrientation()
+                        == android.widget.LinearLayout.HORIZONTAL;
+        boolean constraint = slot.getClass().getName().contains("ConstraintLayout");
+        if (!linear && !constraint) {
+            MainHook.log("EmbedEntry: unsupported slot container ("
                     + slot.getClass().getSimpleName() + "), fallback");
             return false;
         }
@@ -524,15 +526,57 @@ public final class UserPagePurifier {
                 entry.performClick();
             } catch (Throwable ignored) {}
         });
-        android.widget.LinearLayout.LayoutParams slp =
-                new android.widget.LinearLayout.LayoutParams(
+        android.view.ViewGroup.LayoutParams slp;
+        int m = dp(slot, 12);
+        if (linear) {
+            android.widget.LinearLayout.LayoutParams llp =
+                    new android.widget.LinearLayout.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                            android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            llp.gravity = android.view.Gravity.CENTER_VERTICAL;
+            llp.leftMargin = m;
+            llp.rightMargin = m;
+            slp = llp;
+            slot.addView(snap, slot.indexOfChild(withdraw), slp);
+        } else {
+            // ConstraintLayout：反射构造 LayoutParams（模块不编译期依赖宿主库），
+            // 约束在左列与提现按钮之间水平居中、卡内垂直居中
+            View leftCol = null;
+            for (int i = 0; i < slot.getChildCount(); i++) {
+                View c = slot.getChildAt(i);
+                if (c != withdraw && c.getVisibility() == View.VISIBLE
+                        && subtreeText(c).contains(normalize("可提现蚕豆"))) {
+                    leftCol = c;
+                    break;
+                }
+            }
+            if (leftCol == null || leftCol.getId() == View.NO_ID
+                    || withdraw.getId() == View.NO_ID) {
+                MainHook.log("EmbedEntry: constraint anchors missing, fallback");
+                return false;
+            }
+            try {
+                Class<?> clpClass = Class.forName(
+                        "androidx.constraintlayout.widget.ConstraintLayout$LayoutParams",
+                        true, slot.getClass().getClassLoader());
+                Object clp = clpClass.getConstructor(int.class, int.class).newInstance(
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.gravity = android.view.Gravity.CENTER_VERTICAL;
-        int m = dp(slot, 12);
-        slp.leftMargin = m;
-        slp.rightMargin = m;
-        slot.addView(snap, slot.indexOfChild(withdraw), slp);
+                setIntField(clp, "leftToRight", leftCol.getId());
+                setIntField(clp, "rightToLeft", withdraw.getId());
+                setIntField(clp, "topToTop", 0);       // ConstraintLayout.PARENT_ID = 0
+                setIntField(clp, "bottomToBottom", 0);
+                setFloatField(clp, "horizontalBias", 0.5f);
+                setFloatField(clp, "verticalBias", 0.5f);
+                setIntField(clp, "leftMargin", m);
+                setIntField(clp, "rightMargin", m);
+                slot.addView(snap, slot.indexOfChild(withdraw),
+                        (android.view.ViewGroup.LayoutParams) clp);
+            } catch (Throwable t) {
+                MainHook.log("EmbedEntry: constraint params failed (" + t + "), fallback");
+                return false;
+            }
+        }
 
         // 卡片若为固定高度且装不下入口时改为 wrap（记录原值供还原）
         View card = enclosingBeanCard(slot);
@@ -595,6 +639,16 @@ public final class UserPagePurifier {
             }
         }
         return null;
+    }
+
+    private static void setIntField(Object target, String name, int value) throws Exception {
+        java.lang.reflect.Field f = target.getClass().getField(name);
+        f.setInt(target, value);
+    }
+
+    private static void setFloatField(Object target, String name, float value) throws Exception {
+        java.lang.reflect.Field f = target.getClass().getField(name);
+        f.setFloat(target, value);
     }
 
     /**
