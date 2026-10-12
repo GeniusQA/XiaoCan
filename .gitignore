@@ -11,3 +11,6 @@ xiaocan.apk
 signing/
 *.jks
 *.keystore
+
+# 本地构建安装脚本，不入库
+install-beta.ps1
