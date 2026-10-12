@@ -267,6 +267,17 @@ public final class NetworkAdInterceptor {
                     MainHook.log("RESP[discover] " + url + " => "
                             + body.substring(0, Math.min(body.length(), 300)));
                 }
+                // 诊断：地址来源探测——响应体含「XX市XX区」中文地址特征时记录 URL 与片段
+                if (body.length() <= 100000) {
+                    java.util.regex.Matcher am = java.util.regex.Pattern
+                            .compile("[\\u4e00-\\u9fa5]{2,6}[市州][\\u4e00-\\u9fa5]{2,8}[区县]")
+                            .matcher(body);
+                    if (am.find()) {
+                        MainHook.log("ADDR[probe] " + url + " => "
+                                + body.substring(Math.max(0, am.start() - 40),
+                                        Math.min(body.length(), am.start() + 140)));
+                    }
+                }
                 // 红包抽奖中奖数据包（「大额出行福利券 / 即将自动跳转」）到达即布防，
                 // 拦下随后自动拉起的小程序跳转，但不吞掉响应（抽奖仍正常结算）
                 if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
