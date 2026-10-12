@@ -272,9 +272,18 @@ public final class LocationCacheHook {
      * 目标 App 无需 root，模块设置页直接读模块自有存储展示。模块 App 侧无 root 也能收到。
      */
     private static void mirrorToRemote(double lat, double lng, String address) {
-        // 缓存已写入目标 App 私有 SharedPreferences(purify_loc_cache)；
-        // 模块设置页通过 root 读取该文件展示（模块已授予 root）。
+        try {
+            String value = lat + "\u0001" + lng + "\u0001" + System.currentTimeMillis()
+                    + "\u0001" + (address == null ? "" : address);
+            PurifyPrefs.putRemoteString(REMOTE_LOC_INFO, value);
+            MainHook.log("LocationCache: mirrored loc_cache_info=" + value);
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: mirror failed: " + t);
+        }
     }
+
+    /** 远程镜像 key：模块设置页据此展示缓存位置。 */
+    private static final String REMOTE_LOC_INFO = "loc_cache_info";
 
     private static java.util.List<Class<?>> collectLocationInterfaces(Class<?> cls) {
         java.util.List<Class<?>> out = new java.util.ArrayList<>();

@@ -311,9 +311,8 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 缓存位置写在目标 App 私有 SharedPreferences(purify_loc_cache)。模块（已授予 root）
-     * 先用 su 把该文件 cp 到本模块目录，再以普通方式读副本——避开 su 直接 cat 目标
-     * 私有文件时的 stdout 截断/空读问题，也不依赖跨 uid 文件权限。
+     * 缓存位置由目标 App 写入模块 RemotePreferences(key=loc_cache_info)，
+     * 格式 lat \u0001 lng \u0001 time [\u0001 address]。此处直接读取展示。
      */
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
@@ -321,14 +320,15 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             String text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
             try {
-                java.io.File dst = new java.io.File(getFilesDir(), "loc_cache_copy.xml");
-                runSu("/system/bin/cp " + TARGET_PREFS_XML + " " + dst.getAbsolutePath());
-                if (dst.exists() && dst.length() > 0) {
-                    String xml = readAll(dst);
-                    double lat = Double.longBitsToDouble(parseLongAttr(xml, "lat"));
-                    double lng = Double.longBitsToDouble(parseLongAttr(xml, "lng"));
-                    long time = parseLongAttr(xml, "time");
-                    String address = parseSnapshotAddress(matchAttr(xml, "name=\"snapshot\"", "string"));
+                SharedPreferences rp = remotePrefs;
+                String raw = rp != null ? rp.getString("loc_cache_info", null) : null;
+                android.util.Log.w("LocCache", "remotePrefs=" + (rp != null) + " raw=" + raw);
+                if (raw != null && !raw.isEmpty()) {
+                    String[] parts = raw.split("\u0001");
+                    double lat = Double.parseDouble(parts[0]);
+                    double lng = Double.parseDouble(parts[1]);
+                    long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
+                    String address = parts.length > 3 ? parts[3] : "";
                     if (!(lat == 0.0 && lng == 0.0)) {
                         StringBuilder sb = new StringBuilder();
                         sb.append("经纬度：").append(
@@ -353,19 +353,6 @@ public class MainActivity extends Activity {
             final String out = text;
             runOnUiThread(() -> view.setText(out));
         }).start();
-    }
-
-    /** 目标 App 定位缓存偏好文件路径。 */
-    private static final String TARGET_PREFS_XML =
-            "/data/data/" + TARGET_PKG + "/shared_prefs/purify_loc_cache.xml";
-
-    /** 以 root 执行一条命令（模块需授予 root）。 */
-    private static void runSu(String cmd) {
-        try {
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
-            p.waitFor();
-        } catch (Throwable ignored) {
-        }
     }
 
     private static String readAll(java.io.File f) throws Exception {
