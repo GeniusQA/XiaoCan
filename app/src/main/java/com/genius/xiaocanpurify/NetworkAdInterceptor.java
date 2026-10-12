@@ -164,7 +164,13 @@ public final class NetworkAdInterceptor {
         // 把「任意数量反斜杠+引号」统一归一为裸引号后再匹配
         String body = s.replaceAll("\\\\+\"", "\"");
         // 仅处理「用户定位逆地理」响应：含 standard_address 标志（门店列表没有该字段）
-        if (!body.contains("standard_address")) return null;
+        boolean gate = body.contains("standard_address");
+        int fa = body.indexOf("formatted_addresses");
+        MainHook.log("ADDR[dbg] gate=" + gate + " faIdx=" + fa
+                + " bodyLen=" + body.length()
+                + (fa >= 0 ? " snippet=" + body.substring(Math.max(0, fa - 40),
+                        Math.min(body.length(), fa + 200)) : ""));
+        if (!gate) return null;
         // 1) formatted_addresses.recommend（腾讯标准结构的推荐展示地址）
         java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("\"formatted_addresses\"\\s*:\\s*\\{[^{}]*?\"recommend\"\\s*:\\s*\"([^\"]{4,80})\"")
