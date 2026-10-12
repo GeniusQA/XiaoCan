@@ -312,11 +312,25 @@ public final class UserPagePurifier {
                 View top = menuRoot;
                 while (top.getParent() instanceof View) top = (View) top.getParent();
                 if (top instanceof ViewGroup) {
-                    View card = findSmallestContainingAll((ViewGroup) top, new String[]{
+                    View smallest = findSmallestContainingAll((ViewGroup) top, new String[]{
                             normalize("订单待免单"), normalize("今日邀")});
-                    if (card != null && card.getVisibility() != View.GONE) {
-                        card.setVisibility(View.GONE);
-                        MainHook.log("Hidden free-order qualify card (per-render)");
+                    if (smallest == null) {
+                        // 首次进入页面时横幅可能尚未挂载
+                        android.util.Log.w("UserPurify", "qualify banner not found");
+                    } else {
+                        // 从最小命中向上爬到卡片边界（祖先子树出现其它板块关键词即停）
+                        View card = smallest;
+                        View cur = smallest;
+                        while (cur.getParent() instanceof View) {
+                            View p = (View) cur.getParent();
+                            if (subtreeHasOtherSection(subtreeText(p))) break;
+                            card = p;
+                            cur = p;
+                        }
+                        if (card.getVisibility() != View.GONE) {
+                            card.setVisibility(View.GONE);
+                            MainHook.log("Hidden free-order qualify card (per-render)");
+                        }
                     }
                 }
             }
@@ -916,24 +930,25 @@ public final class UserPagePurifier {
         }
     }
 
-    /** 查找同时包含全部关键词的最小子树（找不到更小命中时返回当前命中项）。 */
+    /**
+     * 查找同时包含全部关键词的最小子树。
+     * 关键：先校验当前节点自身包含全部关键词再下探——两个关键词可能
+     * 分属不同子 View（如横幅的两行文案在不同 TextView 里），
+     * 旧实现只在「子节点同时包含全部」时才下探，会因关键词分层而漏找。
+     */
     private static View findSmallestContainingAll(ViewGroup parent, String[] keywords) {
+        String self = subtreeText(parent);
+        for (String k : keywords) {
+            if (!self.contains(k)) return null;
+        }
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
-            String text = subtreeText(child);
-            boolean all = true;
-            for (String keyword : keywords) {
-                if (!text.contains(keyword)) {
-                    all = false;
-                    break;
-                }
-            }
-            if (all && child instanceof ViewGroup) {
+            if (child instanceof ViewGroup) {
                 View deeper = findSmallestContainingAll((ViewGroup) child, keywords);
-                return deeper != null ? deeper : child;
+                if (deeper != null) return deeper;
             }
         }
-        return null;
+        return parent;
     }
 
     /**
