@@ -191,7 +191,8 @@ public final class NetworkAdInterceptor {
                 }
 
                 Method proceedMethod = chain.getClass().getMethod("proceed", request.getClass());
-                return proceedMethod.invoke(chain, request);
+                Object response = proceedMethod.invoke(chain, request);
+                return filterPopupPayload(request, urlStr, response);
             }
             if ("equals".equals(method.getName())) {
                 return proxy == (args != null && args.length > 0 ? args[0] : null);
@@ -223,6 +224,30 @@ public final class NetworkAdInterceptor {
                     || url.contains("withdrawal_success_popup")
                     || url.contains("withdrawalpage_popup")
                     || url.contains("withdraw_pop_up");
+        }
+
+        /**
+         * 响应体内容扫描：营销弹窗配置由服务端原文下发，命中特征文案即视为弹窗数据。
+         * 响应体较小（<=20KB，独立弹窗配置接口）直接返回空成功响应；
+         * 大响应体（页面聚合配置）不能整体吞掉，只记日志留待按接口名精确拦截。
+         */
+        private Object filterPopupPayload(Object request, String url, Object response) {
+            if (response == null) return null;
+            try {
+                Method peekMethod = response.getClass().getMethod("peekBody", long.class);
+                Object peeked = peekMethod.invoke(response, 1048576L);
+                String body = (String) peeked.getClass().getMethod("string").invoke(peeked);
+                if (body == null || body.isEmpty() || !PopupMarkers.contains(body)) {
+                    return response;
+                }
+                MainHook.log("Popup marker in response: " + url);
+                if (body.length() <= 20000) {
+                    MainHook.log("Mocked popup payload response: " + url);
+                    return createMockJsonResponse(request,
+                            "{\"code\":0,\"status\":{\"code\":0},\"msg\":\"ok\",\"data\":{}}");
+                }
+            } catch (Throwable ignored) {}
+            return response;
         }
 
         private Object createMockJsonResponse(Object request, String json) throws Exception {

@@ -86,6 +86,10 @@ public final class PopupBlocker {
                     || text.contains("小蚕卫士")) {
                 return true;
             }
+            // 营销弹窗（免单弹窗 / 签到弹窗 / 订单完成弹窗），特征库与网络层共用
+            if (PopupMarkers.contains(text)) {
+                return true;
+            }
             // 抽奖页（免费开红包）中奖弹窗：命中后同时布防外跳窗口，
             // 拦下弹窗「即将自动跳转领取」触发的微信小程序自动拉起
             if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
