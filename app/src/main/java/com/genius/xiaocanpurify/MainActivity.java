@@ -30,6 +30,7 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.TAB_VIP, "隐藏「会员」Tab", "移除底部会员（SVIP）标签，仅保留首页/订单/我"},
                     {PurifyPrefs.TAB_BENEFIT, "隐藏「赚钱」Tab", "移除底部任务与福利赚钱标签"},
                     {PurifyPrefs.TAB_PLACEMENT, "隐藏「抖音补贴」Tab", "阻止第二个 Tab 被动态替换为抖音补贴等营销入口"},
+                    {PurifyPrefs.TAB_ORDER, "隐藏「订单」Tab", "移除底部订单标签，仅保留首页/我（开启后无法通过 Tab 进入订单页）"},
             }},
             {"首页", new String[][]{
                     {PurifyPrefs.HOME_TOP_BANNER, "顶部红包 Banner 与活动背景", "¥18 外卖红包等顶部大图与红/橙活动背景"},

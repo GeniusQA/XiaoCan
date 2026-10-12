@@ -101,6 +101,10 @@ public final class BottomBarPurifier {
         return PurifyPrefs.hide(PurifyPrefs.TAB_BENEFIT);
     }
 
+    private static boolean hideOrder() {
+        return PurifyPrefs.hide(PurifyPrefs.TAB_ORDER);
+    }
+
     private static boolean hidePlacement() {
         return PurifyPrefs.hide(PurifyPrefs.TAB_PLACEMENT);
     }
@@ -234,6 +238,7 @@ public final class BottomBarPurifier {
             boolean hideVip = hideVip();
             boolean hideBenefit = hideBenefit();
             boolean hidePlacement = hidePlacement();
+            boolean hideOrder = hideOrder();
 
             // Hide VIP decorations / badges
             if (hideVip) {
@@ -249,8 +254,8 @@ public final class BottomBarPurifier {
                 if (v != null) v.setVisibility(View.GONE);
             }
 
-            if (!hideVip && !hideBenefit && !hidePlacement) {
-                // 三个开关都关闭：保留宿主原生导航项，不做任何移除
+            if (!hideVip && !hideBenefit && !hidePlacement && !hideOrder) {
+                // 开关都关闭：保留宿主原生导航项，不做任何移除
                 MainHook.log("BottomBar toggles off: keep native nav items");
                 return;
             }
@@ -296,6 +301,13 @@ public final class BottomBarPurifier {
                     setItemKey.invoke(nbiTd, "order");
                 } catch (Throwable ignored) {}
                 revertPlacementTitle(nbiTd);
+            }
+            if (hideOrder && nbiTd != null && nbiTd.getParent() == navView) {
+                // 隐藏「订单」Tab：与会员/赚钱 Tab 同样的移除方式，页面保留在 ViewPager
+                nbiTd.setVisibility(View.GONE);
+                navView.removeView(nbiTd);
+                removed = true;
+                MainHook.log("navView: order tab removed");
             }
             if (removed) {
                 MainHook.log("navView purged (pages kept intact)");
