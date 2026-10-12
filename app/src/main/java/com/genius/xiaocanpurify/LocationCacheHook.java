@@ -268,11 +268,25 @@ public final class LocationCacheHook {
     }
 
     /**
-     * 缓存位置已写入目标 App 私有 SharedPreferences(purify_loc_cache)，模块设置页
-     * 直接用 su 读取该文件即可（设备已 root），无需跨进程镜像。
+     * 把缓存位置通过 ContentResolver 写入模块 CacheProvider（跨进程 IPC）：
+     * 目标 App 无需 root，模块设置页直接读模块自有存储展示。模块 App 侧无 root 也能收到。
      */
     private static void mirrorToRemote() {
-        // 缓存数据已在 purify_loc_cache 中；模块侧直接读该私有文件，无需额外镜像。
+        try {
+            android.content.Context ctx = currentApplication();
+            if (ctx == null) return;
+            double[] ll = cachedLatLng();
+            if (ll[0] == 0.0 && ll[1] == 0.0) return;
+            String address = readStrSnapshot().get("getAddress");
+            android.content.ContentValues cv = new android.content.ContentValues();
+            cv.put("lat", ll[0]);
+            cv.put("lng", ll[1]);
+            cv.put("time", cachedTime());
+            cv.put("address", address == null ? "" : address);
+            ctx.getContentResolver().insert(
+                    android.net.Uri.parse("content://" + "com.genius.xiaocanpurify.cache" + "/loc"), cv);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static java.util.List<Class<?>> collectLocationInterfaces(Class<?> cls) {

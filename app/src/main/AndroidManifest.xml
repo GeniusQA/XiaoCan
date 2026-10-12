@@ -31,6 +31,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 缓存数据入口：目标 App 通过 ContentResolver 把定位缓存写入本模块（跨进程 IPC，无需 root） -->
+        <provider
+            android:name=".CacheProvider"
+            android:authorities="com.genius.xiaocanpurify.cache"
+            android:exported="true"
+            android:grantUriPermissions="false" />
+
         <!-- 承载桌面图标的入口：隐藏图标时禁用该 alias 即可，设置页仍可通过 LSPosed 模块列表打开 -->
         <activity-alias
             android:name=".MainActivityAlias"
