@@ -418,20 +418,17 @@ public final class UserPagePurifier {
 
     /* ==================== 单入口嵌入蚕豆卡空位 ==================== */
 
-    /** 嵌入的入口快照视图。 */
-    private static android.widget.ImageView embeddedSnapshotView;
+    /** 嵌入的紧凑入口视图（原入口图标+文字的横排重建）。 */
+    private static View embeddedSnapshotView;
     /** 被快照的原始入口（宿主重渲染后实例变化时需重新嵌入）。 */
     private static View embeddedEntryView;
     /** 被收起的活动行（还原时恢复显示）。 */
     private static ViewGroup embeddedRowView;
-    /** 承载快照的槽位/锚点视图（ConstraintLayout 平移定位用）。 */
+    /** 承载嵌入视图的槽位/锚点视图（ConstraintLayout 平移定位用）。 */
     private static ViewGroup embeddedSlotView;
     private static View embeddedLeftColView;
     private static View embeddedBtnWrapView;
     private static View.OnLayoutChangeListener embeddedSlotListener;
-    /** 被改为 WRAP_CONTENT 的视图 -> 原始高度。 */
-    private static final java.util.WeakHashMap<View, Integer> SAVED_CARD_HEIGHTS =
-            new java.util.WeakHashMap<>();
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -540,7 +537,7 @@ public final class UserPagePurifier {
             return false;
         }
 
-        // 快照入口视图（先清历史居中平移，避免快照带偏移）
+        // 先清历史居中平移，避免历史变换影响重建视图
         View.OnLayoutChangeListener oldL = CENTERED_LISTENERS.get(entry);
         if (oldL != null) {
             entry.removeOnLayoutChangeListener(oldL);
@@ -548,18 +545,20 @@ public final class UserPagePurifier {
         }
         CENTERED_CHILDREN.remove(entry);
         entry.setTranslationX(0f);
-        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
-                entry.getWidth(), entry.getHeight(),
-                android.graphics.Bitmap.Config.ARGB_8888);
-        entry.draw(new android.graphics.Canvas(bmp));
 
-        android.widget.ImageView snap = new android.widget.ImageView(slot.getContext());
-        snap.setImageBitmap(bmp);
-        snap.setOnClickListener(v -> {
+        // 从原入口提取图标与文字，重建紧凑横排视图（高度约 28dp，
+        // 天然放得进蚕豆卡原有空位，不改动任何容器尺寸，避免布局重叠）
+        View inline = buildInlineEntryView(slot.getContext(), entry);
+        if (inline == null) {
+            MainHook.log("EmbedEntry: cannot build inline view, fallback");
+            return false;
+        }
+        inline.setOnClickListener(v -> {
             try {
                 entry.performClick();
             } catch (Throwable ignored) {}
         });
+
         android.view.ViewGroup.LayoutParams slp;
         int m = dp(slot, 12);
         if (linear) {
@@ -571,11 +570,11 @@ public final class UserPagePurifier {
             llp.leftMargin = m;
             llp.rightMargin = m;
             slp = llp;
-            slot.addView(snap, slot.indexOfChild(btnWrap), slp);
+            slot.addView(inline, slot.indexOfChild(btnWrap), slp);
         } else {
             // ConstraintLayout：不依赖 view id（Kuikly 视图常无 id）。
-            // 快照锚定父容器左上角（确定性原点），位置由 translation 动态控制：
-            // 水平居中于「左列右缘」与「提现按钮左缘」之间，垂直居中于行容器。
+            // 嵌入视图锚定父容器左上角（确定性原点），位置由 translation 动态控制：
+            // 水平放在左列之后、提现按钮之前，垂直与左列居中对齐。
             View leftCol = null;
             for (int i = 0; i < slot.getChildCount(); i++) {
                 View c = slot.getChildAt(i);
@@ -598,7 +597,7 @@ public final class UserPagePurifier {
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
                 setIntField(clp, "leftToLeft", 0);   // ConstraintLayout.PARENT_ID = 0
                 setIntField(clp, "topToTop", 0);
-                slot.addView(snap, slot.getChildCount(),
+                slot.addView(inline, slot.getChildCount(),
                         (android.view.ViewGroup.LayoutParams) clp);
                 embeddedSlotView = slot;
                 embeddedLeftColView = leftCol;
@@ -614,48 +613,106 @@ public final class UserPagePurifier {
             }
         }
 
-        // 强制行容器高度容纳入口（原值记录供还原）；WRAP 高度下 ConstraintLayout
-        // 对无 bottom 约束的子项不参与父容器测高，必须显式定高
-        int origSlotH = slot.getHeight();
-        int forcedH = entry.getHeight() + dp(slot, 12);
-        forceHeight(slot, forcedH);
-        // 固定高度的祖先容器逐级同步增高，避免卡片内兄弟内容被压缩重叠
-        int delta = Math.max(0, forcedH - origSlotH);
-        ViewGroup anc = slot.getParent() instanceof ViewGroup ? (ViewGroup) slot.getParent() : null;
-        for (int i = 0; i < 3 && anc != null && delta > 0; i++) {
-            ViewGroup.LayoutParams alp = anc.getLayoutParams();
-            if (alp != null && alp.height > 0) {
-                forceHeight(anc, alp.height + delta);
-            }
-            anc = anc.getParent() instanceof ViewGroup ? (ViewGroup) anc.getParent() : null;
-        }
-
         // 原入口一并隐藏：宿主不再复位行可见性（与全隐藏收起的稳定路径一致）
         entry.setVisibility(View.GONE);
         row.setVisibility(View.GONE);
-        embeddedSnapshotView = snap;
+        embeddedSnapshotView = inline;
         embeddedEntryView = entry;
         embeddedRowView = row;
-        MainHook.log("EmbedEntry: embedded ok, entry=" + entry.getWidth() + "x" + entry.getHeight()
-                + " slot=" + slot.getClass().getSimpleName()
-                + " slotLp=" + slot.getLayoutParams().height);
+        MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
     }
 
-    /** 强制视图固定高度（原值记录供还原）。 */
-    private static void forceHeight(View v, int h) {
-        try {
-            android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
-            if (lp == null || lp.height == h) return;
-            if (!SAVED_CARD_HEIGHTS.containsKey(v)) {
-                SAVED_CARD_HEIGHTS.put(v, lp.height);
+    /**
+     * 用原入口的图标与文字重建紧凑横排视图（不改任何容器尺寸）。
+     * 提取不到文本时退化为按 28dp 高度等比缩小的入口位图。
+     */
+    private static View buildInlineEntryView(android.content.Context ctx, View entry) {
+        android.widget.ImageView srcIcon = findFirstImageView(entry);
+        android.widget.TextView srcText = findFirstTextView(entry);
+        android.graphics.drawable.Drawable iconDrawable = null;
+        if (srcIcon != null) {
+            iconDrawable = srcIcon.getDrawable() != null
+                    ? srcIcon.getDrawable() : srcIcon.getBackground();
+        } else if (srcText != null) {
+            for (android.graphics.drawable.Drawable d : srcText.getCompoundDrawables()) {
+                if (d != null) {
+                    iconDrawable = d;
+                    break;
+                }
             }
-            lp.height = h;
-            v.setLayoutParams(lp);
-        } catch (Throwable ignored) {}
+        }
+        if (srcText == null && iconDrawable == null) {
+            try {
+                android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                        entry.getWidth(), entry.getHeight(),
+                        android.graphics.Bitmap.Config.ARGB_8888);
+                entry.draw(new android.graphics.Canvas(bmp));
+                int h = dp(entry, 28);
+                int w = Math.max(1, Math.round(
+                        entry.getWidth() * (h / (float) Math.max(1, entry.getHeight()))));
+                android.widget.ImageView iv = new android.widget.ImageView(ctx);
+                iv.setImageBitmap(android.graphics.Bitmap.createScaledBitmap(bmp, w, h, true));
+                return iv;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        android.widget.LinearLayout box = new android.widget.LinearLayout(ctx);
+        box.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        box.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        if (iconDrawable != null) {
+            android.widget.ImageView iv = new android.widget.ImageView(ctx);
+            iv.setImageDrawable(iconDrawable);
+            android.widget.LinearLayout.LayoutParams ip =
+                    new android.widget.LinearLayout.LayoutParams(dp(entry, 20), dp(entry, 20));
+            ip.rightMargin = dp(entry, 4);
+            box.addView(iv, ip);
+        }
+        if (srcText != null) {
+            android.widget.TextView tv = new android.widget.TextView(ctx);
+            tv.setText(srcText.getText());
+            tv.setTextColor(srcText.getCurrentTextColor());
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, srcText.getTextSize());
+            tv.setIncludeFontPadding(false);
+            box.addView(tv);
+        }
+        return box;
     }
 
-    /** 把嵌入快照定位到左列与提现按钮之间的空位（垂直居中）。 */
+    /** 深度优先找第一个 ImageView。 */
+    private static android.widget.ImageView findFirstImageView(View parent) {
+        if (parent instanceof android.widget.ImageView) {
+            return (android.widget.ImageView) parent;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.widget.ImageView found = findFirstImageView(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** 深度优先找第一个非空文本 TextView。 */
+    private static android.widget.TextView findFirstTextView(View parent) {
+        if (parent instanceof android.widget.TextView
+                && ((android.widget.TextView) parent).getText() != null
+                && ((android.widget.TextView) parent).getText().length() > 0) {
+            return (android.widget.TextView) parent;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.widget.TextView found = findFirstTextView(group.getChildAt(i));
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** 把嵌入视图定位到左列之后、提现按钮之前的空位（与左列垂直居中对齐）。 */
     private static void positionEmbeddedSnapshot() {
         try {
             if (embeddedSnapshotView == null || embeddedSlotView == null
@@ -665,9 +722,11 @@ public final class UserPagePurifier {
             int iw = embeddedSnapshotView.getWidth();
             int ih = embeddedSnapshotView.getHeight();
             if (iw <= 0 || ih <= 0) return;
-            float cx = (embeddedLeftColView.getRight() + embeddedBtnWrapView.getLeft()) / 2f;
-            float tx = cx - iw / 2f;
-            float ty = (slot.getHeight() - ih) / 2f;
+            float tx = embeddedLeftColView.getRight() + dp(embeddedSnapshotView, 12);
+            float maxTx = embeddedBtnWrapView.getLeft() - iw - dp(embeddedSnapshotView, 8);
+            if (tx > maxTx) tx = maxTx;
+            float ty = embeddedLeftColView.getTop()
+                    + (embeddedLeftColView.getHeight() - ih) / 2f;
             if (Math.abs(embeddedSnapshotView.getTranslationX() - tx) > 0.5f
                     || Math.abs(embeddedSnapshotView.getTranslationY() - ty) > 0.5f) {
                 embeddedSnapshotView.setTranslationX(tx);
@@ -676,23 +735,13 @@ public final class UserPagePurifier {
         } catch (Throwable ignored) {}
     }
 
-    /** 撤销嵌入：移除快照、还原卡片高度、恢复活动行显示。 */
+    /** 撤销嵌入：移除嵌入视图、恢复活动行与原入口显示。 */
     private static void restoreEmbeddedEntry(ViewGroup row) {
         if (embeddedSnapshotView == null) return;
         try {
             ViewGroup p = embeddedSnapshotView.getParent() instanceof ViewGroup
                     ? (ViewGroup) embeddedSnapshotView.getParent() : null;
             if (p != null) p.removeView(embeddedSnapshotView);
-            for (java.util.Map.Entry<View, Integer> e : SAVED_CARD_HEIGHTS.entrySet()) {
-                View v = e.getKey();
-                if (v == null) continue;
-                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
-                if (lp != null) {
-                    lp.height = e.getValue();
-                    v.setLayoutParams(lp);
-                }
-            }
-            SAVED_CARD_HEIGHTS.clear();
             if (embeddedSlotView != null && embeddedSlotListener != null) {
                 embeddedSlotView.removeOnLayoutChangeListener(embeddedSlotListener);
             }
