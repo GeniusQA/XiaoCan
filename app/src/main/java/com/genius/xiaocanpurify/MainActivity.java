@@ -15,8 +15,6 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 
-import de.robv.android.xposed.XSharedPreferences;
-
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -313,22 +311,32 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 读取 hook 侧写入目标 App 私有 SharedPreferences(purify_loc_cache) 的缓存位置并展示。
-     * 注意：不能依赖 RemotePreferences 镜像(loc_cache_info)——目标 App 进程反向写回
-     * 模块进程的 remote 偏好经常静默失败；而 XSharedPreferences 直接读目标 App 私有文件，
-     * 是 LSPosed 模块读目标偏好的标准可靠通道。
+     * 读取 hook 侧写入跨进程临时文件(/data/local/tmp/purify_loc_cache_mirror.txt) 的缓存位置并展示。
+     * 注意：不能依赖 RemotePreferences 镜像——目标 App 进程反向写回模块进程的 remote 偏好
+     * 经常静默失败；改用 /data/local/tmp 临时文件，对所有应用可读写，无需存储权限。
      */
+    /** 跨进程镜像文件路径（宿主进程写入，详见 LocationCacheHook.MIRROR_FILE）。 */
+    private static final String LOC_CACHE_MIRROR = "/data/local/tmp/purify_loc_cache_mirror.txt";
+
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
         try {
-            de.robv.android.xposed.XSharedPreferences xp =
-                    new de.robv.android.xposed.XSharedPreferences(TARGET_PKG, "purify_loc_cache");
-            xp.reload();
-            double lat = Double.longBitsToDouble(xp.getLong("lat", 0L));
-            double lng = Double.longBitsToDouble(xp.getLong("lng", 0L));
-            long time = xp.getLong("time", 0L);
-            String address = parseSnapshotAddress(xp.getString("snapshot", null));
+            java.io.File f = new java.io.File(LOC_CACHE_MIRROR);
+            if (!f.exists()) {
+                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
+                return;
+            }
+            String raw = new java.io.BufferedReader(new java.io.FileReader(f)).readLine();
+            if (raw == null || raw.isEmpty()) {
+                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
+                return;
+            }
+            String[] parts = raw.split("\u0001");
+            double lat = Double.parseDouble(parts[0]);
+            double lng = Double.parseDouble(parts[1]);
+            long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
+            String address = parts.length > 3 ? parts[3] : "";
             if (lat == 0.0 && lng == 0.0) {
                 view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
                 return;

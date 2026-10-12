@@ -267,18 +267,20 @@ public final class LocationCacheHook {
         }
     }
 
-    /** 远程镜像 key：模块设置页据此展示缓存位置的地址与经纬度。 */
-    private static final String REMOTE_LOC_INFO = "loc_cache_info";
+    /**
+     * 跨进程镜像文件（/data/local/tmp 对所有应用可读写，无需存储权限）。
+     * 宿主进程把缓存位置写到这里，模块设置页直接读它，避开 RemotePreferences
+     * 从目标 App 反向写回模块进程会静默失败的问题。
+     */
+    private static final String MIRROR_FILE = "/data/local/tmp/purify_loc_cache_mirror.txt";
 
     /**
-     * 把缓存位置镜像写入 libxposed 远程偏好（宿主私有 SharedPreferences 设置页读不到）。
+     * 把缓存位置镜像写入跨进程临时文件，供模块设置页展示。
      * 格式：lat \u0001 lng \u0001 timeMillis [\u0001 address]；地址取回放时实际使用的
      * 快照 getAddress，与离线展示的 POI 标签保持一致。
      */
     private static void mirrorToRemote() {
         try {
-            SharedPreferences p = getPrefs();
-            if (p == null) return;
             double[] ll = cachedLatLng();
             if (ll[0] == 0.0 && ll[1] == 0.0) return;
             String address = readStrSnapshot().get("getAddress");
@@ -289,7 +291,9 @@ public final class LocationCacheHook {
             if (address != null && !address.isEmpty()) {
                 sb.append('\u0001').append(address);
             }
-            PurifyPrefs.putRemoteString(REMOTE_LOC_INFO, sb.toString());
+            java.io.FileWriter fw = new java.io.FileWriter(MIRROR_FILE);
+            fw.write(sb.toString());
+            fw.close();
         } catch (Throwable ignored) {
         }
     }
