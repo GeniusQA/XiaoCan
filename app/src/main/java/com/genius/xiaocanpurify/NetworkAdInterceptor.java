@@ -215,6 +215,61 @@ public final class NetworkAdInterceptor {
     private static final String EMPTY_DISCOVERY =
             "{\"code\":0,\"status\":{\"code\":0},\"msg\":\"ok\",\"data\":{\"list\":[],\"words\":[],\"keywords\":[],\"items\":[],\"search_words\":[],\"recommendations\":[]},\"list\":[],\"words\":[],\"keywords\":[]}";
 
+    /** 请求体读取节流：同区域坐标的请求体只在间隔 >3s 时记录一次诊断。 */
+    private static volatile long lastReqLogMs;
+
+    /**
+     * 把请求体中的定位坐标改写为缓存坐标（GPS 关闭时 App 用自身旧定位发起
+     * 逆地理/附近查询，统一表现为缓存位置）。请求体经 okio 读取后按
+     * 「同区域坐标对（<2km）」识别并整串替换，再用 Builder 重建 Request。
+     *
+     * @return 改写后的 Request；无需改写或改写失败返回 null（走原始请求）
+     */
+    private static Object rewriteRequestCoords(ClassLoader classLoader, Object request) {
+        try {
+            Object reqBody = request.getClass().getMethod("body").invoke(request);
+            if (reqBody == null) return null;
+            Class<?> bufferClass = classLoader.loadClass("okio.Buffer");
+            Object buf = bufferClass.getDeclaredConstructor().newInstance();
+            reqBody.getClass().getMethod("writeTo", classLoader.loadClass("okio.BufferedSink"))
+                    .invoke(reqBody, buf);
+            String body = (String) buf.getClass().getMethod("readUtf8").invoke(buf);
+            if (body == null || body.isEmpty() || body.length() > 200000) return null;
+
+            String rewritten = LocationCacheHook.rewriteCoordsInString(body);
+            if (rewritten == null) {
+                // 结构诊断：携带同区域坐标的请求体（节流），用于确认请求格式
+                if (LocationCacheHook.hasVicinityCoordsInText(body)
+                        && System.currentTimeMillis() - lastReqLogMs > 3000L) {
+                    lastReqLogMs = System.currentTimeMillis();
+                    MainHook.log("REQ[geoloc body] " + body.substring(0, Math.min(body.length(), 300)));
+                }
+                return null;
+            }
+            MainHook.log("REQ coords rewritten in body");
+            // 用 Builder 重建 Request：url/method/headers 保持，替换 body
+            Class<?> builderClass = classLoader.loadClass("okhttp3.Request$Builder");
+            Object builder = builderClass.getDeclaredConstructor().newInstance();
+            Object url = request.getClass().getMethod("url").invoke(request);
+            builder.getClass().getMethod("url", classLoader.loadClass("okhttp3.HttpUrl"))
+                    .invoke(builder, url);
+            String method = (String) request.getClass().getMethod("method").invoke(request);
+            Class<?> requestBodyClass = classLoader.loadClass("okhttp3.RequestBody");
+            Object mediaType = reqBody.getClass().getMethod("contentType").invoke(reqBody);
+            Object newBody = requestBodyClass.getMethod("create", classLoader.loadClass("okhttp3.MediaType"),
+                    String.class, java.nio.charset.Charset.class)
+                    .invoke(null, mediaType, rewritten, java.nio.charset.StandardCharsets.UTF_8);
+            builder.getClass().getMethod("method", String.class, requestBodyClass)
+                    .invoke(builder, method, newBody);
+            Object headers = request.getClass().getMethod("headers").invoke(request);
+            builder.getClass().getMethod("headers", classLoader.loadClass("okhttp3.Headers"))
+                    .invoke(builder, headers);
+            return builderClass.getMethod("build").invoke(builder);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static boolean isBlockedFlutterService(String s) {
         return isWithdrawCardName(s) || isDiscoveryName(s);
     }
@@ -315,6 +370,19 @@ public final class NetworkAdInterceptor {
                     } catch (Throwable t) {
                         MainHook.log("Mock response error: " + t);
                     }
+                }
+
+                // 定位缓存：逆地理/附近查询请求的坐标改写为缓存坐标，
+                // 使 GPS 关闭时 App 的地址与附近结果表现为缓存位置
+                try {
+                    Object newRequest = rewriteRequestCoords(classLoader, request);
+                    if (newRequest != null) {
+                        MainHook.log("REQ coords rewritten to cache");
+                        Method proceedRewritten = chain.getClass().getMethod("proceed", newRequest.getClass());
+                        Object respRewritten = proceedRewritten.invoke(chain, newRequest);
+                        return filterPopupPayload(request, urlStr, respRewritten);
+                    }
+                } catch (Throwable ignored) {
                 }
 
                 Method proceedMethod = chain.getClass().getMethod("proceed", request.getClass());

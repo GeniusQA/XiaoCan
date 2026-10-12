@@ -337,6 +337,71 @@ public final class LocationCacheHook {
     }
 
     /**
+     * 文本中是否存在「同区域的坐标对」（诊断预判用，任意分隔形态）。
+     */
+    public static boolean hasVicinityCoordsInText(String body) {
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(\\d{1,3}\\.\\d{4,})[,，:：= \\\"\\\\]{1,4}(\\d{1,3}\\.\\d{4,})")
+                    .matcher(body);
+            while (m.find()) {
+                double a = Double.parseDouble(m.group(1));
+                double b = Double.parseDouble(m.group(2));
+                if (a > 1 && a < 90 && b > 70 && b < 140 && isVicinityOfCache(a, b)) return true;
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /**
+     * 把文本（请求体 JSON / 带定位参数的 URL）中的定位坐标改写为缓存坐标。
+     * 识别形态：\"lat\":x / \"latitude\":x / \"lng\":x / \"longitude\":x /
+     * location=lat,lng（含多层转义与 URL 编码逗号）。仅当请求坐标与缓存
+     * 同区域（<2km）时改写；找不到或不在附近返回 null。
+     */
+    public static String rewriteCoordsInString(String body) {
+        try {
+            double[] ll = lastLatLng;
+            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return null;
+            String norm = body.replaceAll("\\\\+\"", "\"");
+            java.util.regex.Matcher ml = java.util.regex.Pattern
+                    .compile("\"(?:lat|latitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(norm);
+            java.util.regex.Matcher mn = java.util.regex.Pattern
+                    .compile("\"(?:lng|longitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(norm);
+            boolean hasL = ml.find();
+            boolean hasN = mn.find();
+            if (hasL && hasN) {
+                double la = Double.parseDouble(ml.group(1));
+                double ln = Double.parseDouble(mn.group(1));
+                if (!isVicinityOfCache(la, ln)) return null;
+                String out = new StringBuilder(norm)
+                        .replace(ml.start(1), ml.end(1), String.valueOf(ll[0])).toString();
+                java.util.regex.Matcher mn2 = java.util.regex.Pattern
+                        .compile("\"(?:lng|longitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(out);
+                if (mn2.find()) {
+                    out = new StringBuilder(out)
+                            .replace(mn2.start(1), mn2.end(1), String.valueOf(ll[1])).toString();
+                }
+                return out;
+            }
+            java.util.regex.Matcher mp = java.util.regex.Pattern
+                    .compile("location[=:\"\\\\]{1,6}(\\d{1,3}\\.\\d{3,})[,，%2CcC]{1,4}(\\d{1,3}\\.\\d{3,})")
+                    .matcher(norm);
+            if (mp.find()) {
+                double la = Double.parseDouble(mp.group(1));
+                double ln = Double.parseDouble(mp.group(2));
+                if (isVicinityOfCache(la, ln)) {
+                    return new StringBuilder(norm)
+                            .replace(mp.start(1), mp.end(2), ll[0] + "," + ll[1]).toString();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
      * 把请求载荷中的定位坐标就地改写为缓存坐标。
      * 定位缓存功能的契约是「GPS 关闭时 App 表现为处于缓存位置」——但 App 会把
      * 上一次 GPS 定位（室内偏移可达数百米）存在自己内部并在关 GPS 后继续用
