@@ -268,34 +268,11 @@ public final class LocationCacheHook {
     }
 
     /**
-     * 跨进程镜像文件（/data/local/tmp 对所有应用可读写，无需存储权限）。
-     * 宿主进程把缓存位置写到这里，模块设置页直接读它，避开 RemotePreferences
-     * 从目标 App 反向写回模块进程会静默失败的问题。
-     */
-    private static final String MIRROR_FILE = "/data/local/tmp/purify_loc_cache_mirror.txt";
-
-    /**
-     * 把缓存位置镜像写入跨进程临时文件，供模块设置页展示。
-     * 格式：lat \u0001 lng \u0001 timeMillis [\u0001 address]；地址取回放时实际使用的
-     * 快照 getAddress，与离线展示的 POI 标签保持一致。
+     * 缓存位置已写入目标 App 私有 SharedPreferences(purify_loc_cache)，模块设置页
+     * 直接用 su 读取该文件即可（设备已 root），无需跨进程镜像。
      */
     private static void mirrorToRemote() {
-        try {
-            double[] ll = cachedLatLng();
-            if (ll[0] == 0.0 && ll[1] == 0.0) return;
-            String address = readStrSnapshot().get("getAddress");
-            StringBuilder sb = new StringBuilder()
-                    .append(ll[0]).append('\u0001')
-                    .append(ll[1]).append('\u0001')
-                    .append(cachedTime());
-            if (address != null && !address.isEmpty()) {
-                sb.append('\u0001').append(address);
-            }
-            java.io.FileWriter fw = new java.io.FileWriter(MIRROR_FILE);
-            fw.write(sb.toString());
-            fw.close();
-        } catch (Throwable ignored) {
-        }
+        // 缓存数据已在 purify_loc_cache 中；模块侧直接读该私有文件，无需额外镜像。
     }
 
     private static java.util.List<Class<?>> collectLocationInterfaces(Class<?> cls) {

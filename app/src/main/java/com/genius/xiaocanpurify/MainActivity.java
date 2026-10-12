@@ -16,6 +16,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.LinkedHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
@@ -311,54 +312,95 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 读取 hook 侧写入跨进程临时文件(/data/local/tmp/purify_loc_cache_mirror.txt) 的缓存位置并展示。
-     * 注意：不能依赖 RemotePreferences 镜像——目标 App 进程反向写回模块进程的 remote 偏好
-     * 经常静默失败；改用 /data/local/tmp 临时文件，对所有应用可读写，无需存储权限。
+     * 缓存位置写在目标 App 私有 SharedPreferences(purify_loc_cache)。
+     * 设置页（模块 App）直接用 su 读取该文件展示——设备已 root，这是最可靠的通道；
+     * RemotePreferences 反向写回与跨进程临时文件在目标进程内均不可靠。
      */
-    /** 跨进程镜像文件路径（宿主进程写入，详见 LocationCacheHook.MIRROR_FILE）。 */
-    private static final String LOC_CACHE_MIRROR = "/data/local/tmp/purify_loc_cache_mirror.txt";
+    private static final String TARGET_PREFS_XML =
+            "/data/data/" + TARGET_PKG + "/shared_prefs/purify_loc_cache.xml";
 
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
+        new Thread(() -> {
+            final String text;
+            try {
+                String xml = readFileViaSu(TARGET_PREFS_XML);
+                if (xml == null || xml.isEmpty()) {
+                    text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
+                } else {
+                    double lat = Double.longBitsToDouble(parseLongAttr(xml, "lat"));
+                    double lng = Double.longBitsToDouble(parseLongAttr(xml, "lng"));
+                    long time = parseLongAttr(xml, "time");
+                    String snapshot = matchAttr(xml, "name=\"snapshot\"", "string");
+                    String address = parseSnapshotAddress(snapshot);
+                    if (lat == 0.0 && lng == 0.0) {
+                        text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("经纬度：").append(
+                                String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
+                        if (time > 0) {
+                            sb.append("\n缓存时间：").append(
+                                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
+                                            .format(new java.util.Date(time)));
+                        }
+                        sb.append("\nPOI 地址：");
+                        if (address == null || address.isEmpty()) {
+                            sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
+                        } else {
+                            sb.append(address);
+                        }
+                        text = sb.toString();
+                    }
+                }
+            } catch (Throwable t) {
+                text = "缓存位置信息读取失败：" + t.getClass().getSimpleName();
+            }
+            final String out = text;
+            runOnUiThread(() -> view.setText(out));
+        }).start();
+    }
+
+    /** 通过 su 读取目标 App 私有文件内容（设备需 root）。 */
+    private static String readFileViaSu(String path) {
         try {
-            java.io.File f = new java.io.File(LOC_CACHE_MIRROR);
-            if (!f.exists()) {
-                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
-                return;
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
+            if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroy();
+                return null;
             }
-            String raw = new java.io.BufferedReader(new java.io.FileReader(f)).readLine();
-            if (raw == null || raw.isEmpty()) {
-                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
-                return;
-            }
-            String[] parts = raw.split("\u0001");
-            double lat = Double.parseDouble(parts[0]);
-            double lng = Double.parseDouble(parts[1]);
-            long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
-            String address = parts.length > 3 ? parts[3] : "";
-            if (lat == 0.0 && lng == 0.0) {
-                view.setText("暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。");
-                return;
-            }
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();
-            sb.append("经纬度：").append(String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
-            if (time > 0) {
-                sb.append("\n缓存时间：").append(
-                        new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
-                                .format(new java.util.Date(time)));
-            }
-            sb.append("\nPOI 地址：");
-            if (address == null || address.isEmpty()) {
-                sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
-            } else {
-                sb.append(address);
-            }
-            view.setText(sb.toString());
-            return;
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
         } catch (Throwable t) {
-            view.setText("缓存位置信息读取失败：" + t.getClass().getSimpleName());
+            return null;
         }
+    }
+
+    /** 从 SharedPreferences XML 中解析 <long name="key" value="..."/> 的数值（默认 0）。 */
+    private static long parseLongAttr(String xml, String key) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("name=\"" + key + "\"\\s+value=\"(-?\\d+)\"")
+                .matcher(xml);
+        if (m.find()) {
+            try {
+                return Long.parseLong(m.group(1));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0L;
+    }
+
+    /** 提取 <string name="key">...</string> 的文本内容。 */
+    private static String matchAttr(String xml, String nameToken, String tag) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile(java.util.regex.Pattern.quote(nameToken) + ">(.*?)</" + tag + ">")
+                .matcher(xml);
+        return m.find() ? m.group(1) : "";
     }
 
     /** 从 snapshot 字符串（k\u0002v 以 \u0001 连接）解析 getAddress 字段。 */
