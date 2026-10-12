@@ -298,104 +298,97 @@ public final class UserPagePurifier {
         }
         if (root instanceof ViewGroup) {
             centerSingleMenuEntry((ViewGroup) root);
-            compactMenuRows((ViewGroup) root);
+            repositionSingleEntryRow((ViewGroup) root);
         }
     }
 
-    /** 被压缩过高度的活动行 RecyclerView -> 原始高度；入口恢复后按原始高度重算。 */
-    private static final java.util.WeakHashMap<View, Integer> SAVED_MENU_RV_HEIGHTS =
+    /** 被上移过的活动行 -> 原始插入位置（入口数量恢复后还原）。 */
+    private static final java.util.WeakHashMap<View, Integer> MOVED_MENU_ROWS =
+            new java.util.WeakHashMap<>();
+    /** 随活动行一起搬运的分隔线（原紧邻活动行上方的细线）。 */
+    private static final java.util.WeakHashMap<View, View> MOVED_MENU_DIVIDERS =
             new java.util.WeakHashMap<>();
 
-    /**
-     * 活动行空行收起：入口被隐藏后，它们所在的网格行仍占据原高度，
-     * 在剩余入口与下方内容之间留下空白（尤其只剩一个入口时）。
-     * 布局完成后按「最后一个可见入口所在行数 × 行高」压缩 RecyclerView 高度，
-     * 让下方内容自动上移；入口重新开启时先还原基线高度再重算。
-     */
-    private static void compactMenuRows(ViewGroup row) {
-        View entry = null;
+    /** 统计 layoutMenu 内当前可见的入口数量。 */
+    private static int countVisibleMenuEntries(ViewGroup row) {
+        int n = 0;
         for (String[] item : MENU_ITEMS) {
             View v = findItemView(row, normalize(item[1]));
-            if (v != null && v.getVisibility() == View.VISIBLE) {
-                entry = v;
-                break;
-            }
+            if (v != null && v.getVisibility() == View.VISIBLE) n++;
         }
-        if (entry == null) return; // 全隐藏：collapseMenuIfEmpty 已整行收起
-        final View fEntry = entry;
-        final ViewGroup rv = entry.getParent() instanceof ViewGroup
-                ? (ViewGroup) entry.getParent() : null;
-        if (rv == null) return;
-        rv.post(() -> {
-            try {
-                android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
-                if (lp == null || lp.height <= 0) return; // wrap/match 自适应，无需处理
-                Integer saved = SAVED_MENU_RV_HEIGHTS.get(rv);
-                if (saved != null && lp.height != saved) {
-                    lp.height = saved; // 还原基线，避免在已压缩高度上重复计算
-                    rv.setLayoutParams(lp);
-                }
-                int baseline = lp.height;
-                int entryH = fEntry.getHeight();
-                if (entryH <= 0) return;
-                int spanCount = 1;
-                int rows;
-                Object lm = null;
-                try {
-                    lm = rv.getClass().getMethod("getLayoutManager").invoke(rv);
-                } catch (Throwable ignored) {
-                }
-                String lmClass = lm == null ? "" : lm.getClass().getName();
-                if (lmClass.contains("GridLayoutManager")) {
-                    Object sc = lm.getClass().getMethod("getSpanCount").invoke(lm);
-                    if (sc instanceof Integer) spanCount = Math.max(1, (Integer) sc);
-                } else if (lmClass.contains("LinearLayoutManager")) {
-                    Object ori = lm.getClass().getMethod("getOrientation").invoke(lm);
-                    if (ori instanceof Integer && (Integer) ori == 0) {
-                        rows = 1; // 横向线性：所有入口同一行，无空行可言
-                        int target = entryH * rows;
-                        if (baseline > target + 8) shrinkMenuRv(rv, baseline, target, rows, spanCount);
-                        else if (saved != null && baseline <= target + 8) SAVED_MENU_RV_HEIGHTS.remove(rv);
-                        return;
+        return n;
+    }
+
+    /**
+     * 活动行只剩一个可见入口时，把整行上移到「可提现蚕豆」卡片正下方
+     * （即资产行上方、用户标注箭头的居中位置），原空行随之收起、内容自动上排；
+     * 入口恢复多个时搬回原位还原排版。
+     */
+    private static void repositionSingleEntryRow(ViewGroup menuRow) {
+        try {
+            ViewGroup parent = menuRow.getParent() instanceof ViewGroup
+                    ? (ViewGroup) menuRow.getParent() : null;
+            if (parent == null) return;
+            int visible = countVisibleMenuEntries(menuRow);
+            if (visible == 1) {
+                if (MOVED_MENU_ROWS.containsKey(menuRow)) return;
+                int origIdx = parent.indexOfChild(menuRow);
+                if (origIdx <= 0) return;
+                // 找资产行（元宝/卡券/红包）所在兄弟容器，作为上移目标位
+                int assetIdx = -1;
+                for (int i = 0; i < parent.getChildCount(); i++) {
+                    View c = parent.getChildAt(i);
+                    if (c == menuRow) continue;
+                    String t = subtreeText(c);
+                    if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) {
+                        assetIdx = i;
+                        break;
                     }
-                    rows = lastVisibleRow(rv);
-                    if (rows > 0 && baseline > entryH * rows + 8) {
-                        shrinkMenuRv(rv, baseline, entryH * rows, rows, spanCount);
-                    } else if (saved != null) SAVED_MENU_RV_HEIGHTS.remove(rv);
-                    return;
-                } else {
-                    return; // 未知布局管理器：不冒险改动高度
                 }
-                rows = lastVisibleRow(rv);
-                if (rows <= 0) return;
-                int target = entryH * rows;
-                if (baseline > target + 8) {
-                    shrinkMenuRv(rv, baseline, target, rows, spanCount);
-                } else if (saved != null && baseline <= target + 8) {
-                    SAVED_MENU_RV_HEIGHTS.remove(rv); // 入口恢复、无需压缩，清掉记录
+                if (assetIdx < 0) return;
+                // 紧邻活动行上方、无文本且很薄的视图视为分隔线，一并搬运保持视觉分隔
+                View divider = null;
+                if (origIdx - 1 >= 0 && (origIdx - 1) != assetIdx) {
+                    View d = parent.getChildAt(origIdx - 1);
+                    if (d.getHeight() <= 6 && subtreeText(d).isEmpty()) divider = d;
                 }
-            } catch (Throwable ignored) {}
-        });
-    }
-
-    /** 最后一个可见入口所在的行号（从 1 起）；网格中隐藏子项仍占格，故按子项序号推算。 */
-    private static int lastVisibleRow(ViewGroup rv) {
-        int lastVisible = -1;
-        for (int i = 0; i < rv.getChildCount(); i++) {
-            if (rv.getChildAt(i).getVisibility() == View.VISIBLE) lastVisible = i;
+                parent.removeView(menuRow);
+                if (divider != null) parent.removeView(divider);
+                // 重新定位资产行当前位置（移除后索引可能变化）
+                int insertAt = -1;
+                for (int i = 0; i < parent.getChildCount(); i++) {
+                    String t = subtreeText(parent.getChildAt(i));
+                    if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) {
+                        insertAt = i;
+                        break;
+                    }
+                }
+                if (insertAt < 0) insertAt = 0;
+                parent.addView(menuRow, insertAt);
+                if (divider != null) {
+                    parent.addView(divider, Math.min(insertAt + 1, parent.getChildCount()));
+                }
+                MOVED_MENU_ROWS.put(menuRow, origIdx);
+                if (divider != null) MOVED_MENU_DIVIDERS.put(menuRow, divider);
+                MainHook.log("Moved single-entry menu row above asset row (origIdx=" + origIdx + ")");
+            } else if (MOVED_MENU_ROWS.containsKey(menuRow)) {
+                Integer orig = MOVED_MENU_ROWS.get(menuRow);
+                View divider = MOVED_MENU_DIVIDERS.get(menuRow);
+                MOVED_MENU_ROWS.remove(menuRow);
+                MOVED_MENU_DIVIDERS.remove(menuRow);
+                if (orig == null) return;
+                parent.removeView(menuRow);
+                int idx = Math.min(orig, parent.getChildCount());
+                parent.addView(menuRow, idx);
+                if (divider != null && divider.getParent() == parent) {
+                    parent.removeView(divider);
+                    parent.addView(divider, Math.min(idx, parent.getChildCount()));
+                }
+                MainHook.log("Restored menu row position after entries back");
+            }
+        } catch (Throwable t) {
+            MainHook.log("repositionSingleEntryRow error: " + t);
         }
-        return lastVisible < 0 ? -1 : lastVisible + 1;
-    }
-
-    private static void shrinkMenuRv(ViewGroup rv, int baseline, int target, int rows, int span) {
-        if (!SAVED_MENU_RV_HEIGHTS.containsKey(rv)) {
-            SAVED_MENU_RV_HEIGHTS.put(rv, baseline);
-        }
-        android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
-        lp.height = target;
-        rv.setLayoutParams(lp);
-        MainHook.log("Compacted menu rows: " + baseline + " -> " + target
-                + " (rows=" + rows + ", span=" + span + ")");
     }
 
     /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
