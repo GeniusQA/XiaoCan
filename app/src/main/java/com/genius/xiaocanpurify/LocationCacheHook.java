@@ -225,6 +225,12 @@ public final class LocationCacheHook {
             double lat = readDouble(tencentLocation, "getLatitude");
             double lng = readDouble(tencentLocation, "getLongitude");
             if (lat == 0.0 && lng == 0.0) return;
+            // 回放回声过滤：GPS 关闭时本模块回放缓存定位，回放对象会再次进入监听器。
+            // 坐标与缓存完全一致即为回声而非新定位，跳过重复入账——
+            // 否则会反复重写快照，抹掉注入的 getAddress，并造成广播刷屏
+            if (isEchoOfCache(lat, lng)) {
+                return;
+            }
 
             Map<String, String> strSnap = new LinkedHashMap<>();
             Map<String, Double> dblSnap = new LinkedHashMap<>();
@@ -255,9 +261,9 @@ public final class LocationCacheHook {
             dblSnap.put("getLatitude", lat);
             dblSnap.put("getLongitude", lng);
 
-            // 本机腾讯 SDK 不返回地址（getAddress=null）：新定位与上次捕获地址的
-            // 定位点相距较近（<500m）时沿用该地址，保证缓存坐标与 POI 地址始终成对，
-            // 不会因 WiFi 定位频繁刷新导致 App 展示与模块卡片各说各话
+            // 本机腾讯 SDK 不返回地址（getAddress=null）：真实新定位无地址时沿用
+            // 上次捕获的 POI 地址（回放回声已在上方过滤，不会走到这里），
+            // 保证缓存坐标与 POI 地址始终成对
             if (strSnap.get("getAddress") == null && lastAddress != null && isNearLastFix(lat, lng)) {
                 strSnap.put("getAddress", lastAddress);
             }
@@ -286,6 +292,17 @@ public final class LocationCacheHook {
         double[] ll = lastLatLng;
         if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
         return Math.abs(lat - ll[0]) < 0.005 && Math.abs(lng - ll[1]) < 0.005;
+    }
+
+    /**
+     * 是否为本模块回放缓存的回声：坐标与当前缓存完全一致（双精度级）即为回放，
+     * 而非真实新定位。GPS 关闭后并无真实 WiFi 定位——App 收到的「定位」
+     * 全部来自本模块的回放，必须跳过以免形成「回放→重复入账→重写快照」循环。
+     */
+    private static boolean isEchoOfCache(double lat, double lng) {
+        double[] cur = lastLatLng;
+        if (cur == null || (cur[0] == 0.0 && cur[1] == 0.0)) return false;
+        return Math.abs(lat - cur[0]) < 1e-7 && Math.abs(lng - cur[1]) < 1e-7;
     }
 
     /** 缓存位置经显式广播推送到模块 CacheReceiver（设置页据此展示）。 */
@@ -882,6 +899,10 @@ public final class LocationCacheHook {
         // 仅在 GPS 开启时被调用（GPS 关闭的网络定位在调用前已被屏蔽），
         // 缓存始终跟随最新 GPS 真实位置
         if (lat == 0.0 && lng == 0.0) return;
+        // 回放回声过滤（同 cacheSnapshot）：跳过本模块回放缓存造成的重复入账
+        if (isEchoOfCache(lat, lng)) {
+            return;
+        }
         try {
             Map<String, Double> dbl = new HashMap<>();
             dbl.put("getLatitude", lat);
