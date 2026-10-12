@@ -342,6 +342,7 @@ public final class LocationCacheHook {
             MainHook.log("LocationCache: address push skipped (empty)");
             return;
         }
+        lastAddress = address;
         try {
             // 用内存坐标：prefs 是异步写入，逆地理响应返回时可能还没落盘
             double[] ll = lastLatLng;
@@ -380,6 +381,7 @@ public final class LocationCacheHook {
      */
     public static void injectAddressIntoSnapshot(String address) {
         if (address == null || address.isEmpty()) return;
+        lastAddress = address;
         try {
             SharedPreferences p = getPrefs();
             if (p == null) return;
