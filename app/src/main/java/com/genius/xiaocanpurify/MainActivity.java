@@ -311,44 +311,93 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 缓存位置由目标 App 通过 ContentResolver 写入模块 CacheProvider 的自有存储
-     * (purify_cache_inbox)。设置页直接读模块自己的 SharedPreferences——同进程、无需 root、
-     * 无跨 uid 文件读取、不依赖 RemotePreferences 生命周期。
+     * 缓存位置写在目标 App 私有 SharedPreferences(purify_loc_cache)。模块（已授予 root）
+     * 先用 su 把该文件 cp 到本模块目录，再以普通方式读副本——避开 su 直接 cat 目标
+     * 私有文件时的 stdout 截断/空读问题，也不依赖跨 uid 文件权限。
      */
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
-        try {
-            SharedPreferences inbox = getSharedPreferences(CacheProvider.INBOX_PREFS, MODE_PRIVATE);
-            double lat = Double.longBitsToDouble(inbox.getLong(CacheProvider.K_LAT, 0L));
-            double lng = Double.longBitsToDouble(inbox.getLong(CacheProvider.K_LNG, 0L));
-            long time = inbox.getLong(CacheProvider.K_TIME, 0L);
-            String address = inbox.getString(CacheProvider.K_ADDR, "");
-            String text;
-            if (lat == 0.0 && lng == 0.0) {
-                text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
-            } else {
-                StringBuilder sb = new StringBuilder();
-                sb.append("经纬度：").append(
-                        String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
-                if (time > 0) {
-                    sb.append("\n缓存时间：").append(
-                            new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
-                                    .format(new java.util.Date(time)));
+        new Thread(() -> {
+            String text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
+            try {
+                java.io.File dst = new java.io.File(getFilesDir(), "loc_cache_copy.xml");
+                runSu("/system/bin/cp " + TARGET_PREFS_XML + " " + dst.getAbsolutePath());
+                if (dst.exists() && dst.length() > 0) {
+                    String xml = readAll(dst);
+                    double lat = Double.longBitsToDouble(parseLongAttr(xml, "lat"));
+                    double lng = Double.longBitsToDouble(parseLongAttr(xml, "lng"));
+                    long time = parseLongAttr(xml, "time");
+                    String address = parseSnapshotAddress(matchAttr(xml, "name=\"snapshot\"", "string"));
+                    if (!(lat == 0.0 && lng == 0.0)) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("经纬度：").append(
+                                String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
+                        if (time > 0) {
+                            sb.append("\n缓存时间：").append(
+                                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
+                                            .format(new java.util.Date(time)));
+                        }
+                        sb.append("\nPOI 地址：");
+                        if (address == null || address.isEmpty()) {
+                            sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
+                        } else {
+                            sb.append(address);
+                        }
+                        text = sb.toString();
+                    }
                 }
-                sb.append("\nPOI 地址：");
-                if (address == null || address.isEmpty()) {
-                    sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
-                } else {
-                    sb.append(address);
-                }
-                text = sb.toString();
+            } catch (Throwable t) {
+                text = "缓存位置信息读取失败：" + t.getClass().getSimpleName();
             }
             final String out = text;
-            view.setText(out);
-        } catch (Throwable t) {
-            view.setText("缓存位置信息读取失败：" + t.getClass().getSimpleName());
+            runOnUiThread(() -> view.setText(out));
+        }).start();
+    }
+
+    /** 目标 App 定位缓存偏好文件路径。 */
+    private static final String TARGET_PREFS_XML =
+            "/data/data/" + TARGET_PKG + "/shared_prefs/purify_loc_cache.xml";
+
+    /** 以 root 执行一条命令（模块需授予 root）。 */
+    private static void runSu(String cmd) {
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            p.waitFor();
+        } catch (Throwable ignored) {
         }
+    }
+
+    private static String readAll(java.io.File f) throws Exception {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        java.io.FileInputStream in = new java.io.FileInputStream(f);
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = in.read(buf)) != -1) bos.write(buf, 0, n);
+        in.close();
+        return bos.toString("UTF-8");
+    }
+
+    /** 从 SharedPreferences XML 中解析 <long name="key" value="..."/> 的数值（默认 0）。 */
+    private static long parseLongAttr(String xml, String key) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("name=\"" + key + "\"\\s+value=\"(-?\\d+)\"")
+                .matcher(xml);
+        if (m.find()) {
+            try {
+                return Long.parseLong(m.group(1));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return 0L;
+    }
+
+    /** 提取 <string name="key">...</string> 的文本内容。 */
+    private static String matchAttr(String xml, String nameToken, String tag) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile(java.util.regex.Pattern.quote(nameToken) + ">(.*?)</" + tag + ">")
+                .matcher(xml);
+        return m.find() ? m.group(1) : "";
     }
 
     /** 从 snapshot 字符串（k\u0002v 以 \u0001 连接）解析 getAddress 字段。 */
