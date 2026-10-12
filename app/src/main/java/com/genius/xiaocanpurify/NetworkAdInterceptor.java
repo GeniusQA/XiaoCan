@@ -267,6 +267,13 @@ public final class NetworkAdInterceptor {
                     MainHook.log("RESP[discover] " + url + " => "
                             + body.substring(0, Math.min(body.length(), 300)));
                 }
+                // 红包抽奖中奖数据包（「大额出行福利券 / 即将自动跳转」）到达即布防，
+                // 拦下随后自动拉起的小程序跳转，但不吞掉响应（抽奖仍正常结算）
+                if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
+                        && (body.contains("大额出行福利券") || body.contains("即将自动跳转"))) {
+                    MainHook.log("Lottery prize payload detected, arming jump guard: " + url);
+                    EnrollmentJumpGuard.armNow();
+                }
                 if (!PopupMarkers.contains(body)) {
                     return response;
                 }

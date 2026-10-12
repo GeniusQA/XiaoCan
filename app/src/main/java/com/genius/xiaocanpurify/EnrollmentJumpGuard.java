@@ -87,6 +87,10 @@ final class EnrollmentJumpGuard {
                         MainHook.log("Blocked automatic mini-app launch after enrollment");
                         return false;
                     }
+                    if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP) && request != null) {
+                        MainHook.log("LotteryProbe sendReq " + request.getClass().getName()
+                                + " " + request);
+                    }
                     return chain.proceed();
                 });
             }
@@ -130,6 +134,10 @@ final class EnrollmentJumpGuard {
                     if (storeTarget && WINDOW.isActive(SystemClock.uptimeMillis())) {
                         MainHook.log("Blocked enrollment launch prompt: " + method.getName());
                         return Boolean.FALSE;
+                    }
+                    if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)) {
+                        MainHook.log("LotteryProbe " + method.getName()
+                                + " store=" + storeTarget + " arg=" + chain.getArg(0));
                     }
                     return chain.proceed();
                 });
