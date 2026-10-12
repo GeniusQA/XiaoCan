@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -34,32 +35,63 @@ public final class LotteryTaskAutomator {
 
     private LotteryTaskAutomator() {}
 
+    /** 同一任务的重复触发去重窗口（performClick 与 onTouchEvent 会连击两次）。 */
+    private static int lastTriggerType = TYPE_NONE;
+    private static long lastTriggerMs = 0L;
+
     public static void install(XposedInterface xposed, ClassLoader classLoader) {
         try {
             Method performClick = View.class.getMethod("performClick");
             xposed.hook(performClick).intercept(chain -> {
                 View view = chain.getThisObject() instanceof View ? (View) chain.getThisObject() : null;
                 if (view != null) {
-                    int type = taskTypeOf(view);
-                    if (type == TYPE_MALL || type == TYPE_BROWSE) {
-                        lastTaskActivity = new WeakReference<>(activityOf(view));
-                        MainHook.log("LotteryTaskAutomator: browse task click captured (type=" + type + ")");
-                        scheduleAutoBack(
-                                type == TYPE_MALL ? PAGE_DWELL_MS : QUICK_BROWSE_MS,
-                                type == TYPE_MALL);
-                    } else if (type == TYPE_REDPACK) {
-                        // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
-                        // 观察宿主点击后与返回时的上报接口，用于后续直接领奖
-                        EnrollmentJumpGuard.armNow();
-                        NetworkAdInterceptor.armDiscovery(DISCOVERY_MS);
-                        MainHook.log("LotteryTaskAutomator: red packet task click, jump blocked, RPC discovery armed");
-                    }
+                    handleTask(view, "click");
                 }
                 return chain.proceed();
             });
-            MainHook.log("LotteryTaskAutomator installed");
+            // Kuikly/自绘页面点击可能不走 performClick，触摸层兜底
+            Method onTouchEvent = View.class.getDeclaredMethod("onTouchEvent", MotionEvent.class);
+            xposed.hook(onTouchEvent).intercept(chain -> {
+                View view = chain.getThisObject() instanceof View ? (View) chain.getThisObject() : null;
+                Object ev = chain.getArg(0);
+                if (view != null && ev instanceof MotionEvent
+                        && ((MotionEvent) ev).getActionMasked() == MotionEvent.ACTION_UP) {
+                    handleTask(view, "touch");
+                }
+                return chain.proceed();
+            });
+            MainHook.log("LotteryTaskAutomator installed (click+touch)");
         } catch (Throwable t) {
             MainHook.log("LotteryTaskAutomator install error: " + t);
+        }
+    }
+
+    private static void handleTask(View view, String source) {
+        if (!PurifyPrefs.enabled(PurifyPrefs.LOTTERY_TASK_AUTO)) return;
+        int type = taskTypeOf(view);
+        if (type == TYPE_NONE) {
+            // 诊断探针：命中按钮文案但未匹配到任务卡时记录实际文本，便于定位
+            String text = nearestText(view);
+            if (text.contains("立即浏览") || text.contains("立即前往") || text.contains("立即领取")) {
+                MainHook.log("LotteryTaskAutomator probe(" + source + "): unmatched button text=" + text);
+            }
+            return;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (type == lastTriggerType && now - lastTriggerMs < 1500L) return;
+        lastTriggerType = type;
+        lastTriggerMs = now;
+        if (type == TYPE_MALL || type == TYPE_BROWSE) {
+            lastTaskActivity = new WeakReference<>(activityOf(view));
+            MainHook.log("LotteryTaskAutomator: task captured (" + source + ", type=" + type + ")");
+            scheduleAutoBack(
+                    type == TYPE_MALL ? PAGE_DWELL_MS : QUICK_BROWSE_MS,
+                    type == TYPE_MALL);
+        } else if (type == TYPE_REDPACK) {
+            // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
+            EnrollmentJumpGuard.armNow();
+            NetworkAdInterceptor.armDiscovery(DISCOVERY_MS);
+            MainHook.log("LotteryTaskAutomator: red packet task (" + source + "), jump blocked, discovery armed");
         }
     }
 
@@ -68,21 +100,30 @@ public final class LotteryTaskAutomator {
     private static final int TYPE_BROWSE = 2;  // 浏览霸王餐/福利页（站内页，直接返回）
     private static final int TYPE_REDPACK = 3; // 领取美团/饿了么红包（拦跳转+探针）
 
-    /** 点击的按钮为「立即浏览/立即前往」，按所在卡片标题识别任务类型。 */
+    /** 从被点视图向上查找：某层子树同时含按钮文案与任务卡标题即命中。 */
     private static int taskTypeOf(View view) {
-        if (!PurifyPrefs.enabled(PurifyPrefs.LOTTERY_TASK_AUTO)) return TYPE_NONE;
-        String buttonText = subtreeText(view);
-        if (!buttonText.contains("立即浏览") && !buttonText.contains("立即前往")) return TYPE_NONE;
-        View parent = view;
-        for (int i = 0; i < 8 && parent != null; i++) {
-            parent = parent.getParent() instanceof View ? (View) parent.getParent() : null;
-            if (parent == null) break;
-            String card = subtreeText(parent);
-            if (card.contains("看商城优惠")) return TYPE_MALL;
-            if (card.contains("外卖霸王餐") || card.contains("浏览福利页")) return TYPE_BROWSE;
-            if (card.contains("领取美团红包") || card.contains("领取饿了么红包")) return TYPE_REDPACK;
+        View node = view;
+        for (int i = 0; i < 10 && node != null; i++) {
+            String text = subtreeText(node);
+            if (text.contains("立即浏览") || text.contains("立即前往") || text.contains("立即领取")) {
+                if (text.contains("看商城优惠")) return TYPE_MALL;
+                if (text.contains("外卖霸王餐") || text.contains("浏览福利页")) return TYPE_BROWSE;
+                if (text.contains("领取美团红包") || text.contains("领取饿了么红包")) return TYPE_REDPACK;
+            }
+            node = node.getParent() instanceof View ? (View) node.getParent() : null;
         }
         return TYPE_NONE;
+    }
+
+    /** 找到最近一层含文本的祖先子树文本（探针用）。 */
+    private static String nearestText(View view) {
+        View node = view;
+        for (int i = 0; i < 6 && node != null; i++) {
+            String text = subtreeText(node);
+            if (!text.isEmpty()) return text;
+            node = node.getParent() instanceof View ? (View) node.getParent() : null;
+        }
+        return "";
     }
 
     private static void scheduleAutoBack(long delayMs, boolean verifyTargetPage) {

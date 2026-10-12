@@ -63,13 +63,28 @@ final class EnrollmentJumpGuard {
             for (Method m : Instrumentation.class.getDeclaredMethods()) {
                 if (!"execStartActivity".equals(m.getName())) continue;
                 xposed.hook(m).intercept(chain -> {
-                    if (!WINDOW.isActive(SystemClock.uptimeMillis())) return chain.proceed();
                     Intent intent = null;
                     Activity owner = current.get();
                     for (Object arg : chain.getArgs()) {
                         if (arg instanceof Intent) intent = (Intent) arg;
                         if (arg instanceof Activity) owner = (Activity) arg;
                     }
+                    // 抽奖中奖后跳微信小程序的兜底拦截（命中开关时，无论是否布防窗口）
+                    if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP) && owner != null && intent != null) {
+                        String cls = intent.getComponent() != null
+                                ? intent.getComponent().getClassName() : "";
+                        String pkg = intent.getComponent() != null
+                                ? intent.getComponent().getPackageName()
+                                : intent.getPackage();
+                        boolean wechatMini = "com.tencent.mm".equals(pkg)
+                                && (cls.contains("appbrand") || cls.contains("WXBizEntry"));
+                        if (wechatMini) {
+                            MainHook.log("LotteryProbe startActivity -> WeChat mini-program: " + cls);
+                            MainHook.log("Blocked lottery WeChat mini-program launch (LOTTERY_POPUP)");
+                            return null;
+                        }
+                    }
+                    if (!WINDOW.isActive(SystemClock.uptimeMillis())) return chain.proceed();
                     if (owner != null && intent != null && isExternal(owner, intent)) {
                         MainHook.log("Blocked automatic external launch after enrollment");
                         return null;
@@ -82,14 +97,12 @@ final class EnrollmentJumpGuard {
                 if (!"sendReq".equals(m.getName()) || m.getParameterCount() != 1) continue;
                 xposed.hook(m).intercept(chain -> {
                     Object request = chain.getArg(0);
-                    if (WINDOW.isActive(SystemClock.uptimeMillis()) && request != null
-                            && request.getClass().getName().contains("WXLaunchMiniProgram")) {
-                        MainHook.log("Blocked automatic mini-app launch after enrollment");
-                        return false;
-                    }
-                    if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP) && request != null) {
-                        MainHook.log("LotteryProbe sendReq " + request.getClass().getName()
-                                + " " + request);
+                    if (request != null && request.getClass().getName().contains("WXLaunchMiniProgram")) {
+                        MainHook.log("LotteryProbe sendReq WXLaunchMiniProgram " + request);
+                        if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)) {
+                            MainHook.log("Blocked lottery mini-app launch (LOTTERY_POPUP)");
+                            return false;
+                        }
                     }
                     return chain.proceed();
                 });
