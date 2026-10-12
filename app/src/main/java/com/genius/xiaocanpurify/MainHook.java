@@ -193,6 +193,13 @@ public final class MainHook extends XposedModule {
             log("LotteryTaskAutomator install error: " + t);
         }
 
+        try {
+            OrderTabRedirect.install(xposed, classLoader);
+            log("OrderTabRedirect installed successfully.");
+        } catch (Throwable t) {
+            log("OrderTabRedirect install error: " + t);
+        }
+
         log("All XiaoCanPurify hooks successfully initialized!");
     }
 

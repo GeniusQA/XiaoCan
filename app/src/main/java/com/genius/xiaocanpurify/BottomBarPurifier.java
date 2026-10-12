@@ -350,10 +350,6 @@ public final class BottomBarPurifier {
             for (Method m : listenerClass.getDeclaredMethods()) {
                 if ("onItemSelected".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
-                        if (!hideVip() && !hideBenefit()) {
-                            // 无隐藏：导航位置 == 页面索引，走宿主原生逻辑
-                            return chain.proceed();
-                        }
                         int navPos = (int) chain.getArg(2);
 
                         Field this$0Field = listenerClass.getDeclaredField("this$0");
@@ -370,6 +366,11 @@ public final class BottomBarPurifier {
                         Object navView = ctx[1];
 
                         int tabIndex = pageForNavPos(navPos);
+                        // 订单 Tab：重定向到 MyOrderActivity（与「我的-全部订单」同一页）
+                        if (tabIndex >= 0
+                                && OrderTabRedirect.tryRedirect(mainActivity, navView, navPos, tabIndex)) {
+                            return false;
+                        }
                         if (tabIndex < 0) {
                             return chain.proceed();
                         }

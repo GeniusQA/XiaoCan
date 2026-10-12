@@ -74,6 +74,9 @@ public final class PurifyPrefs {
     // Location
     public static final String LOCATION_CACHE = "location_cache";
 
+    // 底部「订单」Tab 点击重定向到 MyOrderActivity（与「我的-全部订单」同一页）
+    public static final String ORDER_TAB_REDIRECT = "order_tab_redirect";
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 
