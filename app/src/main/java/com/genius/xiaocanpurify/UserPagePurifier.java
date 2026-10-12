@@ -297,97 +297,10 @@ public final class UserPagePurifier {
             MainHook.log("Restored layoutMenu after toggles off");
         }
         if (root instanceof ViewGroup) {
-            centerSingleMenuEntry((ViewGroup) root);
-            repositionSingleEntryRow((ViewGroup) root);
-        }
-    }
-
-    /** 被上移过的活动行 -> 原始插入位置（入口数量恢复后还原）。 */
-    private static final java.util.WeakHashMap<View, Integer> MOVED_MENU_ROWS =
-            new java.util.WeakHashMap<>();
-    /** 随活动行一起搬运的分隔线（原紧邻活动行上方的细线）。 */
-    private static final java.util.WeakHashMap<View, View> MOVED_MENU_DIVIDERS =
-            new java.util.WeakHashMap<>();
-
-    /** 统计 layoutMenu 内当前可见的入口数量。 */
-    private static int countVisibleMenuEntries(ViewGroup row) {
-        int n = 0;
-        for (String[] item : MENU_ITEMS) {
-            View v = findItemView(row, normalize(item[1]));
-            if (v != null && v.getVisibility() == View.VISIBLE) n++;
-        }
-        return n;
-    }
-
-    /**
-     * 活动行只剩一个可见入口时，把整行上移到「可提现蚕豆」卡片正下方
-     * （即资产行上方、用户标注箭头的居中位置），原空行随之收起、内容自动上排；
-     * 入口恢复多个时搬回原位还原排版。
-     */
-    private static void repositionSingleEntryRow(ViewGroup menuRow) {
-        try {
-            ViewGroup parent = menuRow.getParent() instanceof ViewGroup
-                    ? (ViewGroup) menuRow.getParent() : null;
-            if (parent == null) return;
-            int visible = countVisibleMenuEntries(menuRow);
-            if (visible == 1) {
-                if (MOVED_MENU_ROWS.containsKey(menuRow)) return;
-                int origIdx = parent.indexOfChild(menuRow);
-                if (origIdx <= 0) return;
-                // 找资产行（元宝/卡券/红包）所在兄弟容器，作为上移目标位
-                int assetIdx = -1;
-                for (int i = 0; i < parent.getChildCount(); i++) {
-                    View c = parent.getChildAt(i);
-                    if (c == menuRow) continue;
-                    String t = subtreeText(c);
-                    if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) {
-                        assetIdx = i;
-                        break;
-                    }
-                }
-                if (assetIdx < 0) return;
-                // 紧邻活动行上方、无文本且很薄的视图视为分隔线，一并搬运保持视觉分隔
-                View divider = null;
-                if (origIdx - 1 >= 0 && (origIdx - 1) != assetIdx) {
-                    View d = parent.getChildAt(origIdx - 1);
-                    if (d.getHeight() <= 6 && subtreeText(d).isEmpty()) divider = d;
-                }
-                parent.removeView(menuRow);
-                if (divider != null) parent.removeView(divider);
-                // 重新定位资产行当前位置（移除后索引可能变化）
-                int insertAt = -1;
-                for (int i = 0; i < parent.getChildCount(); i++) {
-                    String t = subtreeText(parent.getChildAt(i));
-                    if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) {
-                        insertAt = i;
-                        break;
-                    }
-                }
-                if (insertAt < 0) insertAt = 0;
-                parent.addView(menuRow, insertAt);
-                if (divider != null) {
-                    parent.addView(divider, Math.min(insertAt + 1, parent.getChildCount()));
-                }
-                MOVED_MENU_ROWS.put(menuRow, origIdx);
-                if (divider != null) MOVED_MENU_DIVIDERS.put(menuRow, divider);
-                MainHook.log("Moved single-entry menu row above asset row (origIdx=" + origIdx + ")");
-            } else if (MOVED_MENU_ROWS.containsKey(menuRow)) {
-                Integer orig = MOVED_MENU_ROWS.get(menuRow);
-                View divider = MOVED_MENU_DIVIDERS.get(menuRow);
-                MOVED_MENU_ROWS.remove(menuRow);
-                MOVED_MENU_DIVIDERS.remove(menuRow);
-                if (orig == null) return;
-                parent.removeView(menuRow);
-                int idx = Math.min(orig, parent.getChildCount());
-                parent.addView(menuRow, idx);
-                if (divider != null && divider.getParent() == parent) {
-                    parent.removeView(divider);
-                    parent.addView(divider, Math.min(idx, parent.getChildCount()));
-                }
-                MainHook.log("Restored menu row position after entries back");
+            // 单入口优先嵌入蚕豆卡空位（收起活动行）；结构不满足时退回原居中逻辑
+            if (!embedSingleMenuEntryIntoBeanCard((ViewGroup) root)) {
+                centerSingleMenuEntry((ViewGroup) root);
             }
-        } catch (Throwable t) {
-            MainHook.log("repositionSingleEntryRow error: " + t);
         }
     }
 
@@ -501,6 +414,208 @@ public final class UserPagePurifier {
             }
             CENTERED_CHILDREN.clear();
         }
+    }
+
+    /* ==================== 单入口嵌入蚕豆卡空位 ==================== */
+
+    /** 嵌入的入口快照视图。 */
+    private static android.widget.ImageView embeddedSnapshotView;
+    /** 被快照的原始入口（宿主重渲染后实例变化时需重新嵌入）。 */
+    private static View embeddedEntryView;
+    /** 被收起的活动行（还原时恢复显示）。 */
+    private static ViewGroup embeddedRowView;
+    /** 承载快照的卡片及其被改为 WRAP_CONTENT 前的原始高度。 */
+    private static View embeddedCardView;
+    private static Integer savedCardHeight;
+
+    /**
+     * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
+     * 「可提现蚕豆/余额」与「提现」按钮之间的空位，并收起活动行。
+     * 入口视图可能挂在 RecyclerView 内，直接 reparent 有回收崩溃风险，
+     * 因此采用位图快照 + 点击代理（快照点击转调原入口 performClick）。
+     *
+     * @return true 表示已按嵌入方案处理（成功调度或已嵌入），调用方无需再做居中
+     */
+    private static boolean embedSingleMenuEntryIntoBeanCard(ViewGroup row) {
+        int visibleEntries = 0;
+        View entry = null;
+        for (String[] item : MENU_ITEMS) {
+            View v = findItemView(row, normalize(item[1]));
+            if (v != null && v.getVisibility() == View.VISIBLE) {
+                visibleEntries++;
+                entry = v;
+            }
+        }
+        if (visibleEntries != 1) {
+            restoreEmbeddedEntry(row);
+            return false;
+        }
+        if (entry == null) return false;
+        if (embeddedSnapshotView != null && embeddedEntryView == entry) return true;
+        // 入口实例变化（宿主重渲染）：清旧快照后重嵌
+        restoreEmbeddedEntry(row);
+
+        final View fEntry = entry;
+        final ViewGroup fRow = row;
+        row.post(() -> {
+            try {
+                if (!doEmbedSingleEntry(fEntry, fRow)) {
+                    // 结构不满足（找不到提现按钮/容器非横向线性等）：退回居中
+                    centerSingleMenuEntry(fRow);
+                }
+            } catch (Throwable t) {
+                MainHook.log("EmbedEntry error: " + t);
+                try {
+                    centerSingleMenuEntry(fRow);
+                } catch (Throwable ignored) {}
+            }
+        });
+        return true;
+    }
+
+    /** 执行嵌入；返回 false 表示结构不满足需回退居中。 */
+    private static boolean doEmbedSingleEntry(View entry, ViewGroup row) {
+        if (entry.getWidth() <= 0 || entry.getHeight() <= 0) return false;
+        if (entry.getParent() == null) return false;
+        // 布局后宿主可能已再次调整入口数量，重查一遍
+        int count = 0;
+        for (String[] item : MENU_ITEMS) {
+            View v = findItemView(row, normalize(item[1]));
+            if (v != null && v.getVisibility() == View.VISIBLE) count++;
+        }
+        if (count != 1) return false;
+
+        // 从活动行向上找到视图树顶端，定位「提现」按钮（精确文案，
+        // 避免「可提现蚕豆」中的「提现」子串误匹配）
+        View top = row;
+        while (top.getParent() instanceof View) top = (View) top.getParent();
+        if (!(top instanceof ViewGroup)) return false;
+        View withdraw = findExactTextView((ViewGroup) top, "提现");
+        if (withdraw == null || !(withdraw.getParent() instanceof ViewGroup)) {
+            MainHook.log("EmbedEntry: withdraw button not found, fallback");
+            return false;
+        }
+        ViewGroup slot = (ViewGroup) withdraw.getParent();
+        if (!(slot instanceof android.widget.LinearLayout)
+                || ((android.widget.LinearLayout) slot).getOrientation()
+                        != android.widget.LinearLayout.HORIZONTAL) {
+            MainHook.log("EmbedEntry: slot not horizontal LinearLayout ("
+                    + slot.getClass().getSimpleName() + "), fallback");
+            return false;
+        }
+
+        // 快照入口视图（先清历史居中平移，避免快照带偏移）
+        View.OnLayoutChangeListener oldL = CENTERED_LISTENERS.get(entry);
+        if (oldL != null) {
+            entry.removeOnLayoutChangeListener(oldL);
+            CENTERED_LISTENERS.remove(entry);
+        }
+        CENTERED_CHILDREN.remove(entry);
+        entry.setTranslationX(0f);
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                entry.getWidth(), entry.getHeight(),
+                android.graphics.Bitmap.Config.ARGB_8888);
+        entry.draw(new android.graphics.Canvas(bmp));
+
+        android.widget.ImageView snap = new android.widget.ImageView(slot.getContext());
+        snap.setImageBitmap(bmp);
+        snap.setOnClickListener(v -> {
+            try {
+                entry.performClick();
+            } catch (Throwable ignored) {}
+        });
+        android.widget.LinearLayout.LayoutParams slp =
+                new android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        int m = dp(slot, 12);
+        slp.leftMargin = m;
+        slp.rightMargin = m;
+        slot.addView(snap, slot.indexOfChild(withdraw), slp);
+
+        // 卡片若为固定高度且装不下入口时改为 wrap（记录原值供还原）
+        View card = enclosingBeanCard(slot);
+        if (card != null) {
+            android.view.ViewGroup.LayoutParams clp = card.getLayoutParams();
+            if (clp != null && clp.height > 0 && clp.height < entry.getHeight() + dp(slot, 8)) {
+                savedCardHeight = clp.height;
+                embeddedCardView = card;
+                clp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                card.setLayoutParams(clp);
+            }
+        }
+
+        row.setVisibility(View.GONE);
+        embeddedSnapshotView = snap;
+        embeddedEntryView = entry;
+        embeddedRowView = row;
+        MainHook.log("EmbedEntry: single menu entry embedded into withdraw card, row collapsed");
+        return true;
+    }
+
+    /** 撤销嵌入：移除快照、还原卡片高度、恢复活动行显示。 */
+    private static void restoreEmbeddedEntry(ViewGroup row) {
+        if (embeddedSnapshotView == null) return;
+        try {
+            ViewGroup p = embeddedSnapshotView.getParent() instanceof ViewGroup
+                    ? (ViewGroup) embeddedSnapshotView.getParent() : null;
+            if (p != null) p.removeView(embeddedSnapshotView);
+            if (embeddedCardView != null && savedCardHeight != null) {
+                android.view.ViewGroup.LayoutParams clp = embeddedCardView.getLayoutParams();
+                if (clp != null) {
+                    clp.height = savedCardHeight;
+                    embeddedCardView.setLayoutParams(clp);
+                }
+            }
+        } catch (Throwable ignored) {}
+        embeddedSnapshotView = null;
+        embeddedEntryView = null;
+        embeddedCardView = null;
+        savedCardHeight = null;
+        ViewGroup r = row != null ? row : embeddedRowView;
+        if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
+            r.setVisibility(View.VISIBLE);
+            MainHook.log("EmbedEntry: menu row restored");
+        }
+        embeddedRowView = null;
+    }
+
+    /** 查找文本精确等于关键词的 TextView（深度优先）。 */
+    private static View findExactTextView(ViewGroup parent, String keyword) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof android.widget.TextView
+                    && normalize(((android.widget.TextView) child).getText().toString()).equals(keyword)) {
+                return child;
+            }
+            if (child instanceof ViewGroup) {
+                View found = findExactTextView((ViewGroup) child, keyword);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 从入口槽位向上找「可提现蚕豆」卡片的边界容器：
+     * 祖先子树一旦出现其它板块文案（元宝/卡券/红包等）即停止。
+     */
+    private static View enclosingBeanCard(View node) {
+        View card = node;
+        View cur = node;
+        while (cur.getParent() instanceof View) {
+            View parent = (View) cur.getParent();
+            if (!subtreeText(parent).contains(normalize("可提现蚕豆"))) break;
+            if (subtreeHasOtherSection(subtreeText(parent), "可提现蚕豆")) break;
+            card = parent;
+            cur = parent;
+        }
+        return card != node ? card : null;
+    }
+
+    private static int dp(View v, int value) {
+        return (int) (value * v.getResources().getDisplayMetrics().density + 0.5f);
     }
 
     /**
