@@ -311,48 +311,42 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 缓存位置由目标 App 写入模块 RemotePreferences(key=loc_cache_info)，
-     * 格式 lat \u0001 lng \u0001 time [\u0001 address]。此处直接读取展示。
+ * 缓存位置由目标 App 通过显式广播推送到本模块（CacheReceiver 存入 purify_cache_inbox），
+     * 设置页直接读模块自有存储——无需 root、无跨 uid 文件读取、绕过包可见性限制。
      */
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
-        new Thread(() -> {
-            String text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
-            try {
-                SharedPreferences rp = remotePrefs;
-                String raw = rp != null ? rp.getString("loc_cache_info", null) : null;
-                android.util.Log.w("LocCache", "remotePrefs=" + (rp != null) + " raw=" + raw);
-                if (raw != null && !raw.isEmpty()) {
-                    String[] parts = raw.split("\u0001");
-                    double lat = Double.parseDouble(parts[0]);
-                    double lng = Double.parseDouble(parts[1]);
-                    long time = parts.length > 2 ? Long.parseLong(parts[2]) : 0L;
-                    String address = parts.length > 3 ? parts[3] : "";
-                    if (!(lat == 0.0 && lng == 0.0)) {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("经纬度：").append(
-                                String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
-                        if (time > 0) {
-                            sb.append("\n缓存时间：").append(
-                                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
-                                            .format(new java.util.Date(time)));
-                        }
-                        sb.append("\nPOI 地址：");
-                        if (address == null || address.isEmpty()) {
-                            sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
-                        } else {
-                            sb.append(address);
-                        }
-                        text = sb.toString();
-                    }
+        try {
+            SharedPreferences inbox = getSharedPreferences("purify_cache_inbox", MODE_PRIVATE);
+            double lat = Double.longBitsToDouble(inbox.getLong("lat", 0L));
+            double lng = Double.longBitsToDouble(inbox.getLong("lng", 0L));
+            long time = inbox.getLong("time", 0L);
+            String address = inbox.getString("address", "");
+            String text;
+            if (lat == 0.0 && lng == 0.0) {
+                text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
+            } else {
+                StringBuilder sb = new StringBuilder();
+                sb.append("经纬度：").append(
+                        String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
+                if (time > 0) {
+                    sb.append("\n缓存时间：").append(
+                            new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
+                                    .format(new java.util.Date(time)));
                 }
-            } catch (Throwable t) {
-                text = "缓存位置信息读取失败：" + t.getClass().getSimpleName();
+                sb.append("\nPOI 地址：");
+                if (address == null || address.isEmpty()) {
+                    sb.append("（快照中无地址，开启 GPS 重新定位一次即可刷新）");
+                } else {
+                    sb.append(address);
+                }
+                text = sb.toString();
             }
-            final String out = text;
-            runOnUiThread(() -> view.setText(out));
-        }).start();
+            view.setText(text);
+        } catch (Throwable t) {
+            view.setText("缓存位置信息读取失败：" + t.getClass().getSimpleName());
+        }
     }
 
     private static String readAll(java.io.File f) throws Exception {

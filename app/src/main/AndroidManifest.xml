@@ -31,6 +31,15 @@
             </intent-filter>
         </activity>
 
+        <!-- 缓存位置推送入口：目标 App 通过显式广播写入本模块（绕过包可见性，模块无需 root） -->
+        <receiver
+            android:name=".CacheReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.genius.xiaocanpurify.ACTION_LOC_CACHE" />
+            </intent-filter>
+        </receiver>
+
         <!-- 承载桌面图标的入口：隐藏图标时禁用该 alias 即可，设置页仍可通过 LSPosed 模块列表打开 -->
         <activity-alias
             android:name=".MainActivityAlias"

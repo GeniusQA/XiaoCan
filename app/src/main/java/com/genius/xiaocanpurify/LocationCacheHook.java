@@ -273,17 +273,25 @@ public final class LocationCacheHook {
      */
     private static void mirrorToRemote(double lat, double lng, String address) {
         try {
-            String value = lat + "\u0001" + lng + "\u0001" + System.currentTimeMillis()
-                    + "\u0001" + (address == null ? "" : address);
-            PurifyPrefs.putRemoteString(REMOTE_LOC_INFO, value);
-            MainHook.log("LocationCache: mirrored loc_cache_info=" + value);
+            android.content.Context ctx = currentApplication();
+            if (ctx == null) {
+                MainHook.log("LocationCache: mirror ctx null");
+                return;
+            }
+            android.content.Intent i = new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_LOC_CACHE");
+            // 显式广播（setPackage）可绕过 Android 11+ 包可见性限制
+            i.setPackage("com.genius.xiaocanpurify");
+            i.putExtra("lat", lat);
+            i.putExtra("lng", lng);
+            i.putExtra("time", System.currentTimeMillis());
+            i.putExtra("address", address == null ? "" : address);
+            ctx.sendBroadcast(i);
+            MainHook.log("LocationCache: broadcast sent to module, lat=" + lat + " lng=" + lng);
         } catch (Throwable t) {
             MainHook.log("LocationCache: mirror failed: " + t);
         }
     }
-
-    /** 远程镜像 key：模块设置页据此展示缓存位置。 */
-    private static final String REMOTE_LOC_INFO = "loc_cache_info";
 
     private static java.util.List<Class<?>> collectLocationInterfaces(Class<?> cls) {
         java.util.List<Class<?>> out = new java.util.ArrayList<>();
