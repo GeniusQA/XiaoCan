@@ -91,10 +91,16 @@ public final class OrderTabRedirect {
             Intent intent = new Intent();
             intent.setComponent(new ComponentName(TARGET_PKG, TARGET_ACTIVITY));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (lastExtras != null) intent.putExtras(lastExtras);
+            Bundle extras = lastExtras;
+            if (extras == null) {
+                // 探针尚未捕获自然跳转 extras 时，用「全部订单」页的 TheRouter 参数兜底
+                extras = new Bundle();
+                extras.putString("therouter_path", "/my_order?type=0");
+                extras.putInt("type", 0);
+            }
+            intent.putExtras(extras);
             mainActivity.startActivity(intent);
-            MainHook.log("OrderTabRedirect: launched MyOrderActivity (extras="
-                    + (lastExtras == null ? "none" : "templated") + ")");
+            MainHook.log("OrderTabRedirect: launched MyOrderActivity extras=" + extras);
             // 让订单 Tab 维持高亮，实际页面在独立 Activity
             if (navView != null) {
                 try {
