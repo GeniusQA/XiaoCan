@@ -290,9 +290,11 @@ public final class UserPagePurifier {
             }
         }
         // 开关从「全隐藏」退回部分隐藏时，恢复之前被 collapseMenuIfEmpty 收起的整行；
-        // hasVisibleChild 校验避免覆盖宿主自身的隐藏意图
+        // hasVisibleChild 校验避免覆盖宿主自身的隐藏意图；
+        // 嵌入方案收起的容器（embeddedRowView）不在此恢复，由嵌入还原逻辑负责
         if (root instanceof ViewGroup && root.getVisibility() == View.GONE
-                && hasVisibleChild((ViewGroup) root)) {
+                && hasVisibleChild((ViewGroup) root)
+                && (embeddedSnapshotView == null || embeddedRowView != root)) {
             root.setVisibility(View.VISIBLE);
             MainHook.log("Restored layoutMenu after toggles off");
         }
@@ -615,10 +617,28 @@ public final class UserPagePurifier {
 
         // 原入口一并隐藏：宿主不再复位行可见性（与全隐藏收起的稳定路径一致）
         entry.setVisibility(View.GONE);
-        row.setVisibility(View.GONE);
+        // 只收起承载入口的子容器：layoutMenu 可能同时承载资产行（元宝/卡券/红包），
+        // 整个 layoutMenu GONE 会把资产行连带藏掉——向上爬到不含资产行关键词的最高层
+        ViewGroup collapseTarget = null;
+        View cur = entry;
+        while (cur != row && cur != null) {
+            View p = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+            if (!(p instanceof ViewGroup)) break;
+            String t = subtreeText(p);
+            if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) break;
+            collapseTarget = (ViewGroup) p;
+            cur = p;
+        }
+        if (collapseTarget == null) {
+            collapseTarget = entry.getParent() instanceof ViewGroup
+                    ? (ViewGroup) entry.getParent() : null;
+        }
+        if (collapseTarget != null) {
+            collapseTarget.setVisibility(View.GONE);
+        }
         embeddedSnapshotView = inline;
         embeddedEntryView = entry;
-        embeddedRowView = row;
+        embeddedRowView = collapseTarget;
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
     }
@@ -756,7 +776,7 @@ public final class UserPagePurifier {
         embeddedLeftColView = null;
         embeddedBtnWrapView = null;
         embeddedSlotListener = null;
-        ViewGroup r = row != null ? row : embeddedRowView;
+        ViewGroup r = embeddedRowView != null ? embeddedRowView : row;
         if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
             r.setVisibility(View.VISIBLE);
             MainHook.log("EmbedEntry: menu row restored");
