@@ -35,6 +35,4 @@ android {
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")
-    // XSharedPreferences：由 LSPosed 服务代读目标 App 私有偏好，模块 App 无需 root
-    compileOnly("de.robv.android.xposed:api:82")
 }
