@@ -304,9 +304,22 @@ public final class UserPagePurifier {
                 centerSingleMenuEntry((ViewGroup) root);
             }
         }
-        // 免单资格横幅位于 layoutMenu 内，宿主每次重渲染都会复位其可见性，逐次重藏
+        // 免单资格横幅：宿主每次重渲染都会复位其可见性，逐次从页面根重藏
+        // （菜单 binding 根不一定包含横幅，必须向上爬到页面根再找）
         if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
-            hideFreeOrderQualifyCard(binding);
+            View menuRoot = getBindingRoot(binding);
+            if (menuRoot != null) {
+                View top = menuRoot;
+                while (top.getParent() instanceof View) top = (View) top.getParent();
+                if (top instanceof ViewGroup) {
+                    View card = findSmallestContainingAll((ViewGroup) top, new String[]{
+                            normalize("订单待免单"), normalize("今日邀")});
+                    if (card != null && card.getVisibility() != View.GONE) {
+                        card.setVisibility(View.GONE);
+                        MainHook.log("Hidden free-order qualify card (per-render)");
+                    }
+                }
+            }
         }
     }
 
@@ -435,6 +448,8 @@ public final class UserPagePurifier {
     private static View embeddedLeftColView;
     private static View embeddedBtnWrapView;
     private static View.OnLayoutChangeListener embeddedSlotListener;
+    /** 活动行根视图（点击时重新定位当前入口实例，宿主重渲染会更换实例）。 */
+    private static ViewGroup embeddedMenuRow;
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -561,8 +576,36 @@ public final class UserPagePurifier {
         }
         inline.setOnClickListener(v -> {
             try {
-                entry.performClick();
-            } catch (Throwable ignored) {}
+                // 宿主重渲染会更换入口实例：点击时重新定位当前入口
+                View target = null;
+                ViewGroup rowRef = embeddedMenuRow;
+                if (rowRef != null) {
+                    for (String[] item : MENU_ITEMS) {
+                        View v2 = findItemView(rowRef, normalize(item[1]));
+                        if (v2 != null) {
+                            target = v2;
+                            break;
+                        }
+                    }
+                }
+                if (target == null) target = entry;
+                // 点击处理可能不在入口本体（如挂在其容器/条目上），沿祖先链找
+                View cur = target;
+                for (int i = 0; i < 6 && cur != null; i++) {
+                    if (cur.hasOnClickListeners()) {
+                        MainHook.log("EmbedEntry: click -> "
+                                + cur.getClass().getSimpleName()
+                                + (cur == target ? " (entry)" : " (ancestor)"));
+                        cur.performClick();
+                        return;
+                    }
+                    cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+                }
+                target.performClick();
+                MainHook.log("EmbedEntry: click fallback on entry");
+            } catch (Throwable t) {
+                MainHook.log("EmbedEntry: click error: " + t);
+            }
         });
 
         android.view.ViewGroup.LayoutParams slp;
@@ -643,6 +686,7 @@ public final class UserPagePurifier {
         embeddedSnapshotView = inline;
         embeddedEntryView = entry;
         embeddedRowView = collapseTarget;
+        embeddedMenuRow = row;
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
     }
@@ -780,6 +824,7 @@ public final class UserPagePurifier {
         embeddedLeftColView = null;
         embeddedBtnWrapView = null;
         embeddedSlotListener = null;
+        embeddedMenuRow = null;
         ViewGroup r = embeddedRowView != null ? embeddedRowView : row;
         if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
             r.setVisibility(View.VISIBLE);
