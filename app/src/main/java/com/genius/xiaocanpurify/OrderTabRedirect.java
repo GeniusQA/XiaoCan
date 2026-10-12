@@ -25,8 +25,8 @@ public final class OrderTabRedirect {
     private static final String TARGET_PKG = "com.realtech.xiaocan";
     private static final String TARGET_ACTIVITY = "com.realtech.my_order.ui.MyOrderActivity";
 
-    /** 订单 Tab 在原始 Tab 列表 [HOME, TASK, ORDER, VIP, USER] 中的索引。 */
-    static final int ORDER_TAB_INDEX = 2;
+    /** 订单 Tab 在原始页面列表中的索引（实测 navPos=1 -> tabIndex=1）。 */
+    static final int ORDER_TAB_INDEX = 1;
 
     /** 最近一次「我的 → 全部订单」自然跳转的 Intent extras 模板。 */
     private static volatile Bundle lastExtras;
@@ -77,15 +77,47 @@ public final class OrderTabRedirect {
     }
 
     /**
+     * 取导航项(navPos)的标题文本，用于识别订单 Tab（标题为「订单」），
+     * 兼容页面索引因隐藏 Tab 而变化的情况。
+     */
+    private static String navItemTitle(Object navView, int navPos) {
+        try {
+            if (!(navView instanceof android.view.ViewGroup)) return "";
+            android.view.ViewGroup group = (android.view.ViewGroup) navView;
+            if (navPos < 0 || navPos >= group.getChildCount()) return "";
+            StringBuilder sb = new StringBuilder();
+            collectText(group.getChildAt(navPos), sb);
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static void collectText(android.view.View v, StringBuilder sb) {
+        if (v instanceof android.widget.TextView) {
+            CharSequence cs = ((android.widget.TextView) v).getText();
+            if (cs != null) sb.append(cs).append(' ');
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectText(g.getChildAt(i), sb);
+            }
+        }
+    }
+
+    /**
      * 在订单 Tab 被选中时拦截，启动 MyOrderActivity 并返回 true（表示已处理）。
      * 非订单 Tab 或功能未开启时返回 false，交由调用方走原生逻辑。
      */
     public static boolean tryRedirect(Activity mainActivity, Object navView, int navPos, int tabIndex) {
         boolean enabled = PurifyPrefs.enabled(PurifyPrefs.ORDER_TAB_REDIRECT);
+        String navTitle = navItemTitle(navView, navPos);
+        boolean isOrderTab = (tabIndex == ORDER_TAB_INDEX) || navTitle.contains("订单");
         MainHook.log("tryRedirect: enabled=" + enabled + " tabIndex=" + tabIndex + " want=" + ORDER_TAB_INDEX
-                + " main=" + (mainActivity != null));
+                + " navTitle='" + navTitle + "' isOrder=" + isOrderTab);
         if (!enabled) return false;
-        if (tabIndex != ORDER_TAB_INDEX) return false;
+        if (!isOrderTab) return false;
         if (mainActivity == null) return false;
         try {
             Intent intent = new Intent();

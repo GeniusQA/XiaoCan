@@ -16,7 +16,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.LinkedHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
@@ -313,25 +312,22 @@ public class MainActivity extends Activity {
 
     /**
      * 缓存位置写在目标 App 私有 SharedPreferences(purify_loc_cache)。
-     * 设置页（模块 App）直接用 su 读取该文件展示——设备已 root，这是最可靠的通道；
-     * RemotePreferences 反向写回与跨进程临时文件在目标进程内均不可靠。
+     * 设置页用 XSharedPreferences 由 LSPosed 服务代读该私有偏好——无需模块 App 有 root，
+     * 也避开 RemotePreferences 反向写回（目标进程内静默失败）与跨进程临时文件（不可写）的问题。
      */
-    private static final String TARGET_PREFS_XML =
-            "/data/data/" + TARGET_PKG + "/shared_prefs/purify_loc_cache.xml";
-
     private void refreshLocationInfo() {
         TextView view = locationInfoText;
         if (view == null) return;
         new Thread(() -> {
             String text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
             try {
-                String xml = readFileViaSu(TARGET_PREFS_XML);
+                String xml = readTargetPrefsXml();
                 if (xml != null && !xml.isEmpty()) {
                     double lat = Double.longBitsToDouble(parseLongAttr(xml, "lat"));
                     double lng = Double.longBitsToDouble(parseLongAttr(xml, "lng"));
                     long time = parseLongAttr(xml, "time");
-                    String snapshot = matchAttr(xml, "name=\"snapshot\"", "string");
-                    String address = parseSnapshotAddress(snapshot);
+                    String address = parseSnapshotAddress(
+                            matchAttr(xml, "name=\"snapshot\"", "string"));
                     if (!(lat == 0.0 && lng == 0.0)) {
                         StringBuilder sb = new StringBuilder();
                         sb.append("经纬度：").append(
@@ -358,26 +354,46 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    /** 通过 su 读取目标 App 私有文件内容（设备需 root）。 */
-    private static String readFileViaSu(String path) {
+    /** 目标 App 定位缓存偏好文件路径（供 su 兜底读取）。 */
+    private static final String TARGET_PREFS_XML =
+            "/data/data/" + TARGET_PKG + "/shared_prefs/purify_loc_cache.xml";
+
+    /**
+     * 读取目标 App 私有偏好：优先 XSharedPreferences（LSPosed 代读，无需模块 root），
+     * 失败则用 su 直读文件（模块已授予 root 时可用）。
+     */
+    private static String readTargetPrefsXml() {
         try {
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
-            if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
-                p.destroy();
-                android.util.Log.w("LocCache", "su timeout: " + path);
-                return null;
+            de.robv.android.xposed.XSharedPreferences xp =
+                    new de.robv.android.xposed.XSharedPreferences(TARGET_PKG, "purify_loc_cache");
+            long latBits = xp.getLong("lat", 0L);
+            long lngBits = xp.getLong("lng", 0L);
+            long time = xp.getLong("time", 0L);
+            if (latBits != 0L || lngBits != 0L) {
+                String snap = xp.getString("snapshot", "");
+                StringBuilder sb = new StringBuilder();
+                sb.append("<long name=\"lat\" value=\"").append(latBits).append("\"/>");
+                sb.append("<long name=\"lng\" value=\"").append(lngBits).append("\"/>");
+                sb.append("<long name=\"time\" value=\"").append(time).append("\"/>");
+                sb.append("<string name=\"snapshot\">").append(snap == null ? "" : snap).append("</string>");
+                return sb.toString();
             }
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream(), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-            android.util.Log.w("LocCache", "su read len=" + sb.length() + " exit=" + p.exitValue());
-            return sb.toString();
-        } catch (Throwable t) {
-            android.util.Log.w("LocCache", "su error: " + t);
-            return null;
+        } catch (Throwable ignored) {
         }
+        try {
+            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + TARGET_PREFS_XML});
+            if (p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
+                java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(p.getInputStream(), "UTF-8"));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+                return sb.toString();
+            }
+            p.destroy();
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     /** 从 SharedPreferences XML 中解析 <long name="key" value="..."/> 的数值（默认 0）。 */
