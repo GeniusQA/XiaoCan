@@ -328,8 +328,8 @@ public class MainActivity extends Activity {
                 text = "暂无缓存位置：请开启 GPS 进入小蚕，定位成功一次后自动记录。";
             } else {
                 StringBuilder sb = new StringBuilder();
-                sb.append("经纬度：").append(
-                        String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng));
+                sb.append("纬度：").append(String.format(java.util.Locale.US, "%.6f", lat));
+                sb.append("\n经度：").append(String.format(java.util.Locale.US, "%.6f", lng));
                 if (time > 0) {
                     sb.append("\n缓存时间：").append(
                             new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.CHINA)
