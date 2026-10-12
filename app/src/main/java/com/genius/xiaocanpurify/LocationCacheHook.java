@@ -725,7 +725,17 @@ public final class LocationCacheHook {
                                                         && mArgs != null && mArgs.length >= 1
                                                         && mArgs[0] instanceof Location) {
                                                     Location loc = (Location) mArgs[0];
-                                                    if (!isGpsActuallyEnabled()) {
+                                                    // gps/fused 定位只可能来自真实 GPS 硬件，永远放行——
+                                                    // 不能信任 isGpsActuallyEnabled()：设备上其它定位类
+                                                    // 模块/应用会伪造 isProviderEnabled=false，误判成
+                                                    // 「GPS 关闭」会把 Flutter 插件请求的真实定位拦截成
+                                                    // 缓存回放，导致首页显示陈旧位置。「GPS 关闭只回放」
+                                                    // 仅针对 network 降级定位
+                                                    String fixProvider =
+                                                            loc.getProvider() == null ? "" : loc.getProvider();
+                                                    boolean realHardwareFix = "gps".equals(fixProvider)
+                                                            || "fused".equals(fixProvider);
+                                                    if (!realHardwareFix && !isGpsActuallyEnabled()) {
                                                         // GPS 关闭：屏蔽降级网络定位，改为回放缓存；
                                                         // 无缓存则丢弃回调（宿主按定位失败处理）
                                                         MainHook.log("LocationCache: framework fix blocked (gps-off judged), provider="
