@@ -261,7 +261,7 @@ public final class LocationCacheHook {
             e.apply();
             cacheValid = true;
             MainHook.log("LocationCache: cached location " + lat + "," + lng);
-            mirrorToRemote();
+            mirrorToRemote(lat, lng, strSnap.get("getAddress"));
         } catch (Throwable t) {
             MainHook.log("LocationCache: cacheSnapshot failed: " + t);
         }
@@ -271,21 +271,21 @@ public final class LocationCacheHook {
      * 把缓存位置通过 ContentResolver 写入模块 CacheProvider（跨进程 IPC）：
      * 目标 App 无需 root，模块设置页直接读模块自有存储展示。模块 App 侧无 root 也能收到。
      */
-    private static void mirrorToRemote() {
+    private static void mirrorToRemote(double lat, double lng, String address) {
         try {
             android.content.Context ctx = currentApplication();
-            if (ctx == null) return;
-            double[] ll = cachedLatLng();
-            if (ll[0] == 0.0 && ll[1] == 0.0) return;
-            String address = readStrSnapshot().get("getAddress");
+            if (ctx == null) {
+                MainHook.log("LocationCache: mirror ctx null");
+                return;
+            }
             android.content.ContentValues cv = new android.content.ContentValues();
-            cv.put("lat", ll[0]);
-            cv.put("lng", ll[1]);
-            cv.put("time", cachedTime());
+            cv.put("lat", lat);
+            cv.put("lng", lng);
+            cv.put("time", System.currentTimeMillis());
             cv.put("address", address == null ? "" : address);
             android.net.Uri res = ctx.getContentResolver().insert(
                     android.net.Uri.parse("content://com.genius.xiaocanpurify.cache/loc"), cv);
-            MainHook.log("LocationCache: mirrored to module provider, uri=" + res);
+            MainHook.log("LocationCache: mirrored to module provider uri=" + res);
         } catch (Throwable t) {
             MainHook.log("LocationCache: mirror failed: " + t);
         }
@@ -580,7 +580,7 @@ public final class LocationCacheHook {
             cacheValid = true;
             MainHook.log("LocationCache: cached searched location " + lat + "," + lng
                     + (address != null && !address.isEmpty() ? " addr=" + address : ""));
-            mirrorToRemote();
+            mirrorToRemote(lat, lng, address);
         } catch (Throwable ignored) {
         }
     }
@@ -809,7 +809,7 @@ public final class LocationCacheHook {
                     .apply();
             cacheValid = true;
             MainHook.log("LocationCache: cached framework location " + lat + "," + lng);
-            mirrorToRemote();
+            mirrorToRemote(lat, lng, readStrSnapshot().get("getAddress"));
         } catch (Throwable ignored) {
         }
     }
