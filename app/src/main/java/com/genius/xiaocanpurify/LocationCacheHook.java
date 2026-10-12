@@ -39,6 +39,8 @@ public final class LocationCacheHook {
     /** 最近一次缓存定位的内存坐标：prefs 写入是异步的，地址推送不能依赖它立即可读。 */
     private static volatile double[] lastLatLng = new double[]{0.0, 0.0};
     private static volatile long lastLocationTime;
+    /** 最近一次捕获/注入的 POI 地址：新定位本机 SDK 不带地址时按距离就近沿用。 */
+    private static volatile String lastAddress;
 
     /**
      * 重入保护：isGpsActuallyEnabled 内部会调用 lm.isProviderEnabled()，
@@ -253,6 +255,13 @@ public final class LocationCacheHook {
             dblSnap.put("getLatitude", lat);
             dblSnap.put("getLongitude", lng);
 
+            // 本机腾讯 SDK 不返回地址（getAddress=null）：新定位与上次捕获地址的
+            // 定位点相距较近（<500m）时沿用该地址，保证缓存坐标与 POI 地址始终成对，
+            // 不会因 WiFi 定位频繁刷新导致 App 展示与模块卡片各说各话
+            if (strSnap.get("getAddress") == null && lastAddress != null && isNearLastFix(lat, lng)) {
+                strSnap.put("getAddress", lastAddress);
+            }
+
             SharedPreferences p = getPrefs();
             if (p == null) return;
             SharedPreferences.Editor e = p.edit()
@@ -272,8 +281,16 @@ public final class LocationCacheHook {
         }
     }
 
+    /** 新定位点与上次捕获地址的定位点是否足够接近（约 <500m，经纬度差阈值）。 */
+    private static boolean isNearLastFix(double lat, double lng) {
+        double[] ll = lastLatLng;
+        if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
+        return Math.abs(lat - ll[0]) < 0.005 && Math.abs(lng - ll[1]) < 0.005;
+    }
+
     /** 缓存位置经显式广播推送到模块 CacheReceiver（设置页据此展示）。 */
     private static void mirrorToRemote(double lat, double lng, String address) {
+        if (address != null && !address.isEmpty()) lastAddress = address;
         try {
             android.content.Context ctx = currentApplication();
             if (ctx == null) {

@@ -296,6 +296,61 @@ public final class UserPagePurifier {
             root.setVisibility(View.VISIBLE);
             MainHook.log("Restored layoutMenu after toggles off");
         }
+        if (root instanceof ViewGroup) {
+            centerSingleMenuEntry((ViewGroup) root);
+        }
+    }
+
+    /** 被居中处理过的子项 -> 所在行；入口数量恢复后按记录还原等分布局。 */
+    private static final java.util.WeakHashMap<View, View> CENTERED_CHILDREN = new java.util.WeakHashMap<>();
+
+    /**
+     * 活动行只剩一个可见入口时水平居中展示：该行是权重等分布局，
+     * 剩余子项仍占满整行而内部内容靠左。这里临时清掉其权重、宽度改为
+     * wrap_content 并把整行内容居中；入口恢复多个时自动还原。
+     */
+    private static void centerSingleMenuEntry(ViewGroup row) {
+        int visible = 0;
+        View only = null;
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View c = row.getChildAt(i);
+            if (c != null && c.getVisibility() == View.VISIBLE) {
+                visible++;
+                only = c;
+            }
+        }
+        if (visible == 1 && row instanceof android.widget.LinearLayout && only != null
+                && !CENTERED_CHILDREN.containsKey(only)) {
+            try {
+                android.view.ViewGroup.LayoutParams lp = only.getLayoutParams();
+                if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                    android.widget.LinearLayout.LayoutParams llp =
+                            (android.widget.LinearLayout.LayoutParams) lp;
+                    if (!SAVED_WEIGHTS.containsKey(only)) SAVED_WEIGHTS.put(only, llp.weight);
+                    llp.weight = 0f;
+                    llp.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                    only.setLayoutParams(lp);
+                    CENTERED_CHILDREN.put(only, row);
+                    ((android.widget.LinearLayout) row).setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+                    MainHook.log("Centered single menu entry");
+                }
+            } catch (Throwable ignored) {}
+        } else if (visible != 1 && !CENTERED_CHILDREN.isEmpty()) {
+            // 入口恢复多个：还原之前被居中的子项的等分布局与行的默认对齐
+            boolean restored = false;
+            for (java.util.Map.Entry<View, View> e : CENTERED_CHILDREN.entrySet()) {
+                View child = e.getKey();
+                if (child != null && e.getValue() == row && child.getVisibility() == View.VISIBLE) {
+                    restoreLayoutParams(child);
+                    restored = true;
+                }
+            }
+            if (restored && row instanceof android.widget.LinearLayout) {
+                ((android.widget.LinearLayout) row).setGravity(android.view.Gravity.START);
+                MainHook.log("Restored menu row gravity after entries back");
+            }
+            CENTERED_CHILDREN.clear();
+        }
     }
 
     /**
