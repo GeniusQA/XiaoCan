@@ -82,6 +82,14 @@ public final class NetworkAdInterceptor {
                                 if (path == null) {
                                     path = (String) argumentMethod.invoke(call, "url");
                                 }
+                                // 定位缓存契约：GPS 关闭时 App 应表现为处于缓存位置——
+                                // 把请求载荷中同区域的定位坐标改写为缓存坐标
+                                try {
+                                    Object data = argumentMethod.invoke(call, "data");
+                                    if (data != null && LocationCacheHook.rewritePayloadCoords(data)) {
+                                        MainHook.log("RPC payload coords rewritten to cache");
+                                    }
+                                } catch (Throwable ignored) {}
                                 String s = ((service == null ? "" : service) + " "
                                         + (serverName == null ? "" : serverName) + " "
                                         + (path == null ? "" : path)).toLowerCase(Locale.ROOT);

@@ -229,6 +229,9 @@ public final class LocationCacheHook {
             // 坐标与缓存完全一致即为回声而非新定位，跳过重复入账——
             // 否则会反复重写快照，抹掉注入的 getAddress，并造成广播刷屏
             if (isEchoOfCache(lat, lng)) {
+                // 回放回声不入账（避免重写快照抹掉注入地址），但把当前缓存状态
+                // （坐标+快照地址）节流推送给模块，让设置页卡片在使用中保持最新
+                pushCacheStateToModule();
                 return;
             }
 
@@ -294,6 +297,27 @@ public final class LocationCacheHook {
         return Math.abs(lat - ll[0]) < 0.005 && Math.abs(lng - ll[1]) < 0.005;
     }
 
+    /** 回声推送节流：10 秒一次，避免 GPS 关闭期间高频回放造成广播刷屏。 */
+    private static volatile long lastEchoPushMs;
+
+    /**
+     * 把当前缓存状态（坐标 + 快照注入地址）推送给模块设置页。
+     * 用于回放回声场景：GPS 关闭期间 App 持续回放缓存，节流广播让卡片
+     * 在模块未被停止的情况下始终与 App 实际使用的位置保持一致。
+     */
+    private static void pushCacheStateToModule() {
+        long now = System.currentTimeMillis();
+        if (now - lastEchoPushMs < 10000L) return;
+        lastEchoPushMs = now;
+        try {
+            double[] ll = lastLatLng;
+            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return;
+            String addr = readStrSnapshot().get("getAddress");
+            mirrorToRemote(ll[0], ll[1], addr);
+        } catch (Throwable ignored) {
+        }
+    }
+
     /**
      * 是否为本模块回放缓存的回声：坐标与当前缓存完全一致（双精度级）即为回放，
      * 而非真实新定位。GPS 关闭后并无真实 WiFi 定位——App 收到的「定位」
@@ -303,6 +327,117 @@ public final class LocationCacheHook {
         double[] cur = lastLatLng;
         if (cur == null || (cur[0] == 0.0 && cur[1] == 0.0)) return false;
         return Math.abs(lat - cur[0]) < 1e-7 && Math.abs(lng - cur[1]) < 1e-7;
+    }
+
+    /** 请求坐标是否在缓存位置附近（<2km）——同区域请求可改写为缓存坐标。 */
+    private static boolean isVicinityOfCache(double lat, double lng) {
+        double[] ll = lastLatLng;
+        if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
+        return Math.abs(lat - ll[0]) < 0.02 && Math.abs(lng - ll[1]) < 0.025;
+    }
+
+    /**
+     * 把请求载荷中的定位坐标就地改写为缓存坐标。
+     * 定位缓存功能的契约是「GPS 关闭时 App 表现为处于缓存位置」——但 App 会把
+     * 上一次 GPS 定位（室内偏移可达数百米）存在自己内部并在关 GPS 后继续用
+     * 它发起逆地理/附近查询，导致显示与缓存 POI 不一致。
+     * 这里在网络层统一改写：载荷含 lat/lng（或 location=lat,lng）且与缓存
+     * 同区域（<2km）时替换为缓存坐标。GPS 开启时缓存跟随真实定位，改写为空操作。
+     *
+     * @return 是否发生了改写（调用方据此决定是否用改写后的载荷继续调用）
+     */
+    public static boolean rewritePayloadCoords(Object data) {
+        try {
+            double[] ll = lastLatLng;
+            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
+            if (data instanceof java.util.Map) {
+                java.util.Map<Object, Object> map = (java.util.Map<Object, Object>) data;
+                Double reqLat = null;
+                Double reqLng = null;
+                java.util.List<Object> latKeys = new java.util.ArrayList<>();
+                java.util.List<Object> lngKeys = new java.util.ArrayList<>();
+                Object locKey = null;
+                for (Object k : map.keySet().toArray()) {
+                    String ks = String.valueOf(k).toLowerCase(java.util.Locale.US);
+                    Object v = map.get(k);
+                    if (ks.equals("lat") || ks.equals("latitude")) {
+                        latKeys.add(k);
+                        reqLat = numericValue(v);
+                    } else if (ks.equals("lng") || ks.equals("longitude")) {
+                        lngKeys.add(k);
+                        reqLng = numericValue(v);
+                    } else if (ks.equals("location") && v instanceof String
+                            && ((String) v).contains(",")) {
+                        locKey = k;
+                    }
+                }
+                if (reqLat != null && reqLng != null && isVicinityOfCache(reqLat, reqLng)) {
+                    for (Object k : latKeys) map.put(k, ll[0]);
+                    for (Object k : lngKeys) map.put(k, ll[1]);
+                    return true;
+                }
+                if (locKey != null) {
+                    String loc = (String) map.get(locKey);
+                    String[] parts = loc.split(",");
+                    if (parts.length == 2) {
+                        try {
+                            double la = Double.parseDouble(parts[0].trim());
+                            double ln = Double.parseDouble(parts[1].trim());
+                            if (isVicinityOfCache(la, ln)) {
+                                map.put(locKey, ll[0] + "," + ll[1]);
+                                return true;
+                            }
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
+                }
+                // 嵌套一层：{"location":{"lat":..,"lng":..}} 等
+                for (Object k : map.keySet().toArray()) {
+                    Object v = map.get(k);
+                    if (v instanceof java.util.Map && rewritePayloadCoords(v)) return true;
+                }
+                return false;
+            }
+            if (data instanceof String) {
+                String s = (String) data;
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("(lat(?:itude)?|lng|longitude|location)\"?\\s*[:=]\\s*\"?(\\d{1,3}\\.\\d{3,})(\",?)?")
+                        .matcher(s);
+                Double reqLat = null;
+                Double reqLng = null;
+                while (m.find()) {
+                    String k = m.group(1).toLowerCase(java.util.Locale.US);
+                    double v = Double.parseDouble(m.group(2));
+                    if (v > 1 && v < 90 && (k.startsWith("lat") || k.equals("location"))) reqLat = v;
+                    if (v > 70 && v < 140 && (k.startsWith("lng") || k.equals("longitude") || k.equals("location"))) reqLng = v;
+                }
+                if (reqLat != null && reqLng != null && isVicinityOfCache(reqLat, reqLng)) {
+                    // 坐标在缓存附近：整串替换该组坐标为缓存坐标
+                    String replaced = s
+                            .replace(String.valueOf(reqLat), String.valueOf(ll[0]))
+                            .replace(String.valueOf(reqLng), String.valueOf(ll[1]));
+                    if (!replaced.equals(s)) {
+                        // 就地改写不可行（String 不可变），由调用方用返回值替换
+                        rewriteResult = replaced;
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /** String 载荷改写结果（String 不可变，无法就地改，调用方读取后替换参数）。 */
+    public static volatile String rewriteResult;
+
+    private static Double numericValue(Object v) {
+        try {
+            if (v instanceof Number) return ((Number) v).doubleValue();
+            if (v instanceof String) return Double.parseDouble((String) v);
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     /** 缓存位置经显式广播推送到模块 CacheReceiver（设置页据此展示）。 */
