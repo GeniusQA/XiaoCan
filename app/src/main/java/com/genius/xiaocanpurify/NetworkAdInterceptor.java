@@ -147,6 +147,8 @@ public final class NetworkAdInterceptor {
                                     String addr = extractAddressText(s);
                                     if (addr != null) {
                                         LocationCacheHook.broadcastAddressToModule(addr);
+                                        // 注入定位缓存快照：GPS 关闭回放时 App 直接展示该地址
+                                        LocationCacheHook.injectAddressIntoSnapshot(addr);
                                     }
                                 }
                             } catch (Throwable ignored) {}
