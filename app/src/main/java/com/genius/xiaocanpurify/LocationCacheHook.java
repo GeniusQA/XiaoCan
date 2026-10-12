@@ -336,18 +336,25 @@ public final class LocationCacheHook {
         return Math.abs(lat - ll[0]) < 0.02 && Math.abs(lng - ll[1]) < 0.025;
     }
 
+    /** 请求体/URL 中定位键的取值（数字或字符串形式均可）。 */
+    private static final java.util.regex.Pattern LAT_VALUE = java.util.regex.Pattern
+            .compile("\"(?:lat|latitude)\"\\s*:\\s*\"?(-?\\d+(?:\\.\\d+)?)\"?");
+    private static final java.util.regex.Pattern LNG_VALUE = java.util.regex.Pattern
+            .compile("\"(?:lng|longitude)\"\\s*:\\s*\"?(-?\\d+(?:\\.\\d+)?)\"?");
+
     /**
-     * 文本中是否存在「同区域的坐标对」（诊断预判用，任意分隔形态）。
+     * 文本中是否存在「同区域的坐标对」（诊断预判用，数字/字符串形式均可）。
      */
     public static boolean hasVicinityCoordsInText(String body) {
         try {
-            java.util.regex.Matcher m = java.util.regex.Pattern
-                    .compile("(\\d{1,3}\\.\\d{4,})[,，:：= \\\"\\\\]{1,4}(\\d{1,3}\\.\\d{4,})")
-                    .matcher(body);
-            while (m.find()) {
-                double a = Double.parseDouble(m.group(1));
-                double b = Double.parseDouble(m.group(2));
-                if (a > 1 && a < 90 && b > 70 && b < 140 && isVicinityOfCache(a, b)) return true;
+            java.util.regex.Matcher ml = LAT_VALUE.matcher(body);
+            java.util.regex.Matcher mn = LNG_VALUE.matcher(body);
+            while (ml.find()) {
+                double la = Double.parseDouble(ml.group(1));
+                if (mn.find()) {
+                    double ln = Double.parseDouble(mn.group(1));
+                    if (la > 1 && la < 90 && ln > 70 && ln < 140 && isVicinityOfCache(la, ln)) return true;
+                }
             }
         } catch (Throwable ignored) {
         }
@@ -356,19 +363,17 @@ public final class LocationCacheHook {
 
     /**
      * 把文本（请求体 JSON / 带定位参数的 URL）中的定位坐标改写为缓存坐标。
-     * 识别形态：\"lat\":x / \"latitude\":x / \"lng\":x / \"longitude\":x /
-     * location=lat,lng（含多层转义与 URL 编码逗号）。仅当请求坐标与缓存
-     * 同区域（<2km）时改写；找不到或不在附近返回 null。
+     * 识别形态：\"lat\":x / \"lat\":\"x\"（数字或字符串）/ location=lat,lng
+     * （含多层转义与 URL 编码逗号）。仅当请求坐标与缓存同区域（<2km）时改写；
+     * 找不到或不在附近返回 null。
      */
     public static String rewriteCoordsInString(String body) {
         try {
             double[] ll = lastLatLng;
             if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return null;
             String norm = body.replaceAll("\\\\+\"", "\"");
-            java.util.regex.Matcher ml = java.util.regex.Pattern
-                    .compile("\"(?:lat|latitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(norm);
-            java.util.regex.Matcher mn = java.util.regex.Pattern
-                    .compile("\"(?:lng|longitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(norm);
+            java.util.regex.Matcher ml = LAT_VALUE.matcher(norm);
+            java.util.regex.Matcher mn = LNG_VALUE.matcher(norm);
             boolean hasL = ml.find();
             boolean hasN = mn.find();
             if (hasL && hasN) {
@@ -377,8 +382,7 @@ public final class LocationCacheHook {
                 if (!isVicinityOfCache(la, ln)) return null;
                 String out = new StringBuilder(norm)
                         .replace(ml.start(1), ml.end(1), String.valueOf(ll[0])).toString();
-                java.util.regex.Matcher mn2 = java.util.regex.Pattern
-                        .compile("\"(?:lng|longitude)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").matcher(out);
+                java.util.regex.Matcher mn2 = LNG_VALUE.matcher(out);
                 if (mn2.find()) {
                     out = new StringBuilder(out)
                             .replace(mn2.start(1), mn2.end(1), String.valueOf(ll[1])).toString();
