@@ -424,9 +424,14 @@ public final class UserPagePurifier {
     private static View embeddedEntryView;
     /** 被收起的活动行（还原时恢复显示）。 */
     private static ViewGroup embeddedRowView;
-    /** 承载快照的卡片及其被改为 WRAP_CONTENT 前的原始高度。 */
-    private static View embeddedCardView;
-    private static Integer savedCardHeight;
+    /** 承载快照的槽位/锚点视图（ConstraintLayout 平移定位用）。 */
+    private static ViewGroup embeddedSlotView;
+    private static View embeddedLeftColView;
+    private static View embeddedBtnWrapView;
+    private static View.OnLayoutChangeListener embeddedSlotListener;
+    /** 被改为 WRAP_CONTENT 的视图 -> 原始高度。 */
+    private static final java.util.WeakHashMap<View, Integer> SAVED_CARD_HEIGHTS =
+            new java.util.WeakHashMap<>();
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -495,7 +500,23 @@ public final class UserPagePurifier {
             MainHook.log("EmbedEntry: withdraw button not found, fallback");
             return false;
         }
-        ViewGroup slot = (ViewGroup) withdraw.getParent();
+        // 从提现按钮向上找同时承载「可提现蚕豆」左列的行容器；
+        // btnWrap 记录提现按钮在该行容器内的祖先子项
+        View btnWrap = withdraw;
+        View rowC = null;
+        while (btnWrap.getParent() instanceof View) {
+            View p = (View) btnWrap.getParent();
+            if (subtreeText(p).contains(normalize("可提现蚕豆"))) {
+                rowC = p;
+                break;
+            }
+            btnWrap = p;
+        }
+        if (!(rowC instanceof ViewGroup)) {
+            MainHook.log("EmbedEntry: bean card row not found, fallback");
+            return false;
+        }
+        ViewGroup slot = (ViewGroup) rowC;
         boolean linear = slot instanceof android.widget.LinearLayout
                 && ((android.widget.LinearLayout) slot).getOrientation()
                         == android.widget.LinearLayout.HORIZONTAL;
@@ -537,21 +558,21 @@ public final class UserPagePurifier {
             llp.leftMargin = m;
             llp.rightMargin = m;
             slp = llp;
-            slot.addView(snap, slot.indexOfChild(withdraw), slp);
+            slot.addView(snap, slot.indexOfChild(btnWrap), slp);
         } else {
-            // ConstraintLayout：反射构造 LayoutParams（模块不编译期依赖宿主库），
-            // 约束在左列与提现按钮之间水平居中、卡内垂直居中
+            // ConstraintLayout：不依赖 view id（Kuikly 视图常无 id）。
+            // 快照锚定父容器左上角（确定性原点），位置由 translation 动态控制：
+            // 水平居中于「左列右缘」与「提现按钮左缘」之间，垂直居中于行容器。
             View leftCol = null;
             for (int i = 0; i < slot.getChildCount(); i++) {
                 View c = slot.getChildAt(i);
-                if (c != withdraw && c.getVisibility() == View.VISIBLE
+                if (c != btnWrap && c.getVisibility() == View.VISIBLE
                         && subtreeText(c).contains(normalize("可提现蚕豆"))) {
                     leftCol = c;
                     break;
                 }
             }
-            if (leftCol == null || leftCol.getId() == View.NO_ID
-                    || withdraw.getId() == View.NO_ID) {
+            if (leftCol == null || btnWrap.getParent() != slot) {
                 MainHook.log("EmbedEntry: constraint anchors missing, fallback");
                 return false;
             }
@@ -562,32 +583,29 @@ public final class UserPagePurifier {
                 Object clp = clpClass.getConstructor(int.class, int.class).newInstance(
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-                setIntField(clp, "leftToRight", leftCol.getId());
-                setIntField(clp, "rightToLeft", withdraw.getId());
-                setIntField(clp, "topToTop", 0);       // ConstraintLayout.PARENT_ID = 0
-                setIntField(clp, "bottomToBottom", 0);
-                setFloatField(clp, "horizontalBias", 0.5f);
-                setFloatField(clp, "verticalBias", 0.5f);
-                setIntField(clp, "leftMargin", m);
-                setIntField(clp, "rightMargin", m);
-                slot.addView(snap, slot.indexOfChild(withdraw),
+                setIntField(clp, "leftToLeft", 0);   // ConstraintLayout.PARENT_ID = 0
+                setIntField(clp, "topToTop", 0);
+                slot.addView(snap, slot.getChildCount(),
                         (android.view.ViewGroup.LayoutParams) clp);
+                embeddedSlotView = slot;
+                embeddedLeftColView = leftCol;
+                embeddedBtnWrapView = btnWrap;
+                View.OnLayoutChangeListener sl = (v, l, t, r, b, ol, ot, or2, ob) ->
+                        positionEmbeddedSnapshot();
+                slot.addOnLayoutChangeListener(sl);
+                embeddedSlotListener = sl;
+                slot.post(() -> positionEmbeddedSnapshot());
             } catch (Throwable t) {
                 MainHook.log("EmbedEntry: constraint params failed (" + t + "), fallback");
                 return false;
             }
         }
 
-        // 卡片若为固定高度且装不下入口时改为 wrap（记录原值供还原）
+        // 行容器/卡片若为固定高度且装不下入口时改为 wrap（记录原值供还原）
+        ensureWrapHeight(slot, entry.getHeight() + dp(slot, 8));
         View card = enclosingBeanCard(slot);
         if (card != null) {
-            android.view.ViewGroup.LayoutParams clp = card.getLayoutParams();
-            if (clp != null && clp.height > 0 && clp.height < entry.getHeight() + dp(slot, 8)) {
-                savedCardHeight = clp.height;
-                embeddedCardView = card;
-                clp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
-                card.setLayoutParams(clp);
-            }
+            ensureWrapHeight(card, entry.getHeight() + dp(slot, 8));
         }
 
         row.setVisibility(View.GONE);
@@ -598,6 +616,41 @@ public final class UserPagePurifier {
         return true;
     }
 
+    /** 视图为固定高度且小于 needed 时改为 WRAP_CONTENT，原高度记录供还原。 */
+    private static void ensureWrapHeight(View v, int needed) {
+        try {
+            android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+            if (lp != null && lp.height > 0 && lp.height < needed) {
+                if (!SAVED_CARD_HEIGHTS.containsKey(v)) {
+                    SAVED_CARD_HEIGHTS.put(v, lp.height);
+                }
+                lp.height = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                v.setLayoutParams(lp);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 把嵌入快照定位到左列与提现按钮之间的空位（垂直居中）。 */
+    private static void positionEmbeddedSnapshot() {
+        try {
+            if (embeddedSnapshotView == null || embeddedSlotView == null
+                    || embeddedLeftColView == null || embeddedBtnWrapView == null) return;
+            ViewGroup slot = embeddedSlotView;
+            if (slot.getWidth() <= 0) return;
+            int iw = embeddedSnapshotView.getWidth();
+            int ih = embeddedSnapshotView.getHeight();
+            if (iw <= 0 || ih <= 0) return;
+            float cx = (embeddedLeftColView.getRight() + embeddedBtnWrapView.getLeft()) / 2f;
+            float tx = cx - iw / 2f;
+            float ty = (slot.getHeight() - ih) / 2f;
+            if (Math.abs(embeddedSnapshotView.getTranslationX() - tx) > 0.5f
+                    || Math.abs(embeddedSnapshotView.getTranslationY() - ty) > 0.5f) {
+                embeddedSnapshotView.setTranslationX(tx);
+                embeddedSnapshotView.setTranslationY(ty);
+            }
+        } catch (Throwable ignored) {}
+    }
+
     /** 撤销嵌入：移除快照、还原卡片高度、恢复活动行显示。 */
     private static void restoreEmbeddedEntry(ViewGroup row) {
         if (embeddedSnapshotView == null) return;
@@ -605,18 +658,26 @@ public final class UserPagePurifier {
             ViewGroup p = embeddedSnapshotView.getParent() instanceof ViewGroup
                     ? (ViewGroup) embeddedSnapshotView.getParent() : null;
             if (p != null) p.removeView(embeddedSnapshotView);
-            if (embeddedCardView != null && savedCardHeight != null) {
-                android.view.ViewGroup.LayoutParams clp = embeddedCardView.getLayoutParams();
-                if (clp != null) {
-                    clp.height = savedCardHeight;
-                    embeddedCardView.setLayoutParams(clp);
+            for (java.util.Map.Entry<View, Integer> e : SAVED_CARD_HEIGHTS.entrySet()) {
+                View v = e.getKey();
+                if (v == null) continue;
+                android.view.ViewGroup.LayoutParams lp = v.getLayoutParams();
+                if (lp != null) {
+                    lp.height = e.getValue();
+                    v.setLayoutParams(lp);
                 }
+            }
+            SAVED_CARD_HEIGHTS.clear();
+            if (embeddedSlotView != null && embeddedSlotListener != null) {
+                embeddedSlotView.removeOnLayoutChangeListener(embeddedSlotListener);
             }
         } catch (Throwable ignored) {}
         embeddedSnapshotView = null;
         embeddedEntryView = null;
-        embeddedCardView = null;
-        savedCardHeight = null;
+        embeddedSlotView = null;
+        embeddedLeftColView = null;
+        embeddedBtnWrapView = null;
+        embeddedSlotListener = null;
         ViewGroup r = row != null ? row : embeddedRowView;
         if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
             r.setVisibility(View.VISIBLE);
