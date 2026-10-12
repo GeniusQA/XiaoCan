@@ -364,22 +364,21 @@ public class MainActivity extends Activity {
      */
     private static String readTargetPrefsXml() {
         try {
-            // 模块 App 的 su shell 环境 PATH 精简，cat 需用全路径
+            // 模块 App 的 su shell 环境 PATH 精简，cat 需用全路径；完整读取字节流避免截断
             Process p = Runtime.getRuntime().exec(
-                    new String[]{"su", "-c", "/system/bin/cat " + TARGET_PREFS_XML + " 2>&1"});
-            if (p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
-                java.io.BufferedReader br = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(p.getInputStream(), "UTF-8"));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-                android.util.Log.w("LocCache", "su read len=" + sb.length());
-                if (sb.indexOf("<map") >= 0) {
-                    return sb.toString();
-                }
-            } else {
-                p.destroy();
-                android.util.Log.w("LocCache", "su timeout");
+                    new String[]{"su", "-c", "/system/bin/cat " + TARGET_PREFS_XML});
+            java.io.InputStream in = p.getInputStream();
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                bos.write(buf, 0, n);
+            }
+            p.waitFor();
+            String xml = bos.toString("UTF-8");
+            android.util.Log.w("LocCache", "su read len=" + xml.length());
+            if (xml.indexOf("name=\"lat\"") >= 0) {
+                return xml;
             }
         } catch (Throwable t) {
             android.util.Log.w("LocCache", "su error: " + t);
