@@ -24,6 +24,8 @@ import io.github.libxposed.api.XposedInterface;
 public final class LotteryTaskAutomator {
     /** 服务端要求浏览 10s，留 1s 余量对齐其计时起点。 */
     private static final long PAGE_DWELL_MS = 11000L;
+    /** 进入即发奖的浏览任务（霸王餐/福利页）：页面加载+发奖上报后立即返回。 */
+    private static final long QUICK_BROWSE_MS = 3000L;
     /** 红包任务点击后的 RPC 探针窗口。 */
     private static final long DISCOVERY_MS = 20000L;
 
@@ -42,7 +44,9 @@ public final class LotteryTaskAutomator {
                     if (type == TYPE_MALL || type == TYPE_BROWSE) {
                         lastTaskActivity = new WeakReference<>(activityOf(view));
                         MainHook.log("LotteryTaskAutomator: browse task click captured (type=" + type + ")");
-                        scheduleAutoBack(type == TYPE_MALL);
+                        scheduleAutoBack(
+                                type == TYPE_MALL ? PAGE_DWELL_MS : QUICK_BROWSE_MS,
+                                type == TYPE_MALL);
                     } else if (type == TYPE_REDPACK) {
                         // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
                         // 观察宿主点击后与返回时的上报接口，用于后续直接领奖
@@ -81,7 +85,7 @@ public final class LotteryTaskAutomator {
         return TYPE_NONE;
     }
 
-    private static void scheduleAutoBack(boolean verifyTargetPage) {
+    private static void scheduleAutoBack(long delayMs, boolean verifyTargetPage) {
         MAIN.postDelayed(() -> {
             Activity activity = lastTaskActivity.get();
             if (activity == null || activity.isFinishing()) return;
@@ -97,7 +101,7 @@ public final class LotteryTaskAutomator {
             MainHook.log("LotteryTaskAutomator: dwell done, dispatching back");
             activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
             activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
-        }, PAGE_DWELL_MS);
+        }, delayMs);
     }
 
     private static Activity activityOf(View view) {
