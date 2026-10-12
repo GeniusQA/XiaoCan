@@ -36,6 +36,9 @@ public final class LocationCacheHook {
 
     private static volatile SharedPreferences prefs;
     private static volatile boolean cacheValid;
+    /** 最近一次缓存定位的内存坐标：prefs 写入是异步的，地址推送不能依赖它立即可读。 */
+    private static volatile double[] lastLatLng = new double[]{0.0, 0.0};
+    private static volatile long lastLocationTime;
 
     /**
      * 重入保护：isGpsActuallyEnabled 内部会调用 lm.isProviderEnabled()，
@@ -260,6 +263,8 @@ public final class LocationCacheHook {
             e.putLong(KEY_LNG, Double.doubleToRawLongBits(lng));
             e.apply();
             cacheValid = true;
+            lastLatLng = new double[]{lat, lng};
+            lastLocationTime = System.currentTimeMillis();
             MainHook.log("LocationCache: cached location " + lat + "," + lng);
             mirrorToRemote(lat, lng, strSnap.get("getAddress"));
         } catch (Throwable t) {
@@ -298,11 +303,13 @@ public final class LocationCacheHook {
     public static void broadcastAddressToModule(String address) {
         if (address == null || address.isEmpty()) return;
         try {
-            double[] ll = cachedLatLng();
+            // 用内存坐标：prefs 是异步写入，逆地理响应返回时可能还没落盘
+            double[] ll = lastLatLng;
+            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) ll = cachedLatLng();
             if (ll[0] == 0.0 && ll[1] == 0.0) return;
             android.content.Context ctx = currentApplication();
             if (ctx == null) return;
-            long time = cachedTime();
+            long time = lastLocationTime > 0 ? lastLocationTime : cachedTime();
             if (time <= 0) time = System.currentTimeMillis();
             android.content.Intent i = new android.content.Intent(
                     "com.genius.xiaocanpurify.ACTION_LOC_CACHE");
@@ -604,6 +611,8 @@ public final class LocationCacheHook {
                     .putLong(KEY_LNG, Double.doubleToRawLongBits(lng))
                     .apply();
             cacheValid = true;
+            lastLatLng = new double[]{lat, lng};
+            lastLocationTime = System.currentTimeMillis();
             MainHook.log("LocationCache: cached searched location " + lat + "," + lng
                     + (address != null && !address.isEmpty() ? " addr=" + address : ""));
             mirrorToRemote(lat, lng, address);
@@ -834,6 +843,8 @@ public final class LocationCacheHook {
                     .putString(KEY_SNAPSHOT_DBL, joinMap2(dbl))
                     .apply();
             cacheValid = true;
+            lastLatLng = new double[]{lat, lng};
+            lastLocationTime = System.currentTimeMillis();
             MainHook.log("LocationCache: cached framework location " + lat + "," + lng);
             mirrorToRemote(lat, lng, readStrSnapshot().get("getAddress"));
         } catch (Throwable ignored) {
