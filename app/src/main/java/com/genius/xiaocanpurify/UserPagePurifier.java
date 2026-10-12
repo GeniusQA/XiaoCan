@@ -131,6 +131,9 @@ public final class UserPagePurifier {
                                     if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
                                         hideUserOrderSection(b);
                                     }
+                                    if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
+                                        hideFreeOrderQualifyCard(b);
+                                    }
                                     // 重渲染后同样做单入口居中（对所有卡片生效）
                                     try {
                                         View root2 = getBindingRoot(b);
@@ -182,6 +185,9 @@ public final class UserPagePurifier {
             filterAssetItems(binding);
             if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
                 hideUserOrderSection(binding);
+            }
+            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
+                hideFreeOrderQualifyCard(binding);
             }
             if (PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT)) {
                 hideBindingLayout(binding, "layoutUserMerchant");
@@ -308,6 +314,44 @@ public final class UserPagePurifier {
             group.setVisibility(View.GONE);
             MainHook.log("layoutMenu empty after filter: collapsed");
         }
+    }
+
+    /**
+     * 隐藏「免单资格卡」——活动行下方的红色横幅卡
+     * （「您有1笔订单待免单 今日邀1人得抽免单资格」）。
+     * 该卡不在 layoutMenu 内，filterMenuItems 找不到它；且卡内含其它入口文案，
+     * 通用最小单项下探只会藏到内部 TextView。改用卡片独有双关键词
+     * （「订单待免单」+「今日邀」）定位同时包含两者的最小整卡。
+     */
+    private static void hideFreeOrderQualifyCard(Object binding) {
+        View root = getBindingRoot(binding);
+        if (!(root instanceof ViewGroup)) return;
+        View card = findSmallestContainingAll((ViewGroup) root,
+                new String[]{normalize("订单待免单"), normalize("今日邀")});
+        if (card != null && card.getVisibility() != View.GONE) {
+            card.setVisibility(View.GONE);
+            MainHook.log("Hidden free-order qualify card");
+        }
+    }
+
+    /** 查找同时包含全部关键词的最小子树（找不到更小命中时返回当前命中项）。 */
+    private static View findSmallestContainingAll(ViewGroup parent, String[] keywords) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            String text = subtreeText(child);
+            boolean all = true;
+            for (String keyword : keywords) {
+                if (!text.contains(keyword)) {
+                    all = false;
+                    break;
+                }
+            }
+            if (all && child instanceof ViewGroup) {
+                View deeper = findSmallestContainingAll((ViewGroup) child, keywords);
+                return deeper != null ? deeper : child;
+            }
+        }
+        return null;
     }
 
     /**

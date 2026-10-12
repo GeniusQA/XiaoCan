@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.USER_MENU_SECRET, "活动行「对接暗号」", "活动行中的对接暗号入口"},
                     {PurifyPrefs.USER_MENU_RAIN, "活动行「红包雨」", "活动行中的红包雨入口"},
                     {PurifyPrefs.USER_MENU_ELIMINATE, "活动行「有奖消消乐」", "活动行中的有奖消消乐入口"},
-                    {PurifyPrefs.USER_MENU_QUALIFY, "活动行「免单资格卡」", "活动行中的免单资格卡（全部子项关闭时整行自动隐藏）"},
+                    {PurifyPrefs.USER_MENU_QUALIFY, "「免单资格卡」", "活动行中的免单资格入口及下方「您有1笔订单待免单」红色横幅卡（全部子项关闭时活动行整行自动隐藏）"},
                     {PurifyPrefs.USER_MENU_CHECKIN, "活动行「签到」", "接口请求异常时出现的签到入口"},
                     {PurifyPrefs.USER_ASSET_YUANBAO, "资产行「元宝」", "元宝余额入口（元宝/卡券/红包一行）"},
                     {PurifyPrefs.USER_ASSET_COUPON, "资产行「卡券」", "卡券入口（元宝/卡券/红包一行）"},
