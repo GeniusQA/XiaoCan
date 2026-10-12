@@ -267,10 +267,7 @@ public final class LocationCacheHook {
         }
     }
 
-    /**
-     * 把缓存位置通过 ContentResolver 写入模块 CacheProvider（跨进程 IPC）：
-     * 目标 App 无需 root，模块设置页直接读模块自有存储展示。模块 App 侧无 root 也能收到。
-     */
+    /** 缓存位置经显式广播推送到模块 CacheReceiver（设置页据此展示）。 */
     private static void mirrorToRemote(double lat, double lng, String address) {
         try {
             android.content.Context ctx = currentApplication();
@@ -290,6 +287,33 @@ public final class LocationCacheHook {
             MainHook.log("LocationCache: broadcast sent to module, lat=" + lat + " lng=" + lng);
         } catch (Throwable t) {
             MainHook.log("LocationCache: mirror failed: " + t);
+        }
+    }
+
+    /**
+     * 用当前缓存经纬度向模块推送地址文案（供设置页展示 POI 地址）。
+     * 本机腾讯 SDK 不返回地址（getAddress=null），App 界面上的地址来自它自己的
+     * 逆地理接口，网络层捕获到地址后调用此方法补齐展示。
+     */
+    public static void broadcastAddressToModule(String address) {
+        if (address == null || address.isEmpty()) return;
+        try {
+            double[] ll = cachedLatLng();
+            if (ll[0] == 0.0 && ll[1] == 0.0) return;
+            android.content.Context ctx = currentApplication();
+            if (ctx == null) return;
+            long time = cachedTime();
+            if (time <= 0) time = System.currentTimeMillis();
+            android.content.Intent i = new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_LOC_CACHE");
+            i.setPackage("com.genius.xiaocanpurify");
+            i.putExtra("lat", ll[0]);
+            i.putExtra("lng", ll[1]);
+            i.putExtra("time", time);
+            i.putExtra("address", address);
+            ctx.sendBroadcast(i);
+            MainHook.log("LocationCache: address pushed to module: " + address);
+        } catch (Throwable ignored) {
         }
     }
 

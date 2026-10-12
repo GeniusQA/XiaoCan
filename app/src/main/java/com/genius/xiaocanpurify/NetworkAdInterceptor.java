@@ -66,6 +66,8 @@ public final class NetworkAdInterceptor {
             Class<?> bridgeClass = Class.forName("com.realtech.xiaocan.flutter.NativeHttpBridge", false, cl);
             Method replySuccess = Class.forName("io.flutter.plugin.common.MethodChannel$Result", false, cl)
                     .getMethod("success", Object.class);
+            final Class<?> resultInterface =
+                    Class.forName("io.flutter.plugin.common.MethodChannel$Result", false, cl);
             for (Method m : bridgeClass.getDeclaredMethods()) {
                 if ("createBridge$lambda$2".equals(m.getName())) {
                     xposed.hook(m).intercept(chain -> {
@@ -97,6 +99,14 @@ public final class NetworkAdInterceptor {
                                 }
                             } catch (Throwable ignored) {}
                         }
+                        // 包装响应回调：捕获逆地理接口返回的 POI 地址，推送给模块设置页展示
+                        try {
+                            Object[] args = chain.getArgs().toArray();
+                            if (args.length > 1 && args[1] != null) {
+                                args[1] = wrapFlutterResult(resultInterface, args[1]);
+                                return chain.proceed(args);
+                            }
+                        } catch (Throwable ignored) {}
                         return chain.proceed();
                     });
                     MainHook.log("Hooked NativeHttpBridge.createBridge$lambda$2");
@@ -106,6 +116,58 @@ public final class NetworkAdInterceptor {
         } catch (Throwable t) {
             MainHook.log("Failed to hook NativeHttpBridge: " + t);
         }
+    }
+
+    /** 中文地址特征（XX市XX区 / XX市XX镇 等）。 */
+    private static final java.util.regex.Pattern CN_ADDR = java.util.regex.Pattern.compile(
+            "[\\u4e00-\\u9fa5]{2,6}[市州][\\u4e00-\\u9fa5]{2,8}(?:[区县]|路|街|镇|街道)");
+
+    private static final java.util.regex.Pattern JSON_ADDR_KEY = java.util.regex.Pattern.compile(
+            "\"(?:address|addr|poi_name|formatted_addresses|recommend|name|title)\"\\s*:\\s*\"([^\"]{4,80})\"");
+
+    private static final java.util.regex.Pattern MAP_ADDR_KEY = java.util.regex.Pattern.compile(
+            "(?:address|addr|poi_name|formatted_addresses|recommend|name|title)=([^,}\\)]{4,80})");
+
+    /** 把 MethodChannel.Result 包一层代理：success() 载荷含中文地址时提取并推送。 */
+    private static Object wrapFlutterResult(Class<?> resultInterface, Object result) {
+        try {
+            return java.lang.reflect.Proxy.newProxyInstance(
+                    resultInterface.getClassLoader(),
+                    new Class<?>[]{resultInterface},
+                    (proxy, method, margs) -> {
+                        if ("success".equals(method.getName())
+                                && margs != null && margs.length == 1 && margs[0] != null) {
+                            try {
+                                String s = String.valueOf(margs[0]);
+                                if (s.length() <= 300000) {
+                                    String addr = extractAddressText(s);
+                                    if (addr != null) {
+                                        LocationCacheHook.broadcastAddressToModule(addr);
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        return method.invoke(result, margs);
+                    });
+        } catch (Throwable t) {
+            return result;
+        }
+    }
+
+    /** 响应载荷须含中文地址特征才算逆地理结果，再择优提取地址字段。 */
+    private static String extractAddressText(String s) {
+        if (!CN_ADDR.matcher(s).find()) return null;
+        java.util.regex.Matcher m = JSON_ADDR_KEY.matcher(s);
+        while (m.find()) {
+            String v = m.group(1);
+            if (CN_ADDR.matcher(v).find()) return v;
+        }
+        m = MAP_ADDR_KEY.matcher(s);
+        while (m.find()) {
+            String v = m.group(1);
+            if (CN_ADDR.matcher(v).find()) return v;
+        }
+        return null;
     }
 
     private static final String EMPTY_DISCOVERY =
@@ -267,7 +329,7 @@ public final class NetworkAdInterceptor {
                     MainHook.log("RESP[discover] " + url + " => "
                             + body.substring(0, Math.min(body.length(), 300)));
                 }
-                // 诊断：地址来源探测——响应体含「XX市XX区」中文地址特征时记录 URL 与片段
+                // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
                 if (body.length() <= 100000) {
                     java.util.regex.Matcher am = java.util.regex.Pattern
                             .compile("[\\u4e00-\\u9fa5]{2,6}[市州][\\u4e00-\\u9fa5]{2,8}[区县]")
@@ -276,6 +338,10 @@ public final class NetworkAdInterceptor {
                         MainHook.log("ADDR[probe] " + url + " => "
                                 + body.substring(Math.max(0, am.start() - 40),
                                         Math.min(body.length(), am.start() + 140)));
+                        String addr = extractAddressText(body);
+                        if (addr != null) {
+                            LocationCacheHook.broadcastAddressToModule(addr);
+                        }
                     }
                 }
                 // 红包抽奖中奖数据包（「大额出行福利券 / 即将自动跳转」）到达即布防，
