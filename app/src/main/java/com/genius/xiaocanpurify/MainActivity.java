@@ -364,6 +364,7 @@ public class MainActivity extends Activity {
             Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
             if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) {
                 p.destroy();
+                android.util.Log.w("LocCache", "su timeout: " + path);
                 return null;
             }
             java.io.BufferedReader br = new java.io.BufferedReader(
@@ -371,8 +372,10 @@ public class MainActivity extends Activity {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) sb.append(line);
+            android.util.Log.w("LocCache", "su read len=" + sb.length() + " exit=" + p.exitValue());
             return sb.toString();
         } catch (Throwable t) {
+            android.util.Log.w("LocCache", "su error: " + t);
             return null;
         }
     }

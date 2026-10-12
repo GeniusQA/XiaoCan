@@ -81,7 +81,10 @@ public final class OrderTabRedirect {
      * 非订单 Tab 或功能未开启时返回 false，交由调用方走原生逻辑。
      */
     public static boolean tryRedirect(Activity mainActivity, Object navView, int navPos, int tabIndex) {
-        if (!PurifyPrefs.enabled(PurifyPrefs.ORDER_TAB_REDIRECT)) return false;
+        boolean enabled = PurifyPrefs.enabled(PurifyPrefs.ORDER_TAB_REDIRECT);
+        MainHook.log("tryRedirect: enabled=" + enabled + " tabIndex=" + tabIndex + " want=" + ORDER_TAB_INDEX
+                + " main=" + (mainActivity != null));
+        if (!enabled) return false;
         if (tabIndex != ORDER_TAB_INDEX) return false;
         if (mainActivity == null) return false;
         try {

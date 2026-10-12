@@ -366,6 +366,7 @@ public final class BottomBarPurifier {
                         Object navView = ctx[1];
 
                         int tabIndex = pageForNavPos(navPos);
+                        MainHook.log("NavItemSelected navPos=" + navPos + " tabIndex=" + tabIndex);
                         // 订单 Tab：重定向到 MyOrderActivity（与「我的-全部订单」同一页）
                         if (tabIndex >= 0
                                 && OrderTabRedirect.tryRedirect(mainActivity, navView, navPos, tabIndex)) {
