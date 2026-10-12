@@ -298,7 +298,104 @@ public final class UserPagePurifier {
         }
         if (root instanceof ViewGroup) {
             centerSingleMenuEntry((ViewGroup) root);
+            compactMenuRows((ViewGroup) root);
         }
+    }
+
+    /** 被压缩过高度的活动行 RecyclerView -> 原始高度；入口恢复后按原始高度重算。 */
+    private static final java.util.WeakHashMap<View, Integer> SAVED_MENU_RV_HEIGHTS =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 活动行空行收起：入口被隐藏后，它们所在的网格行仍占据原高度，
+     * 在剩余入口与下方内容之间留下空白（尤其只剩一个入口时）。
+     * 布局完成后按「最后一个可见入口所在行数 × 行高」压缩 RecyclerView 高度，
+     * 让下方内容自动上移；入口重新开启时先还原基线高度再重算。
+     */
+    private static void compactMenuRows(ViewGroup row) {
+        View entry = null;
+        for (String[] item : MENU_ITEMS) {
+            View v = findItemView(row, normalize(item[1]));
+            if (v != null && v.getVisibility() == View.VISIBLE) {
+                entry = v;
+                break;
+            }
+        }
+        if (entry == null) return; // 全隐藏：collapseMenuIfEmpty 已整行收起
+        final View fEntry = entry;
+        final ViewGroup rv = entry.getParent() instanceof ViewGroup
+                ? (ViewGroup) entry.getParent() : null;
+        if (rv == null) return;
+        rv.post(() -> {
+            try {
+                android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
+                if (lp == null || lp.height <= 0) return; // wrap/match 自适应，无需处理
+                Integer saved = SAVED_MENU_RV_HEIGHTS.get(rv);
+                if (saved != null && lp.height != saved) {
+                    lp.height = saved; // 还原基线，避免在已压缩高度上重复计算
+                    rv.setLayoutParams(lp);
+                }
+                int baseline = lp.height;
+                int entryH = fEntry.getHeight();
+                if (entryH <= 0) return;
+                int spanCount = 1;
+                int rows;
+                Object lm = null;
+                try {
+                    lm = rv.getClass().getMethod("getLayoutManager").invoke(rv);
+                } catch (Throwable ignored) {
+                }
+                String lmClass = lm == null ? "" : lm.getClass().getName();
+                if (lmClass.contains("GridLayoutManager")) {
+                    Object sc = lm.getClass().getMethod("getSpanCount").invoke(lm);
+                    if (sc instanceof Integer) spanCount = Math.max(1, (Integer) sc);
+                } else if (lmClass.contains("LinearLayoutManager")) {
+                    Object ori = lm.getClass().getMethod("getOrientation").invoke(lm);
+                    if (ori instanceof Integer && (Integer) ori == 0) {
+                        rows = 1; // 横向线性：所有入口同一行，无空行可言
+                        int target = entryH * rows;
+                        if (baseline > target + 8) shrinkMenuRv(rv, baseline, target, rows, spanCount);
+                        else if (saved != null && baseline <= target + 8) SAVED_MENU_RV_HEIGHTS.remove(rv);
+                        return;
+                    }
+                    rows = lastVisibleRow(rv);
+                    if (rows > 0 && baseline > entryH * rows + 8) {
+                        shrinkMenuRv(rv, baseline, entryH * rows, rows, spanCount);
+                    } else if (saved != null) SAVED_MENU_RV_HEIGHTS.remove(rv);
+                    return;
+                } else {
+                    return; // 未知布局管理器：不冒险改动高度
+                }
+                rows = lastVisibleRow(rv);
+                if (rows <= 0) return;
+                int target = entryH * rows;
+                if (baseline > target + 8) {
+                    shrinkMenuRv(rv, baseline, target, rows, spanCount);
+                } else if (saved != null && baseline <= target + 8) {
+                    SAVED_MENU_RV_HEIGHTS.remove(rv); // 入口恢复、无需压缩，清掉记录
+                }
+            } catch (Throwable ignored) {}
+        });
+    }
+
+    /** 最后一个可见入口所在的行号（从 1 起）；网格中隐藏子项仍占格，故按子项序号推算。 */
+    private static int lastVisibleRow(ViewGroup rv) {
+        int lastVisible = -1;
+        for (int i = 0; i < rv.getChildCount(); i++) {
+            if (rv.getChildAt(i).getVisibility() == View.VISIBLE) lastVisible = i;
+        }
+        return lastVisible < 0 ? -1 : lastVisible + 1;
+    }
+
+    private static void shrinkMenuRv(ViewGroup rv, int baseline, int target, int rows, int span) {
+        if (!SAVED_MENU_RV_HEIGHTS.containsKey(rv)) {
+            SAVED_MENU_RV_HEIGHTS.put(rv, baseline);
+        }
+        android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
+        lp.height = target;
+        rv.setLayoutParams(lp);
+        MainHook.log("Compacted menu rows: " + baseline + " -> " + target
+                + " (rows=" + rows + ", span=" + span + ")");
     }
 
     /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
