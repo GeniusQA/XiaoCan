@@ -514,6 +514,14 @@ public final class UserPagePurifier {
                 }
                 MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
                         + " skip [" + detail.toString().trim() + "]");
+                // 深度诊断：layoutMenu 子树的文本节点转储（含非标准 TextView，
+                // 反射取文本），并从页面根搜索「免费抽奖」实际渲染位置
+                dumpTexts(row, "layoutMenu");
+                View pageRoot = row;
+                while (pageRoot.getParent() instanceof View) {
+                    pageRoot = (View) pageRoot.getParent();
+                }
+                if (pageRoot != row) dumpTexts((ViewGroup) pageRoot, "page");
             }
             restoreEmbeddedEntry(row);
             return false;
@@ -1537,6 +1545,79 @@ public final class UserPagePurifier {
             if (changed) MainHook.log("Asset-only card polished");
         } catch (Throwable t) {
             MainHook.log("polishAssetOnlyCard error: " + t);
+        }
+    }
+
+    /** 文本节点转储上限（单次）。 */
+    private static final int DUMP_TEXT_LIMIT = 60;
+    /** 文本转储节流。 */
+    private static long lastDumpTextMs;
+
+    /**
+     * 深度优先转储子树内所有带文本的节点（含 RichFontTextView 等
+     * 非 android.widget.TextView 的自绘文本，反射调用 getText）。
+     * tag 为空串时从页面根搜索「免费抽奖」；非空时按 tag 节流整树转储。
+     */
+    private static void dumpTexts(ViewGroup root, String tag) {
+        long nowMs = android.os.SystemClock.uptimeMillis();
+        boolean searchMode = "page".equals(tag);
+        if (searchMode) {
+            if (nowMs - lastDumpTextMs < 1000L) return;
+            lastDumpTextMs = nowMs;
+            StringBuilder hits = new StringBuilder();
+            collectTextHits(root, "免费抽奖", hits);
+            MainHook.log("TextDump[page] search 免费抽奖 => " + hits);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        appendTexts(root, sb, new int[]{0});
+        MainHook.log("TextDump[" + tag + "] " + sb);
+    }
+
+    private static void collectTextHits(View v, String keyword, StringBuilder out) {
+        if (out.length() > 600) return;
+        String text = viewText(v);
+        if (text != null && text.contains(keyword)) {
+            out.append(v.getClass().getSimpleName())
+                    .append('[').append(v.getVisibility() == View.VISIBLE ? "V"
+                            : v.getVisibility() == View.GONE ? "G" : "I")
+                    .append("]=\"").append(text, 0, Math.min(text.length(), 24))
+                    .append("\" ");
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectTextHits(g.getChildAt(i), keyword, out);
+            }
+        }
+    }
+
+    private static void appendTexts(View v, StringBuilder out, int[] count) {
+        if (count[0] >= DUMP_TEXT_LIMIT || out.length() > 1500) return;
+        String text = viewText(v);
+        if (text != null && text.length() > 0) {
+            count[0]++;
+            out.append(v.getClass().getSimpleName())
+                    .append('[').append(v.getVisibility() == View.VISIBLE ? "V"
+                            : v.getVisibility() == View.GONE ? "G" : "I")
+                    .append("]=\"").append(text, 0, Math.min(text.length(), 20))
+                    .append("\" ");
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                appendTexts(g.getChildAt(i), out, count);
+            }
+        }
+    }
+
+    /** 反射读取任意 View 的文本（兼容 RichFontTextView 等自绘文本控件）。 */
+    private static String viewText(View v) {
+        try {
+            Object t = v.getClass().getMethod("getText").invoke(v);
+            return t instanceof CharSequence ? ((CharSequence) t).toString() : null;
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
