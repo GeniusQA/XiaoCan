@@ -881,24 +881,35 @@ public final class UserPagePurifier {
      */
     private static void dumpBannerNeighbors(View top) {
         try {
-            findAndLogText(top, "免单", 0);
-            View assetRow = findViewWhoseSubtreeContains(top, "元宝");
-            if (assetRow != null && assetRow.getParent() instanceof ViewGroup) {
-                ViewGroup p = (ViewGroup) assetRow.getParent();
-                for (int i = 0; i < p.getChildCount(); i++) {
-                    View c = p.getChildAt(i);
-                    MainHook.log("BannerDiag: sibling[" + i + "] "
-                            + c.getClass().getName()
-                            + " bounds=" + c.getLeft() + "," + c.getTop()
-                            + "-" + c.getRight() + "," + c.getBottom()
-                            + " textLen=" + subtreeText(c).length());
-                }
-            } else {
-                MainHook.log("BannerDiag: asset row not found");
-            }
+            MainHook.log("BannerDiag: begin band scan (screen y 1400-1950)");
+            dumpBand(top, 1400, 1950, 0);
         } catch (Throwable t) {
             MainHook.log("BannerDiag error: " + t);
         }
+    }
+
+    /** 打印屏幕纵带内的视图（绝对坐标），用于定位自绘横幅的真实视图。 */
+    private static void dumpBand(View v, int bandTop, int bandBottom, int depth) {
+        if (v == null || depth > 16) return;
+        try {
+            int[] loc = new int[2];
+            v.getLocationOnScreen(loc);
+            int w = v.getRight() - v.getLeft();
+            int h = v.getBottom() - v.getTop();
+            if (loc[1] >= bandTop && loc[1] + h <= bandBottom && h > 50 && w > 150) {
+                String t = subtreeText(v);
+                MainHook.log("BandDiag: d" + depth + " " + v.getClass().getName()
+                        + " abs=" + loc[0] + "," + loc[1] + "-" + (loc[0] + w) + "," + (loc[1] + h)
+                        + " textLen=" + t.length()
+                        + (t.length() > 0 ? " text=" + t.substring(0, Math.min(30, t.length())) : ""));
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    dumpBand(g.getChildAt(i), bandTop, bandBottom, depth + 1);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     /** 深度优先记录文本包含关键词的 TextView（限 5 条）。 */
