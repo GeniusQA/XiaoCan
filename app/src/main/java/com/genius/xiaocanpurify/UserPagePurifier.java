@@ -300,6 +300,28 @@ public final class UserPagePurifier {
             root.setVisibility(View.VISIBLE);
             MainHook.log("Restored layoutMenu after toggles off");
         }
+        // 显示态入口的祖先容器若被此前「判空收起」压成 GONE（文案匹配修复
+        // 前富文本读不到导致），恢复容器链；嵌入方案收起的不在此恢复
+        if (embeddedSnapshotView == null && root instanceof ViewGroup) {
+            for (String[] item : MENU_ITEMS) {
+                if (PurifyPrefs.hide(item[0])) continue;
+                View v = findItemView(root, normalize(item[1]));
+                if (v == null) continue;
+                View cur = v;
+                while (cur != root && cur != null) {
+                    View p = cur.getParent() instanceof View
+                            ? (View) cur.getParent() : null;
+                    if (!(p instanceof ViewGroup)) break;
+                    if (p.getVisibility() == View.GONE && p != embeddedRowView) {
+                        p.setVisibility(View.VISIBLE);
+                        MainHook.log("Restored entry container: "
+                                + p.getClass().getSimpleName()
+                                + " (entry " + item[1] + ")");
+                    }
+                    cur = p;
+                }
+            }
+        }
         if (root instanceof ViewGroup) {
             // 单入口优先嵌入蚕豆卡空位（收起活动行）；结构不满足时退回原居中逻辑
             try {
@@ -1499,11 +1521,12 @@ public final class UserPagePurifier {
                     && hideShells((ViewGroup) assetRow, 2)) {
                 changed = true;
             }
-            // 实测内容容器被宿主固定为 153px 高，资产行仅 115px——多余的
-            // 高度表现为资产行下方的空白。资产行独占时把容器高度改为自适应；
-            // 宿主重渲染复位后本路径（每次渲染执行）会重新修正
+            // 实测内容容器被宿主固定为 153px 高（或 MATCH_PARENT），资产行
+            // 仅 115px——多余的高度表现为资产行下方的空白。资产行独占时
+            // 把容器高度改为自适应；宿主重渲染复位后本路径会重新修正
             if (assetRow.getLayoutParams() != null
-                    && assetRow.getLayoutParams().height > 0) {
+                    && assetRow.getLayoutParams().height
+                            != android.view.ViewGroup.LayoutParams.WRAP_CONTENT) {
                 assetRow.getLayoutParams().height =
                         android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
                 assetRow.requestLayout();
@@ -1843,11 +1866,39 @@ public final class UserPagePurifier {
         if (view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group = (android.view.ViewGroup) view;
             StringBuilder sb = new StringBuilder();
+            // 容器自身可能是富文本控件（Kuikly RichFontTextView 等）
+            String own = reflectiveText(view);
+            if (!own.isEmpty()) sb.append(own);
             for (int i = 0; i < group.getChildCount(); i++) {
                 sb.append(subtreeText(group.getChildAt(i)));
             }
             return sb.toString();
         }
+        // Kuikly 等自绘框架的富文本控件不是 android.widget.TextView，
+        // 但普遍声明 getText()——反射读取，否则入口文案匹配不到，
+        // 表现为入口「消失」被整组收起
+        return reflectiveText(view);
+    }
+
+    /** 反射读取非 TextView 控件的 getText()/contentDescription 文本。 */
+    private static String reflectiveText(View view) {
+        if (view == null) return "";
+        try {
+            java.lang.reflect.Method m = view.getClass().getMethod("getText");
+            Object t = m.invoke(view);
+            if (t instanceof CharSequence) {
+                CharSequence cs = (CharSequence) t;
+                if (cs.length() > 0 && cs.length() <= 200) {
+                    return normalize(cs.toString());
+                }
+            }
+        } catch (Throwable ignored) {}
+        try {
+            CharSequence cd = view.getContentDescription();
+            if (cd != null && cd.length() > 0 && cd.length() <= 200) {
+                return normalize(cd.toString());
+            }
+        } catch (Throwable ignored) {}
         return "";
     }
 
