@@ -1238,6 +1238,11 @@ public final class UserPagePurifier {
             boolean onScreenX = loc[0] > -60 && loc[0] + w < 1140;
             if (onScreenX && loc[1] >= bandTop && loc[1] + h <= bandBottom && h > 50 && w > 150) {
                 String t = subtreeText(v);
+                String textColor = "";
+                if (v instanceof android.widget.TextView) {
+                    textColor = " textColor=" + String.format("0x%08X",
+                            ((android.widget.TextView) v).getCurrentTextColor());
+                }
                 MainHook.log("BandDiag: d" + depth + " " + v.getClass().getName()
                         + " abs=" + loc[0] + "," + loc[1] + "-" + (loc[0] + w) + "," + (loc[1] + h)
                         + " vis=" + v.getVisibility()
@@ -1246,7 +1251,8 @@ public final class UserPagePurifier {
                         + " trY=" + String.format(java.util.Locale.ROOT, "%.0f", v.getTranslationY())
                         + " scX=" + String.format(java.util.Locale.ROOT, "%.2f", v.getScaleX())
                         + " textLen=" + t.length()
-                        + (t.length() > 0 ? " text=" + t.substring(0, Math.min(30, t.length())) : ""));
+                        + (t.length() > 0 ? " text=" + t.substring(0, Math.min(30, t.length())) : "")
+                        + textColor);
             }
             if (v instanceof ViewGroup) {
                 ViewGroup g = (ViewGroup) v;
