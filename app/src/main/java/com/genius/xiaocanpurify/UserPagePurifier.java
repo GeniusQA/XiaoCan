@@ -1655,6 +1655,11 @@ public final class UserPagePurifier {
                                     + (100 * nonWhite / (w * h)) + "%)");
                             bmp.recycle();
                             if (hasContent) {
+                                // 文字颜色诊断：确认入口 TextView 是否被置白
+                                int[] loc2 = new int[2];
+                                rv.getLocationOnScreen(loc2);
+                                dumpBand(rv.getRootView(), loc2[1] - 5,
+                                        loc2[1] + rv.getHeight() + 5, 0);
                                 rebuildCarouselRender(rv);
                             }
                             if (hasContent) {
