@@ -15,6 +15,9 @@ public final class NetworkAdInterceptor {
     /** RPC 探针窗口截止时间：红包任务点击后临时记录宿主全部请求，用于发现领奖上报接口。 */
     private static volatile long DISCOVERY_UNTIL = 0L;
 
+    /** RPC 请求探针节流（1 秒一条）。 */
+    private static volatile long lastRpcProbeMs;
+
     private NetworkAdInterceptor() {}
 
     static void armDiscovery(long durationMs) {
@@ -93,6 +96,13 @@ public final class NetworkAdInterceptor {
                                 String s = ((service == null ? "" : service) + " "
                                         + (serverName == null ? "" : serverName) + " "
                                         + (path == null ? "" : path)).toLowerCase(Locale.ROOT);
+                                // 探针：节流记录 Flutter RPC 请求，定位页面按钮
+                                // 点击后实际触发的接口（广告拦截误杀排查）
+                                long nowMs = android.os.SystemClock.uptimeMillis();
+                                if (nowMs - lastRpcProbeMs > 1000L) {
+                                    lastRpcProbeMs = nowMs;
+                                    MainHook.log("RPC[probe] " + s);
+                                }
                                 if (discoveryActive()) {
                                     MainHook.log("RPC[discover][flutter] " + s);
                                 }

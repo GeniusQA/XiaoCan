@@ -1442,30 +1442,27 @@ public final class UserPagePurifier {
                             ? ((android.widget.LinearLayout) cardGroup).getGravity()
                             : -1)
                     + " children=" + diag);
+            // 资产行条目容器：assetRow（内容容器）内包含锚点标签的直接子节点
+            View itemsRow = anchor;
+            while (itemsRow.getParent() instanceof View && itemsRow.getParent() != assetRow) {
+                itemsRow = (View) itemsRow.getParent();
+            }
+            if (itemsRow.getParent() != assetRow) itemsRow = null;
             if (hasVisibleMenuEntryText(cardGroup)) {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
                 //（只还原无文本无图片的空壳，不会碰活动行容器）
-                for (int i = 0; i < cardGroup.getChildCount(); i++) {
-                    View child = cardGroup.getChildAt(i);
-                    if (child == assetRow) continue;
-                    if (child.getVisibility() == View.GONE
-                            && !subtreeHasTextOrImage(child)) {
-                        child.setVisibility(View.VISIBLE);
-                    }
-                }
+                restoreEmptySiblings(cardGroup, assetRow);
+                if (itemsRow != null) restoreEmptySiblings(assetRow, itemsRow);
                 restoreAdjacentShells(cardGroup);
                 return;
             }
             boolean changed = false;
-            for (int i = 0; i < cardGroup.getChildCount(); i++) {
-                View child = cardGroup.getChildAt(i);
-                if (child == assetRow || child.getVisibility() != View.VISIBLE) continue;
-                // 含活动入口文案的子树（活动行容器链）不碰，由嵌入/收起逻辑负责；
-                // 其余无可见内容的空壳/分割线整块隐藏
-                if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
-                    child.setVisibility(View.GONE);
-                    changed = true;
-                }
+            // 卡片层：隐藏资产行内容容器之外的无内容空壳
+            changed |= hideEmptySiblings(cardGroup, assetRow);
+            // 内容容器层（实测资产行与活动行同卡）：隐藏资产行条目旁的
+            // 分割线/空占位——活动行容器链含入口文案，不碰
+            if (itemsRow != null) {
+                changed |= hideEmptySiblings(assetRow, itemsRow);
             }
             // 资产行在卡片内垂直居中（卡片高度自适应内容，入口恢复后无副作用）
             if (cardGroup instanceof android.widget.LinearLayout
@@ -1496,6 +1493,31 @@ public final class UserPagePurifier {
             if (changed) MainHook.log("Asset-only card polished");
         } catch (Throwable t) {
             MainHook.log("polishAssetOnlyCard error: " + t);
+        }
+    }
+
+    /** 隐藏 parent 内 keep 之外的无内容子视图（分割线/空占位）。 */
+    private static boolean hideEmptySiblings(ViewGroup parent, View keep) {
+        boolean changed = false;
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child == keep || child.getVisibility() != View.VISIBLE) continue;
+            if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
+                child.setVisibility(View.GONE);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /** 还原 parent 内 keep 之外此前被隐藏的无内容子视图。 */
+    private static void restoreEmptySiblings(ViewGroup parent, View keep) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child == keep) continue;
+            if (child.getVisibility() == View.GONE && !subtreeHasTextOrImage(child)) {
+                child.setVisibility(View.VISIBLE);
+            }
         }
     }
 
