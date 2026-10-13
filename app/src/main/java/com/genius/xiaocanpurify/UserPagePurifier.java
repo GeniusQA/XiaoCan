@@ -128,6 +128,7 @@ public final class UserPagePurifier {
                                         collapseMenuIfEmpty(b);
                                     }
                                     filterAssetItems(b);
+                                    polishAssetOnlyCard(b);
                                     if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
                                         hideUserOrderSection(b);
                                     }
@@ -183,6 +184,7 @@ public final class UserPagePurifier {
                 collapseMenuIfEmpty(binding);
             }
             filterAssetItems(binding);
+            polishAssetOnlyCard(binding);
             if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
                 hideUserOrderSection(binding);
             }
@@ -589,9 +591,24 @@ public final class UserPagePurifier {
         CENTERED_CHILDREN.remove(entry);
         entry.setTranslationX(0f);
 
+        // 取「可提现蚕豆」左列 logo 的实际尺寸，嵌入入口的 logo 与其同尺寸
+        int beanIconSize = 0;
+        for (int i = 0; i < slot.getChildCount(); i++) {
+            View c = slot.getChildAt(i);
+            if (c.getVisibility() == View.VISIBLE
+                    && subtreeText(c).contains(normalize("可提现蚕豆"))) {
+                android.widget.ImageView beanIcon = findFirstImageView(c);
+                if (beanIcon != null && beanIcon.getWidth() > 0
+                        && beanIcon.getHeight() > 0) {
+                    beanIconSize = Math.min(beanIcon.getWidth(), beanIcon.getHeight());
+                }
+                break;
+            }
+        }
+
         // 从原入口提取图标与文字，重建紧凑横排视图（高度约 28dp，
         // 天然放得进蚕豆卡原有空位，不改动任何容器尺寸，避免布局重叠）
-        View inline = buildInlineEntryView(slot.getContext(), entry);
+        View inline = buildInlineEntryView(slot.getContext(), entry, beanIconSize);
         if (inline == null) {
             MainHook.log("EmbedEntry: cannot build inline view, fallback");
             return false;
@@ -850,9 +867,11 @@ public final class UserPagePurifier {
 
     /**
      * 用原入口的图标与文字重建紧凑横排视图（不改任何容器尺寸）。
-     * 提取不到文本时退化为按 28dp 高度等比缩小的入口位图。
+     * iconSizePx > 0 时 logo 使用该尺寸（与左侧「可提现蚕豆」logo 同尺寸），
+     * 否则退回 20dp。提取不到文本时退化为按 28dp 高度等比缩小的入口位图。
      */
-    private static View buildInlineEntryView(android.content.Context ctx, View entry) {
+    private static View buildInlineEntryView(android.content.Context ctx, View entry,
+                                             int iconSizePx) {
         android.widget.ImageView srcIcon = findFirstImageView(entry);
         android.widget.TextView srcText = findFirstTextView(entry);
         android.graphics.drawable.Drawable iconDrawable = null;
@@ -889,8 +908,9 @@ public final class UserPagePurifier {
         if (iconDrawable != null) {
             android.widget.ImageView iv = new android.widget.ImageView(ctx);
             iv.setImageDrawable(iconDrawable);
+            int isz = iconSizePx > 0 ? iconSizePx : dp(entry, 20);
             android.widget.LinearLayout.LayoutParams ip =
-                    new android.widget.LinearLayout.LayoutParams(dp(entry, 20), dp(entry, 20));
+                    new android.widget.LinearLayout.LayoutParams(isz, isz);
             ip.rightMargin = dp(entry, 4);
             box.addView(iv, ip);
         }
@@ -947,9 +967,12 @@ public final class UserPagePurifier {
             int iw = embeddedSnapshotView.getWidth();
             int ih = embeddedSnapshotView.getHeight();
             if (iw <= 0 || ih <= 0) return;
-            float tx = embeddedLeftColView.getRight() + dp(embeddedSnapshotView, 12);
-            float maxTx = embeddedBtnWrapView.getLeft() - iw - dp(embeddedSnapshotView, 8);
-            if (tx > maxTx) tx = maxTx;
+            // 在左列与提现按钮之间的空位内水平居中展示
+            float gapL = embeddedLeftColView.getRight() + dp(embeddedSnapshotView, 8);
+            float gapR = embeddedBtnWrapView.getLeft() - dp(embeddedSnapshotView, 8);
+            float tx = gapL + (gapR - gapL - iw) / 2f;
+            if (tx > gapR - iw) tx = gapR - iw;
+            if (tx < gapL) tx = gapL;
             float ty = embeddedLeftColView.getTop()
                     + (embeddedLeftColView.getHeight() - ih) / 2f;
             if (Math.abs(embeddedSnapshotView.getTranslationX() - tx) > 0.5f
@@ -1274,6 +1297,128 @@ public final class UserPagePurifier {
                 MainHook.log("Restored user asset item: " + item[1]);
             }
         }
+    }
+
+    /**
+     * 资产行独占卡片时的收尾美化：活动行入口被全部隐藏/嵌入蚕豆卡后，
+     * 卡片内只剩资产行，残留的分割线与空占位容器会在资产行下方留出
+     * 一条空白——把不含任何可见内容、也不承载活动入口的兄弟视图整块
+     * GONE，并让资产行在卡片内垂直居中。入口恢复显示时反向还原。
+     */
+    private static void polishAssetOnlyCard(Object binding) {
+        try {
+            View root = getBindingRoot(binding);
+            if (!(root instanceof ViewGroup)) return;
+            ViewGroup rootGroup = (ViewGroup) root;
+            // 定位资产行锚点（元宝/卡券/红包 任一标签）
+            View anchor = null;
+            for (String[] item : ASSET_ITEMS) {
+                anchor = findLabelView(root, item[1]);
+                if (anchor != null) break;
+            }
+            if (anchor == null) return;
+            // 爬到卡片边界：子树不含其它卡片关键词的最高祖先
+            //（不能用 subtreeHasOtherSection——本卡的活动入口文案在隐藏后
+            // 仍存在，会把边界误判在资产行容器）
+            String[] otherCards = {"可提现蚕豆", "累计团员", "信用极好",
+                    "待上传", "全部订单", "为你节省"};
+            View card = anchor;
+            while (card.getParent() instanceof View && card.getParent() != rootGroup) {
+                View parent = (View) card.getParent();
+                String text = subtreeText(parent);
+                boolean other = false;
+                for (String key : otherCards) {
+                    if (text.contains(key)) { other = true; break; }
+                }
+                if (other) break;
+                card = parent;
+            }
+            if (!(card instanceof ViewGroup) || card == rootGroup) return;
+            ViewGroup cardGroup = (ViewGroup) card;
+            // 资产行容器：从锚点爬到卡片直接子节点
+            View assetRow = anchor;
+            while (assetRow.getParent() instanceof View && assetRow.getParent() != card) {
+                assetRow = (View) assetRow.getParent();
+            }
+            if (assetRow.getParent() != card) return;
+            if (hasVisibleMenuEntryText(cardGroup)) {
+                // 入口已恢复显示：还原此前被隐藏的分割线/空占位
+                //（只还原无文本无图片的空壳，不会碰活动行容器）
+                for (int i = 0; i < cardGroup.getChildCount(); i++) {
+                    View child = cardGroup.getChildAt(i);
+                    if (child == assetRow) continue;
+                    if (child.getVisibility() == View.GONE
+                            && !subtreeHasTextOrImage(child)) {
+                        child.setVisibility(View.VISIBLE);
+                    }
+                }
+                return;
+            }
+            boolean changed = false;
+            for (int i = 0; i < cardGroup.getChildCount(); i++) {
+                View child = cardGroup.getChildAt(i);
+                if (child == assetRow || child.getVisibility() != View.VISIBLE) continue;
+                // 含活动入口文案的子树（活动行容器链）不碰，由嵌入/收起逻辑负责；
+                // 其余无可见内容的空壳/分割线整块隐藏
+                if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
+                    child.setVisibility(View.GONE);
+                    changed = true;
+                }
+            }
+            // 资产行在卡片内垂直居中（卡片高度自适应内容，入口恢复后无副作用）
+            if (cardGroup instanceof android.widget.LinearLayout
+                    && ((android.widget.LinearLayout) cardGroup).getOrientation()
+                            == android.widget.LinearLayout.VERTICAL) {
+                ((android.widget.LinearLayout) cardGroup).setGravity(
+                        android.view.Gravity.CENTER_VERTICAL);
+                changed = true;
+            }
+            if (changed) MainHook.log("Asset-only card polished");
+        } catch (Throwable t) {
+            MainHook.log("polishAssetOnlyCard error: " + t);
+        }
+    }
+
+    /** 子树内是否存在可见文本或图片（只看 VISIBLE 部分）。 */
+    private static boolean hasVisibleContent(View v) {
+        if (v.getVisibility() != View.VISIBLE) return false;
+        if (v instanceof android.widget.TextView) {
+            CharSequence t = ((android.widget.TextView) v).getText();
+            if (t != null && t.length() > 0) return true;
+        }
+        if (v instanceof android.widget.ImageView) return true;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                if (hasVisibleContent(g.getChildAt(i))) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 子树内是否存在文本或图片（不看可见性，GONE 的活动行文案也算）。 */
+    private static boolean subtreeHasTextOrImage(View v) {
+        if (v instanceof android.widget.TextView) {
+            CharSequence t = ((android.widget.TextView) v).getText();
+            if (t != null && t.length() > 0) return true;
+        }
+        if (v instanceof android.widget.ImageView) return true;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                if (subtreeHasTextOrImage(g.getChildAt(i))) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 卡片内是否有可见的活动入口文案。 */
+    private static boolean hasVisibleMenuEntryText(ViewGroup card) {
+        for (String[] item : MENU_ITEMS) {
+            View label = findLabelView(card, item[1]);
+            if (label != null && label.isShown()) return true;
+        }
+        return false;
     }
 
     /**

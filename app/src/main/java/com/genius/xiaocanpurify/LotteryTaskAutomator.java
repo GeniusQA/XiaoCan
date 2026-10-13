@@ -89,7 +89,8 @@ public final class LotteryTaskAutomator {
                     type == TYPE_MALL);
         } else if (type == TYPE_REDPACK) {
             // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
-            EnrollmentJumpGuard.armNow();
+            // （任务模式：不受用户触摸影响，窗口内始终拦截）
+            EnrollmentJumpGuard.armTaskNow();
             NetworkAdInterceptor.armDiscovery(DISCOVERY_MS);
             MainHook.log("LotteryTaskAutomator: red packet task (" + source + "), jump blocked, discovery armed");
         }
