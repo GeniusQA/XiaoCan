@@ -649,13 +649,37 @@ public final class UserPagePurifier {
                     View cur = target;
                     float px = target.getWidth() / 2f;
                     float py = target.getHeight() / 2f;
-                    // 把入口中心点从入口局部坐标逐层映射到活动行根的局部坐标
-                    //（累加 left + translation - scroll，同一冻结快照内自洽）
-                    while (cur != null && cur != rowTop
-                            && cur.getWidth() > 0 && cur.getHeight() > 0) {
+                    // 诊断：记录入口 → 活动行根 每层的边界、可点击性与监听器，
+                    // 以及入口中心在行根坐标系下的映射结果
+                    StringBuilder diag = new StringBuilder();
+                    View clickTarget = null;
+                    while (cur != null && cur.getWidth() > 0 && cur.getHeight() > 0) {
+                        diag.append(cur.getClass().getSimpleName())
+                                .append('[').append(cur.getLeft()).append(',')
+                                .append(cur.getTop()).append(' ')
+                                .append(cur.getWidth()).append('x')
+                                .append(cur.getHeight())
+                                .append(cur.isClickable() ? " C" : "")
+                                .append(cur.hasOnClickListeners() ? " L" : "")
+                                .append(cur.isShown() ? "" : " H")
+                                .append(']');
+                        if (clickTarget == null && cur.hasOnClickListeners()) {
+                            clickTarget = cur;
+                        }
+                        if (cur == rowTop) break;
                         px += cur.getLeft() + cur.getTranslationX() - cur.getScrollX();
                         py += cur.getTop() + cur.getTranslationY() - cur.getScrollY();
                         cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+                    }
+                    MainHook.log("EmbedEntry: chain " + diag
+                            + " -> rowPoint(" + (int) px + "," + (int) py + ")");
+                    // 优先原生点击监听：链上最近的 OnClickListener 最具体，
+                    // performClick 直接触发，无坐标依赖
+                    if (clickTarget != null) {
+                        MainHook.log("EmbedEntry: click -> performClick on "
+                                + clickTarget.getClass().getSimpleName());
+                        clickTarget.performClick();
+                        return;
                     }
                     if (cur == rowTop && cur.getWidth() > 0 && cur.getHeight() > 0) {
                         // 单次从活动行根投递：dispatchTouchEvent 会先跑行根自身的
@@ -798,20 +822,27 @@ public final class UserPagePurifier {
         return fallback;
     }
 
-    /** 在视图局部坐标 (x, y) 处向 target 投递一次合成点击（DOWN+UP）。 */
+    /**
+     * 在视图局部坐标 (x, y) 处向 target 投递一次合成点击。
+     * 完整 DOWN → MOVE → UP 序列：部分手势识别器依赖 MOVE 才判定为 tap。
+     */
     private static boolean dispatchSyntheticTapAt(View target, float x, float y) {
         if (target == null) return false;
         long now = android.os.SystemClock.uptimeMillis();
         android.view.MotionEvent down = android.view.MotionEvent.obtain(
                 now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0);
+        android.view.MotionEvent move = android.view.MotionEvent.obtain(
+                now, now + 40L, android.view.MotionEvent.ACTION_MOVE, x, y, 0);
         android.view.MotionEvent up = android.view.MotionEvent.obtain(
-                now, now + 50L, android.view.MotionEvent.ACTION_UP, x, y, 0);
+                now, now + 90L, android.view.MotionEvent.ACTION_UP, x, y, 0);
         boolean consumed;
         try {
             consumed = target.dispatchTouchEvent(down);
+            target.dispatchTouchEvent(move);
             target.dispatchTouchEvent(up);
         } finally {
             down.recycle();
+            move.recycle();
             up.recycle();
         }
         return consumed;
