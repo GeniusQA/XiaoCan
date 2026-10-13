@@ -599,27 +599,22 @@ public final class UserPagePurifier {
         entry.setTranslationX(0f);
 
         // 取「可提现蚕豆」左列 logo 的实际尺寸，嵌入入口的 logo 与其同尺寸。
-        // 用「列内面积最大的可见 ImageView」而非第一个：第一个可能是
-        // 透明占位/装饰图。实测左列可能没有任何 ImageView（logo 由
-        // Kuikly 自绘）——此时退回整卡扫描，仍取最大者
+        // 列内可能没有已测量的 ImageView（logo 由 Kuikly 自绘或尚未布局）——
+        // 测量尺寸为 0 时回退读 LayoutParams；仍取不到时整卡扫描并加
+        // 32dp 上限（整卡最大图可能是提现按钮背景等大图，实测偏大）
         int beanIconSize = 0;
         for (int i = 0; i < slot.getChildCount(); i++) {
             View c = slot.getChildAt(i);
             if (c.getVisibility() == View.VISIBLE
                     && subtreeText(c).contains(normalize("可提现蚕豆"))) {
-                android.widget.ImageView beanIcon = findLargestImageView(c);
-                if (beanIcon != null && beanIcon.getWidth() > 0
-                        && beanIcon.getHeight() > 0) {
-                    beanIconSize = Math.min(beanIcon.getWidth(), beanIcon.getHeight());
-                }
+                beanIconSize = estimateIconSize(c);
                 break;
             }
         }
         if (beanIconSize == 0) {
-            android.widget.ImageView anyIcon = findLargestImageView(slot);
-            if (anyIcon != null && anyIcon.getWidth() > 0 && anyIcon.getHeight() > 0) {
-                beanIconSize = Math.min(anyIcon.getWidth(), anyIcon.getHeight());
-            }
+            beanIconSize = estimateIconSize(slot);
+            int cap = dp(entry, 32);
+            if (beanIconSize > cap) beanIconSize = cap;
         }
         MainHook.log("EmbedEntry: beanIconSize=" + beanIconSize);
 
@@ -961,30 +956,34 @@ public final class UserPagePurifier {
         return box;
     }
 
-    /** 深度优先找可见面积最大的 ImageView（logo 通常是列内最大的图）。 */
-    private static android.widget.ImageView findLargestImageView(View parent) {
-        if (parent instanceof android.widget.ImageView
-                && parent.getVisibility() == View.VISIBLE
-                && parent.getWidth() > 0 && parent.getHeight() > 0) {
-            return (android.widget.ImageView) parent;
+    /** 估算区域内最大图标尺寸：取 ImageView 的测量尺寸，为 0 时读
+     *  LayoutParams（Kuikly 布局可能尚未测量，params 仍保留目标尺寸）。 */
+    private static int estimateIconSize(View parent) {
+        if (parent instanceof android.widget.ImageView) {
+            return iconSizeOf((android.widget.ImageView) parent);
         }
         if (parent instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) parent;
-            android.widget.ImageView best = null;
-            long bestArea = -1;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                android.widget.ImageView found = findLargestImageView(group.getChildAt(i));
-                if (found != null) {
-                    long area = (long) found.getWidth() * found.getHeight();
-                    if (area > bestArea) {
-                        bestArea = area;
-                        best = found;
-                    }
-                }
+            ViewGroup g = (ViewGroup) parent;
+            int best = 0;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                int s = estimateIconSize(g.getChildAt(i));
+                if (s > best) best = s;
             }
             return best;
         }
-        return null;
+        return 0;
+    }
+
+    private static int iconSizeOf(android.widget.ImageView iv) {
+        if (iv.getVisibility() == View.VISIBLE
+                && iv.getWidth() > 0 && iv.getHeight() > 0) {
+            return Math.min(iv.getWidth(), iv.getHeight());
+        }
+        android.view.ViewGroup.LayoutParams lp = iv.getLayoutParams();
+        if (lp != null && lp.width > 0 && lp.height > 0) {
+            return Math.min(lp.width, lp.height);
+        }
+        return 0;
     }
 
     /** 深度优先找第一个 ImageView。 */
