@@ -474,6 +474,8 @@ public final class UserPagePurifier {
     private static View.OnLayoutChangeListener embeddedSlotListener;
     /** 活动行根视图（点击时重新定位当前入口实例，宿主重渲染会更换实例）。 */
     private static ViewGroup embeddedMenuRow;
+    /** 活动行卡片壳是否已被连带收起（壳内无可见资产行内容时）。 */
+    private static boolean embeddedCardCollapsed;
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -503,6 +505,11 @@ public final class UserPagePurifier {
             boolean reset = false;
             if (embeddedRowView != null && embeddedRowView.getVisibility() != View.GONE) {
                 embeddedRowView.setVisibility(View.GONE);
+                reset = true;
+            }
+            if (embeddedCardCollapsed && embeddedMenuRow != null
+                    && embeddedMenuRow.getVisibility() != View.GONE) {
+                embeddedMenuRow.setVisibility(View.GONE);
                 reset = true;
             }
             if (embeddedEntryView != null && embeddedEntryView.getVisibility() != View.GONE) {
@@ -593,7 +600,8 @@ public final class UserPagePurifier {
 
         // 取「可提现蚕豆」左列 logo 的实际尺寸，嵌入入口的 logo 与其同尺寸。
         // 用「列内面积最大的可见 ImageView」而非第一个：第一个可能是
-        // 透明占位/装饰图，尺寸为 0 时会整体回退 20dp（实测偏小）
+        // 透明占位/装饰图。实测左列可能没有任何 ImageView（logo 由
+        // Kuikly 自绘）——此时退回整卡扫描，仍取最大者
         int beanIconSize = 0;
         for (int i = 0; i < slot.getChildCount(); i++) {
             View c = slot.getChildAt(i);
@@ -605,6 +613,12 @@ public final class UserPagePurifier {
                     beanIconSize = Math.min(beanIcon.getWidth(), beanIcon.getHeight());
                 }
                 break;
+            }
+        }
+        if (beanIconSize == 0) {
+            android.widget.ImageView anyIcon = findLargestImageView(slot);
+            if (anyIcon != null && anyIcon.getWidth() > 0 && anyIcon.getHeight() > 0) {
+                beanIconSize = Math.min(anyIcon.getWidth(), anyIcon.getHeight());
             }
         }
         MainHook.log("EmbedEntry: beanIconSize=" + beanIconSize);
@@ -813,12 +827,31 @@ public final class UserPagePurifier {
         if (collapseTarget != null) {
             collapseTarget.setVisibility(View.GONE);
         }
+        // 实测：收起入口子容器后，活动行卡片壳（row=MaterialCardView）仍以
+        // 固定高度渲染为空白卡，加上卡片间隙形成截图中的「灰线+空白」。
+        // 若卡片壳内已无可见资产行内容，把壳一并 GONE。
+        embeddedCardCollapsed = false;
+        if (row.getVisibility() == View.VISIBLE && !rowHasVisibleAssetContent(row)) {
+            row.setVisibility(View.GONE);
+            embeddedCardCollapsed = true;
+            MainHook.log("EmbedEntry: empty menu card shell collapsed");
+        }
         embeddedSnapshotView = inline;
         embeddedEntryView = entry;
         embeddedRowView = collapseTarget;
         embeddedMenuRow = row;
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
+    }
+
+    /** 活动行卡片壳内是否存在可见的资产行内容（有则不能收起壳）。 */
+    private static boolean rowHasVisibleAssetContent(ViewGroup row) {
+        for (String[] item : ASSET_ITEMS) {
+            View lbl = findLabelView(row, item[1]);
+            if (lbl == null) lbl = findTextContaining(row, item[1]);
+            if (lbl != null && lbl.isShown()) return true;
+        }
+        return false;
     }
 
     /**
@@ -1033,12 +1066,20 @@ public final class UserPagePurifier {
         embeddedLeftColView = null;
         embeddedBtnWrapView = null;
         embeddedSlotListener = null;
-        embeddedMenuRow = null;
         ViewGroup r = embeddedRowView != null ? embeddedRowView : row;
         if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
             r.setVisibility(View.VISIBLE);
             MainHook.log("EmbedEntry: menu row restored");
         }
+        // 恢复被连带收起的活动行卡片壳
+        ViewGroup shell = embeddedMenuRow;
+        if (embeddedCardCollapsed && shell != null
+                && shell.getVisibility() == View.GONE) {
+            shell.setVisibility(View.VISIBLE);
+            MainHook.log("EmbedEntry: menu card shell restored");
+        }
+        embeddedCardCollapsed = false;
+        embeddedMenuRow = null;
         embeddedRowView = null;
     }
 

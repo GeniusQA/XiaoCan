@@ -99,8 +99,8 @@ public final class NetworkAdInterceptor {
                                 Object data = argumentMethod.invoke(call, "data");
                                 if (isBlockedFlutterService(s) || WithdrawAdPolicy.isAdPlacement(s, data)) {
                                     MainHook.log(isDiscoveryName(s)
-                                            ? "Blocked search discovery"
-                                            : "Blocked withdraw card request");
+                                            ? "Blocked search discovery: " + s
+                                            : "Blocked withdraw card request: " + s);
                                     replySuccess.invoke(result, isDiscoveryName(s) ? EMPTY_DISCOVERY : null);
                                     if (isWithdrawCardName(s)) FlutterPageGuard.onWithdrawResponse();
                                     return null;
@@ -343,7 +343,7 @@ public final class NetworkAdInterceptor {
                     if (methodName != null) {
                         String mLower = methodName.toLowerCase(Locale.ROOT);
                         if (isWithdrawCardName(mLower)) {
-                            MainHook.log("Blocked withdraw card RPC");
+                            MainHook.log("Blocked withdraw card RPC: " + mLower);
                             FlutterPageGuard.onWithdrawResponse();
                             return createMockJsonResponse(request, "{\"code\":0,\"data\":{},\"msg\":\"ok\"}");
                         }
