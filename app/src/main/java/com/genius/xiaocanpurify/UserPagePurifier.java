@@ -591,13 +591,15 @@ public final class UserPagePurifier {
         CENTERED_CHILDREN.remove(entry);
         entry.setTranslationX(0f);
 
-        // 取「可提现蚕豆」左列 logo 的实际尺寸，嵌入入口的 logo 与其同尺寸
+        // 取「可提现蚕豆」左列 logo 的实际尺寸，嵌入入口的 logo 与其同尺寸。
+        // 用「列内面积最大的可见 ImageView」而非第一个：第一个可能是
+        // 透明占位/装饰图，尺寸为 0 时会整体回退 20dp（实测偏小）
         int beanIconSize = 0;
         for (int i = 0; i < slot.getChildCount(); i++) {
             View c = slot.getChildAt(i);
             if (c.getVisibility() == View.VISIBLE
                     && subtreeText(c).contains(normalize("可提现蚕豆"))) {
-                android.widget.ImageView beanIcon = findFirstImageView(c);
+                android.widget.ImageView beanIcon = findLargestImageView(c);
                 if (beanIcon != null && beanIcon.getWidth() > 0
                         && beanIcon.getHeight() > 0) {
                     beanIconSize = Math.min(beanIcon.getWidth(), beanIcon.getHeight());
@@ -605,6 +607,7 @@ public final class UserPagePurifier {
                 break;
             }
         }
+        MainHook.log("EmbedEntry: beanIconSize=" + beanIconSize);
 
         // 从原入口提取图标与文字，重建紧凑横排视图（高度约 28dp，
         // 天然放得进蚕豆卡原有空位，不改动任何容器尺寸，避免布局重叠）
@@ -923,6 +926,32 @@ public final class UserPagePurifier {
             box.addView(tv);
         }
         return box;
+    }
+
+    /** 深度优先找可见面积最大的 ImageView（logo 通常是列内最大的图）。 */
+    private static android.widget.ImageView findLargestImageView(View parent) {
+        if (parent instanceof android.widget.ImageView
+                && parent.getVisibility() == View.VISIBLE
+                && parent.getWidth() > 0 && parent.getHeight() > 0) {
+            return (android.widget.ImageView) parent;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            android.widget.ImageView best = null;
+            long bestArea = -1;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.widget.ImageView found = findLargestImageView(group.getChildAt(i));
+                if (found != null) {
+                    long area = (long) found.getWidth() * found.getHeight();
+                    if (area > bestArea) {
+                        bestArea = area;
+                        best = found;
+                    }
+                }
+            }
+            return best;
+        }
+        return null;
     }
 
     /** 深度优先找第一个 ImageView。 */
@@ -1310,13 +1339,18 @@ public final class UserPagePurifier {
             View root = getBindingRoot(binding);
             if (!(root instanceof ViewGroup)) return;
             ViewGroup rootGroup = (ViewGroup) root;
-            // 定位资产行锚点（元宝/卡券/红包 任一标签）
+            // 定位资产行锚点（元宝/卡券/红包 任一标签；精确匹配失败时
+            // 退回包含匹配——资产行标签可能带计数后缀/空格）
             View anchor = null;
             for (String[] item : ASSET_ITEMS) {
                 anchor = findLabelView(root, item[1]);
+                if (anchor == null) anchor = findTextContaining(root, item[1]);
                 if (anchor != null) break;
             }
-            if (anchor == null) return;
+            if (anchor == null) {
+                MainHook.log("AssetPolish: asset label not found");
+                return;
+            }
             // 爬到卡片边界：子树不含其它卡片关键词的最高祖先
             //（不能用 subtreeHasOtherSection——本卡的活动入口文案在隐藏后
             // 仍存在，会把边界误判在资产行容器）
@@ -1333,14 +1367,41 @@ public final class UserPagePurifier {
                 if (other) break;
                 card = parent;
             }
-            if (!(card instanceof ViewGroup) || card == rootGroup) return;
+            if (!(card instanceof ViewGroup) || card == rootGroup) {
+                MainHook.log("AssetPolish: card boundary not found, stopped at "
+                        + card.getClass().getSimpleName());
+                return;
+            }
             ViewGroup cardGroup = (ViewGroup) card;
             // 资产行容器：从锚点爬到卡片直接子节点
             View assetRow = anchor;
             while (assetRow.getParent() instanceof View && assetRow.getParent() != card) {
                 assetRow = (View) assetRow.getParent();
             }
-            if (assetRow.getParent() != card) return;
+            if (assetRow.getParent() != card) {
+                MainHook.log("AssetPolish: asset row not direct child of card, row="
+                        + assetRow.getClass().getSimpleName() + " card="
+                        + card.getClass().getSimpleName());
+                return;
+            }
+            // 诊断：卡片各直接子节点的结构与内容分布
+            StringBuilder diag = new StringBuilder();
+            for (int i = 0; i < cardGroup.getChildCount(); i++) {
+                View child = cardGroup.getChildAt(i);
+                diag.append(child.getClass().getSimpleName())
+                        .append('[').append(child.getWidth()).append('x')
+                        .append(child.getHeight())
+                        .append(child.getVisibility() == View.VISIBLE ? "" : " G")
+                        .append(hasVisibleContent(child) ? " C" : "")
+                        .append(subtreeHasTextOrImage(child) ? " T" : "")
+                        .append(']');
+            }
+            MainHook.log("AssetPolish: card=" + cardGroup.getClass().getSimpleName()
+                    + " row=" + assetRow.getClass().getSimpleName()
+                    + " gravity=" + (cardGroup instanceof android.widget.LinearLayout
+                            ? ((android.widget.LinearLayout) cardGroup).getGravity()
+                            : -1)
+                    + " children=" + diag);
             if (hasVisibleMenuEntryText(cardGroup)) {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
                 //（只还原无文本无图片的空壳，不会碰活动行容器）

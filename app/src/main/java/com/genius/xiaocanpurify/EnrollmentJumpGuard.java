@@ -81,6 +81,25 @@ final class EnrollmentJumpGuard {
                         if (arg instanceof Intent) intent = (Intent) arg;
                         if (arg instanceof Activity) owner = (Activity) arg;
                     }
+                    // 探针：记录所有离开宿主包的跳转尝试（含目标与布防状态），
+                    // 用于定位「下单流程」等页面按钮的跳转路径与拦截情况
+                    if (intent != null) {
+                        String pkg = intent.getComponent() != null
+                                ? intent.getComponent().getPackageName()
+                                : intent.getPackage();
+                        if (pkg != null && !pkg.equals("com.realtech.xiaocan")) {
+                            long now = SystemClock.uptimeMillis();
+                            MainHook.log("JumpProbe: "
+                                    + (owner != null ? owner.getClass().getSimpleName() : "?")
+                                    + " -> " + pkg + " "
+                                    + (intent.getComponent() != null
+                                            ? intent.getComponent().getClassName()
+                                            : intent.getAction())
+                                    + " data=" + intent.getDataString()
+                                    + " armed=" + WINDOW.isActive(now)
+                                    + " manual=" + WINDOW.manualSinceArm(now));
+                        }
+                    }
                     // 抽奖中奖后跳微信小程序的兜底拦截（命中开关且布防窗口内
                     // 且用户无触摸）：此前为无条件拦截，会误拦「小程序进店」
                     // 等手动跳转，现改为与窗口一致——弹窗命中时已布防，
