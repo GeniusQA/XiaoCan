@@ -285,8 +285,12 @@ public final class NetworkAdInterceptor {
     }
 
     private static boolean isWithdrawCardName(String s) {
-        return s != null && (s.contains("checkuseringroup")
-                || s.contains("groupdetail")
+        // 注意：不要按方法名拦截 experimentservice.checkuseringroup（实验
+        // 分组检查）与 silkwormwxgroupmangerservice.ismemberbysilkid（会员
+        // 身份检查）——它们不是广告位，mock 成空响应会导致宿主不再渲染
+        // 「我」页活动行（挑战赛/免费抽奖入口消失）。提现页广告拦截由
+        // WithdrawAdPolicy 内容级检查与下方明确的 banner/popup 名称兜底
+        return s != null && (s.contains("groupdetail")
                 || s.contains("wechat_group")
                 || s.contains("bawangcan_banner")
                 || s.contains("candoutx_banner")
@@ -298,7 +302,6 @@ public final class NetworkAdInterceptor {
                 || s.contains("withdraw_placement")
                 || s.contains("withdraw_flow")
                 || s.contains("withdrawupactivitydialog")
-                || s.contains("ismemberbysilkid")
                 || s.contains("listexchangeproduct"));
     }
 
