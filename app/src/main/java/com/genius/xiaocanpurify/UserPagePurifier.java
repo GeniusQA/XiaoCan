@@ -304,38 +304,18 @@ public final class UserPagePurifier {
                 centerSingleMenuEntry((ViewGroup) root);
             }
         }
-        // 免单资格横幅：宿主每次重渲染都会复位其可见性，逐次从页面根重藏
-        // （菜单 binding 根不一定包含横幅，必须向上爬到页面根再找）
+        // 免单资格横幅 = banner_notice 轮播卡（RichFontTextView 富文本渲染，
+        // 非 TextView，文案匹配永远找不到），按资源 id 每次渲染时隐藏
         if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
             View menuRoot = getBindingRoot(binding);
             if (menuRoot != null) {
-                View top = menuRoot;
-                while (top.getParent() instanceof View) top = (View) top.getParent();
-                if (top instanceof ViewGroup) {
-                    View smallest = findSmallestContainingAll((ViewGroup) top, new String[]{
-                            normalize("订单待免单"), normalize("今日邀")});
-                    if (smallest == null) {
-                        // 未命中时 dump 横幅区域结构；页面渲染稳定（嵌入已完成）后才扫，
-                        // 避免早期布局未完成时空跑
-                        if (embeddedSnapshotView != null && bannerDiagAttempts < 3) {
-                            bannerDiagAttempts++;
-                            dumpBannerNeighbors(top);
-                        }
-                        android.util.Log.w("UserPurify", "qualify banner not found");
-                    } else {
-                        // 从最小命中向上爬到卡片边界（祖先子树出现其它板块关键词即停）
-                        View card = smallest;
-                        View cur = smallest;
-                        while (cur.getParent() instanceof View) {
-                            View p = (View) cur.getParent();
-                            if (subtreeHasOtherSection(subtreeText(p))) break;
-                            card = p;
-                            cur = p;
-                        }
-                        if (card.getVisibility() != View.GONE) {
-                            card.setVisibility(View.GONE);
-                            MainHook.log("Hidden free-order qualify card (per-render)");
-                        }
+                int id = menuRoot.getResources().getIdentifier(
+                        "banner_notice", "id", menuRoot.getContext().getPackageName());
+                if (id != 0) {
+                    View bn = menuRoot.findViewById(id);
+                    if (bn != null && bn.getVisibility() != View.GONE) {
+                        bn.setVisibility(View.GONE);
+                        MainHook.log("Hidden banner_notice (qualify banner)");
                     }
                 }
             }
@@ -595,15 +575,23 @@ public final class UserPagePurifier {
         }
         inline.setOnClickListener(v -> {
             try {
-                // 宿主重渲染会更换入口实例：点击时重新定位当前入口
+                // 定位真正承载跳转的入口：
+                // 1) 优先原入口（仍挂在树上时）；
+                // 2) 实例已被宿主更换时，按开关找「未被隐藏」的入口——
+                //    不能取第一个找到的视图，那可能是被隐藏的其它入口（点了没反应）
                 View target = null;
-                ViewGroup rowRef = embeddedMenuRow;
-                if (rowRef != null) {
-                    for (String[] item : MENU_ITEMS) {
-                        View v2 = findItemView(rowRef, normalize(item[1]));
-                        if (v2 != null) {
-                            target = v2;
-                            break;
+                if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
+                    target = embeddedEntryView;
+                } else {
+                    ViewGroup rowRef = embeddedMenuRow;
+                    if (rowRef != null) {
+                        for (String[] item : MENU_ITEMS) {
+                            if (PurifyPrefs.hide(item[0])) continue;
+                            View v2 = findItemView(rowRef, normalize(item[1]));
+                            if (v2 != null) {
+                                target = v2;
+                                break;
+                            }
                         }
                     }
                 }
