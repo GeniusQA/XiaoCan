@@ -496,6 +496,16 @@ public final class UserPagePurifier {
             }
         }
         if (visibleEntries != 1) {
+            // 明细日志：各入口的查找结果与可见性（定位入口消失/未嵌入原因）
+            StringBuilder detail = new StringBuilder();
+            for (String[] item : MENU_ITEMS) {
+                View v = findItemView(row, normalize(item[1]));
+                detail.append(' ').append(item[1]).append('=')
+                        .append(v == null ? "none"
+                                : String.valueOf(v.getVisibility()));
+            }
+            MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
+                    + " skip [" + detail + " ]");
             restoreEmbeddedEntry(row);
             return false;
         }
@@ -1488,6 +1498,17 @@ public final class UserPagePurifier {
             if (assetRow instanceof ViewGroup
                     && hideShells((ViewGroup) assetRow, 2)) {
                 changed = true;
+            }
+            // 实测内容容器被宿主固定为 153px 高，资产行仅 115px——多余的
+            // 高度表现为资产行下方的空白。资产行独占时把容器高度改为自适应；
+            // 宿主重渲染复位后本路径（每次渲染执行）会重新修正
+            if (assetRow.getLayoutParams() != null
+                    && assetRow.getLayoutParams().height > 0) {
+                assetRow.getLayoutParams().height =
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                assetRow.requestLayout();
+                changed = true;
+                MainHook.log("AssetPolish: content container height -> wrap");
             }
             // 资产行在卡片内垂直居中（卡片高度自适应内容，入口恢复后无副作用）
             if (cardGroup instanceof android.widget.LinearLayout
