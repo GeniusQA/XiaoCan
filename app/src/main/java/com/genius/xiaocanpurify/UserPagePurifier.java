@@ -1576,6 +1576,37 @@ public final class UserPagePurifier {
                             ? ((android.widget.LinearLayout) cardGroup).getGravity()
                             : -1)
                     + " children=" + diag + " rowChildren=" + rowDiag);
+            // 轮播子 item 诊断：两页轮播（入口分页）自动翻到空页时表现为
+            // 「入口短暂显示又隐藏」——dump 每个页 item 的边界/可见性/文本
+            // 与 RecyclerView 滚动偏移，确认空白页归属
+            if (assetRow instanceof ViewGroup) {
+                ViewGroup rg = (ViewGroup) assetRow;
+                for (int i = 0; i < rg.getChildCount(); i++) {
+                    View child = rg.getChildAt(i);
+                    if (!(child instanceof ViewGroup)
+                            || !(child.getClass().getName().contains("RecyclerView"))) {
+                        continue;
+                    }
+                    ViewGroup rv = (ViewGroup) child;
+                    StringBuilder itemDiag = new StringBuilder();
+                    for (int j = 0; j < rv.getChildCount(); j++) {
+                        View it = rv.getChildAt(j);
+                        itemDiag.append('#').append(j)
+                                .append('[').append(it.getLeft()).append(',')
+                                .append(it.getTranslationX()).append(' ')
+                                .append(it.getWidth()).append('x').append(it.getHeight())
+                                .append(it.getVisibility() == View.VISIBLE ? "" : " G");
+                        String t = subtreeText(it);
+                        if (t.length() > 0) {
+                            itemDiag.append(" \"").append(t, 0, Math.min(24, t.length())).append('"');
+                        }
+                        itemDiag.append(']');
+                    }
+                    MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
+                            + " transX=" + rv.getTranslationX()
+                            + " items=" + itemDiag);
+                }
+            }
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
             //（全树反射扫描开销大，5 秒节流）
             try {
