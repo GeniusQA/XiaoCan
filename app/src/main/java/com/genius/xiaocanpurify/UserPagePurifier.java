@@ -305,18 +305,23 @@ public final class UserPagePurifier {
             }
         }
         // 免单资格横幅 = banner_notice 轮播卡（RichFontTextView 富文本渲染，
-        // 非 TextView，文案匹配永远找不到），按资源 id 每次渲染时隐藏
+        // 非 TextView，文案匹配永远找不到；且它是 layout_menu 的兄弟节点，
+        // 必须从页面根 findViewById）。宿主每次重渲染都会复位，逐次隐藏。
         if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
             View menuRoot = getBindingRoot(binding);
             if (menuRoot != null) {
-                int id = menuRoot.getResources().getIdentifier(
-                        "banner_notice", "id", menuRoot.getContext().getPackageName());
+                View top = menuRoot;
+                while (top.getParent() instanceof View) top = (View) top.getParent();
+                int id = top.getResources().getIdentifier(
+                        "banner_notice", "id", top.getContext().getPackageName());
                 if (id != 0) {
-                    View bn = menuRoot.findViewById(id);
+                    View bn = top.findViewById(id);
                     if (bn != null && bn.getVisibility() != View.GONE) {
                         bn.setVisibility(View.GONE);
                         MainHook.log("Hidden banner_notice (qualify banner)");
                     }
+                } else {
+                    android.util.Log.w("UserPurify", "banner_notice id not found");
                 }
             }
         }
