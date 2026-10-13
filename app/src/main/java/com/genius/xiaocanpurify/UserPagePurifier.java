@@ -891,13 +891,15 @@ public final class UserPagePurifier {
 
     /** 打印屏幕纵带内的视图（绝对坐标），用于定位自绘横幅的真实视图。 */
     private static void dumpBand(View v, int bandTop, int bandBottom, int depth) {
-        if (v == null || depth > 16) return;
+        if (v == null || depth > 30) return;
         try {
             int[] loc = new int[2];
             v.getLocationOnScreen(loc);
             int w = v.getRight() - v.getLeft();
             int h = v.getBottom() - v.getTop();
-            if (loc[1] >= bandTop && loc[1] + h <= bandBottom && h > 50 && w > 150) {
+            // 只看屏幕内视图，跳过 RecyclerView 屏外回收项
+            boolean onScreenX = loc[0] > -60 && loc[0] + w < 1140;
+            if (onScreenX && loc[1] >= bandTop && loc[1] + h <= bandBottom && h > 50 && w > 150) {
                 String t = subtreeText(v);
                 MainHook.log("BandDiag: d" + depth + " " + v.getClass().getName()
                         + " abs=" + loc[0] + "," + loc[1] + "-" + (loc[0] + w) + "," + (loc[1] + h)
