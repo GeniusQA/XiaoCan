@@ -315,8 +315,9 @@ public final class UserPagePurifier {
                     View smallest = findSmallestContainingAll((ViewGroup) top, new String[]{
                             normalize("订单待免单"), normalize("今日邀")});
                     if (smallest == null) {
-                        // 未命中时 dump 横幅区域结构（早期布局未完成时结果为空，允许重试）
-                        if (bannerDiagAttempts < 5) {
+                        // 未命中时 dump 横幅区域结构；页面渲染稳定（嵌入已完成）后才扫，
+                        // 避免早期布局未完成时空跑
+                        if (embeddedSnapshotView != null && bannerDiagAttempts < 3) {
                             bannerDiagAttempts++;
                             dumpBannerNeighbors(top);
                         }
