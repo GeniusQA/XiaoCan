@@ -1417,6 +1417,12 @@ public final class UserPagePurifier {
             View root = getBindingRoot(binding);
             if (!(root instanceof ViewGroup)) return;
             ViewGroup rootGroup = (ViewGroup) root;
+            // 节流：宿主每秒重渲染 3-4 次，全树反射扫描在主线程累积成
+            // 长任务（实测主线程消息迟到 9.8s）——同一页面 500ms 内只跑一次
+            long nowMs = android.os.SystemClock.uptimeMillis();
+            Long lastRun = POLISH_THROTTLE.get(root);
+            if (lastRun != null && nowMs - lastRun < 500L) return;
+            POLISH_THROTTLE.put(root, nowMs);
             // 定位资产行锚点（元宝/卡券/红包 任一标签；精确匹配失败时
             // 退回包含匹配——资产行标签可能带计数后缀/空格）
             View anchor = null;
@@ -1510,14 +1516,18 @@ public final class UserPagePurifier {
                             : -1)
                     + " children=" + diag + " rowChildren=" + rowDiag);
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
+            //（全树反射扫描开销大，5 秒节流）
             try {
-                View pageRoot = getBindingRoot(binding);
-                View lottery = pageRoot == null
-                        ? null : findItemView(pageRoot, normalize("免费抽奖"));
-                MainHook.log("AssetPolish: pageRoot search 免费抽奖 -> "
-                        + (lottery == null ? "none"
-                                : lottery.getClass().getName()
-                                        + " vis=" + lottery.getVisibility()));
+                if (nowMs - lastPageRootSearchMs > 5000L) {
+                    lastPageRootSearchMs = nowMs;
+                    View pageRoot = getBindingRoot(binding);
+                    View lottery = pageRoot == null
+                            ? null : findItemView(pageRoot, normalize("免费抽奖"));
+                    MainHook.log("AssetPolish: pageRoot search 免费抽奖 -> "
+                            + (lottery == null ? "none"
+                                    : lottery.getClass().getName()
+                                            + " vis=" + lottery.getVisibility()));
+                }
             } catch (Throwable ignored) {}
             if (hasVisibleMenuEntryText(cardGroup)) {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
@@ -1980,12 +1990,34 @@ public final class UserPagePurifier {
         return reflectiveText(view);
     }
 
+    /** getText/getRichText 反射 Method 缓存（按类）：主线程全树扫描高频
+     *  调用，getMethod 每次遍历方法表并分配，必须缓存。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method>
+            TEXT_METHOD_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final java.util.Set<String> TEXT_METHOD_MISS =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static java.lang.reflect.Method textMethodOf(Class<?> cls, String name) {
+        String key = cls.getName() + "#" + name;
+        if (TEXT_METHOD_MISS.contains(key)) return null;
+        try {
+            java.lang.reflect.Method m = cls.getMethod(name);
+            TEXT_METHOD_CACHE.put(key, m);
+            return m;
+        } catch (Throwable t) {
+            TEXT_METHOD_MISS.add(key);
+            return null;
+        }
+    }
+
     /** 反射读取非 TextView 控件的文本：getText/getRichText/contentDescription。 */
     private static String reflectiveText(View view) {
         if (view == null) return "";
         for (String name : new String[]{"getText", "getRichText"}) {
             try {
-                java.lang.reflect.Method m = view.getClass().getMethod(name);
+                java.lang.reflect.Method m = textMethodOf(view.getClass(), name);
+                if (m == null) continue;
                 Object t = m.invoke(view);
                 if (t instanceof CharSequence) {
                     CharSequence cs = (CharSequence) t;
@@ -2013,6 +2045,11 @@ public final class UserPagePurifier {
     /** 资产行独占时清零的末项底部 margin：原值缓存，入口恢复后还原。 */
     private static final java.util.WeakHashMap<View, Integer> SAVED_BOTTOM_MARGINS =
             new java.util.WeakHashMap<>();
+    /** AssetPolish 节流：同一页面根视图上次处理时间。 */
+    private static final java.util.WeakHashMap<View, Long> POLISH_THROTTLE =
+            new java.util.WeakHashMap<>();
+    /** 页面根入口搜索上次执行时间（5 秒节流）。 */
+    private static volatile long lastPageRootSearchMs;
 
     private static void collapseLayoutParams(View view) {
         try {
