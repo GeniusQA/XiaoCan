@@ -506,13 +506,22 @@ public final class NetworkAdInterceptor {
                             + body.substring(0, Math.min(body.length(), 300)));
                 }
                 // 轮播列表（活动入口行数据源）响应结构诊断：30 秒节流，
-                // 确认入口字段结构后实现数据层按开关剔除隐藏入口
-                if (url.contains("getcarousellist")
-                        && System.currentTimeMillis() - lastCarouselDumpMs > 30000L
-                        && body.length() > 2) {
-                    lastCarouselDumpMs = System.currentTimeMillis();
-                    MainHook.log("Carousel resp: " + url + " => "
-                            + body.substring(0, Math.min(body.length(), 800)));
+                // 确认入口字段结构后实现数据层按开关剔除隐藏入口。
+                // 方法名在 methodname header 里（URL 统一为 /rpc）
+                if (body.length() > 2) {
+                    String mn = "";
+                    try {
+                        Object m = request.getClass()
+                                .getMethod("header", String.class)
+                                .invoke(request, "methodname");
+                        mn = m != null ? m.toString().toLowerCase(Locale.ROOT) : "";
+                    } catch (Throwable ignored) {}
+                    if (mn.contains("getcarousellist")
+                            && System.currentTimeMillis() - lastCarouselDumpMs > 30000L) {
+                        lastCarouselDumpMs = System.currentTimeMillis();
+                        MainHook.log("Carousel resp: " + mn + " => "
+                                + body.substring(0, Math.min(body.length(), 1200)));
+                    }
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
                 if (body.length() <= 100000) {
