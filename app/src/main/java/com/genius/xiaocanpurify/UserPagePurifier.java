@@ -1468,7 +1468,8 @@ public final class UserPagePurifier {
                         .append(subtreeHasTextOrImage(child) ? " T" : "")
                         .append(']');
             }
-            // 诊断：内容容器自身的子节点（灰线/空白实测位于容器内部菜单区）
+            // 诊断：内容容器自身的子节点（灰线/空白实测位于容器内部菜单区），
+            // 带文本内容摘要（确认富文本读取是否生效、入口文本在哪个节点）
             StringBuilder rowDiag = new StringBuilder();
             if (assetRow instanceof ViewGroup) {
                 ViewGroup rg = (ViewGroup) assetRow;
@@ -1479,16 +1480,39 @@ public final class UserPagePurifier {
                             .append(child.getHeight())
                             .append(child.getVisibility() == View.VISIBLE ? "" : " G")
                             .append(hasVisibleContent(child) ? " C" : "")
-                            .append(subtreeHasTextOrImage(child) ? " T" : "")
-                            .append(']');
+                            .append(subtreeHasTextOrImage(child) ? " T" : "");
+                    if (subtreeHasTextOrImage(child)) {
+                        String t = subtreeText(child);
+                        rowDiag.append(" \"").append(t.length() == 0
+                                ? "<unreadable>"
+                                : t.substring(0, Math.min(40, t.length()))).append('"');
+                    }
+                    rowDiag.append(']');
                 }
             }
             MainHook.log("AssetPolish: card=" + cardGroup.getClass().getSimpleName()
                     + " row=" + assetRow.getClass().getSimpleName()
+                    + " lp=" + (assetRow.getLayoutParams() != null
+                            ? "h=" + assetRow.getLayoutParams().height : "null")
+                    + " pad=" + assetRow.getPaddingLeft() + ","
+                    + assetRow.getPaddingTop() + ","
+                    + assetRow.getPaddingRight() + ","
+                    + assetRow.getPaddingBottom()
+                    + " minH=" + assetRow.getMinimumHeight()
                     + " gravity=" + (cardGroup instanceof android.widget.LinearLayout
                             ? ((android.widget.LinearLayout) cardGroup).getGravity()
                             : -1)
                     + " children=" + diag + " rowChildren=" + rowDiag);
+            // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
+            try {
+                View pageRoot = getBindingRoot(binding);
+                View lottery = pageRoot == null
+                        ? null : findItemView(pageRoot, normalize("免费抽奖"));
+                MainHook.log("AssetPolish: pageRoot search 免费抽奖 -> "
+                        + (lottery == null ? "none"
+                                : lottery.getClass().getName()
+                                        + " vis=" + lottery.getVisibility()));
+            } catch (Throwable ignored) {}
             if (hasVisibleMenuEntryText(cardGroup)) {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
                 //（只还原无文本无图片的空壳，不会碰活动行容器与资产行子项开关）
@@ -1521,9 +1545,29 @@ public final class UserPagePurifier {
                     && hideShells((ViewGroup) assetRow, 2)) {
                 changed = true;
             }
-            // 实测内容容器被宿主固定为 153px 高（或 MATCH_PARENT），资产行
-            // 仅 115px——多余的高度表现为资产行下方的空白。资产行独占时
-            // 把容器高度改为自适应；宿主重渲染复位后本路径会重新修正
+            // 实测内容容器 153px 高而内容仅 115px——空白来自容器/card 的
+            // 底部 padding 或 minHeight（菜单区预留）。资产行独占时清除，
+            // 宿主重渲染复位后本路径会重新修正
+            if (assetRow.getPaddingBottom() > dp(assetRow, 8)) {
+                assetRow.setPadding(assetRow.getPaddingLeft(),
+                        assetRow.getPaddingTop(), assetRow.getPaddingRight(),
+                        dp(assetRow, 4));
+                changed = true;
+                MainHook.log("AssetPolish: container bottom padding reduced");
+            }
+            if (assetRow.getMinimumHeight() > 0) {
+                assetRow.setMinimumHeight(0);
+                changed = true;
+                MainHook.log("AssetPolish: container minHeight cleared");
+            }
+            if (cardGroup.getPaddingBottom() > dp(cardGroup, 8)
+                    && cardGroup.getChildCount() == 1) {
+                cardGroup.setPadding(cardGroup.getPaddingLeft(),
+                        cardGroup.getPaddingTop(), cardGroup.getPaddingRight(),
+                        dp(cardGroup, 4));
+                changed = true;
+                MainHook.log("AssetPolish: card bottom padding reduced");
+            }
             if (assetRow.getLayoutParams() != null
                     && assetRow.getLayoutParams().height
                             != android.view.ViewGroup.LayoutParams.WRAP_CONTENT) {
@@ -1880,19 +1924,21 @@ public final class UserPagePurifier {
         return reflectiveText(view);
     }
 
-    /** 反射读取非 TextView 控件的 getText()/contentDescription 文本。 */
+    /** 反射读取非 TextView 控件的文本：getText/getRichText/contentDescription。 */
     private static String reflectiveText(View view) {
         if (view == null) return "";
-        try {
-            java.lang.reflect.Method m = view.getClass().getMethod("getText");
-            Object t = m.invoke(view);
-            if (t instanceof CharSequence) {
-                CharSequence cs = (CharSequence) t;
-                if (cs.length() > 0 && cs.length() <= 200) {
-                    return normalize(cs.toString());
+        for (String name : new String[]{"getText", "getRichText"}) {
+            try {
+                java.lang.reflect.Method m = view.getClass().getMethod(name);
+                Object t = m.invoke(view);
+                if (t instanceof CharSequence) {
+                    CharSequence cs = (CharSequence) t;
+                    if (cs.length() > 0 && cs.length() <= 200) {
+                        return normalize(cs.toString());
+                    }
                 }
-            }
-        } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+        }
         try {
             CharSequence cd = view.getContentDescription();
             if (cd != null && cd.length() > 0 && cd.length() <= 200) {
