@@ -476,6 +476,8 @@ public final class UserPagePurifier {
     private static ViewGroup embeddedMenuRow;
     /** 活动行卡片壳是否已被连带收起（壳内无可见资产行内容时）。 */
     private static boolean embeddedCardCollapsed;
+    /** 嵌入跳过日志节流。 */
+    private static long lastEmbedSkipLogMs;
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -496,6 +498,23 @@ public final class UserPagePurifier {
             }
         }
         if (visibleEntries != 1) {
+            // 节流记录：嵌入前置条件不满足时的可见入口数与各入口可见性
+            //（0=入口被隐藏，2+=多个入口），用于排查「入口消失」类问题
+            long nowMs = android.os.SystemClock.uptimeMillis();
+            if (nowMs - lastEmbedSkipLogMs > 1000L) {
+                lastEmbedSkipLogMs = nowMs;
+                StringBuilder detail = new StringBuilder();
+                for (String[] item : MENU_ITEMS) {
+                    View v = findItemView(row, normalize(item[1]));
+                    detail.append(item[1]).append('=')
+                            .append(v == null ? "none"
+                                    : v.getVisibility() == View.VISIBLE ? "V"
+                                            : v.getVisibility() == View.GONE ? "G" : "I")
+                            .append(' ');
+                }
+                MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
+                        + " skip [" + detail.toString().trim() + "]");
+            }
             restoreEmbeddedEntry(row);
             return false;
         }
@@ -542,15 +561,25 @@ public final class UserPagePurifier {
 
     /** 执行嵌入；返回 false 表示结构不满足需回退居中。 */
     private static boolean doEmbedSingleEntry(View entry, ViewGroup row) {
-        if (entry.getWidth() <= 0 || entry.getHeight() <= 0) return false;
-        if (entry.getParent() == null) return false;
+        if (entry.getWidth() <= 0 || entry.getHeight() <= 0) {
+            MainHook.log("EmbedEntry: skip, entry not measured "
+                    + entry.getWidth() + "x" + entry.getHeight());
+            return false;
+        }
+        if (entry.getParent() == null) {
+            MainHook.log("EmbedEntry: skip, entry detached");
+            return false;
+        }
         // 布局后宿主可能已再次调整入口数量，重查一遍
         int count = 0;
         for (String[] item : MENU_ITEMS) {
             View v = findItemView(row, normalize(item[1]));
             if (v != null && v.getVisibility() == View.VISIBLE) count++;
         }
-        if (count != 1) return false;
+        if (count != 1) {
+            MainHook.log("EmbedEntry: skip, recheck visibleEntries=" + count);
+            return false;
+        }
 
         // 从活动行向上找到视图树顶端，定位「提现」按钮（精确文案，
         // 避免「可提现蚕豆」中的「提现」子串误匹配）
@@ -1474,6 +1503,19 @@ public final class UserPagePurifier {
                         android.view.Gravity.CENTER_VERTICAL);
                 changed = true;
             }
+            // 实测卡片为 MaterialCardView（FrameLayout 系）且内容容器顶部
+            // 对齐、卡片高度固定——给内容容器设垂直居中 gravity，使资产行
+            // 在卡片剩余空间内居中（入口恢复后 gravity 无副作用）
+            android.view.ViewGroup.LayoutParams clp = assetRow.getLayoutParams();
+            if (clp instanceof android.widget.FrameLayout.LayoutParams) {
+                android.widget.FrameLayout.LayoutParams flp =
+                        (android.widget.FrameLayout.LayoutParams) clp;
+                if (flp.gravity != android.view.Gravity.CENTER_VERTICAL) {
+                    flp.gravity = android.view.Gravity.CENTER_VERTICAL;
+                    assetRow.setLayoutParams(flp);
+                    changed = true;
+                }
+            }
             // 分割线/空占位可能在卡片外部：实测资产行卡片只有一个子节点
             //（资产行本身），灰线是卡片同级兄弟——清理紧邻卡片前后的
             // 无内容兄弟视图（含活动行卡收起后残留的占位）
@@ -1507,6 +1549,9 @@ public final class UserPagePurifier {
             if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
                 child.setVisibility(View.GONE);
                 changed = true;
+                MainHook.log("AssetPolish: hid empty sibling "
+                        + child.getClass().getSimpleName() + " in "
+                        + parent.getClass().getSimpleName());
             }
         }
         return changed;
