@@ -315,7 +315,11 @@ public final class UserPagePurifier {
                     View smallest = findSmallestContainingAll((ViewGroup) top, new String[]{
                             normalize("订单待免单"), normalize("今日邀")});
                     if (smallest == null) {
-                        // 首次进入页面时横幅可能尚未挂载
+                        // 首次未命中时 dump 横幅区域结构，定位真实视图类型
+                        if (!bannerDiagDumped) {
+                            bannerDiagDumped = true;
+                            dumpBannerNeighbors(top);
+                        }
                         android.util.Log.w("UserPurify", "qualify banner not found");
                     } else {
                         // 从最小命中向上爬到卡片边界（祖先子树出现其它板块关键词即停）
@@ -866,6 +870,74 @@ public final class UserPagePurifier {
     private static void setIntField(Object target, String name, int value) throws Exception {
         java.lang.reflect.Field f = target.getClass().getField(name);
         f.setInt(target, value);
+    }
+
+    /** 横幅结构诊断只 dump 一次。 */
+    private static boolean bannerDiagDumped = false;
+
+    /**
+     * 横幅结构诊断：全树找含「免单」的 TextView + 资产行的兄弟节点清单，
+     * 用于确认横幅的真实渲染方式（原生文本 / 自绘 / 图片）。
+     */
+    private static void dumpBannerNeighbors(View top) {
+        try {
+            findAndLogText(top, "免单", 0);
+            View assetRow = findViewWhoseSubtreeContains(top, "元宝");
+            if (assetRow != null && assetRow.getParent() instanceof ViewGroup) {
+                ViewGroup p = (ViewGroup) assetRow.getParent();
+                for (int i = 0; i < p.getChildCount(); i++) {
+                    View c = p.getChildAt(i);
+                    MainHook.log("BannerDiag: sibling[" + i + "] "
+                            + c.getClass().getName()
+                            + " bounds=" + c.getLeft() + "," + c.getTop()
+                            + "-" + c.getRight() + "," + c.getBottom()
+                            + " textLen=" + subtreeText(c).length());
+                }
+            } else {
+                MainHook.log("BannerDiag: asset row not found");
+            }
+        } catch (Throwable t) {
+            MainHook.log("BannerDiag error: " + t);
+        }
+    }
+
+    /** 深度优先记录文本包含关键词的 TextView（限 5 条）。 */
+    private static void findAndLogText(View parent, String keyword, int depth) {
+        if (depth > 14) return;
+        if (parent instanceof android.widget.TextView) {
+            String text = ((android.widget.TextView) parent).getText().toString();
+            if (normalize(text).contains(keyword)) {
+                MainHook.log("BannerDiag: TextView「" + text + "」class="
+                        + parent.getClass().getName()
+                        + " bounds=" + parent.getLeft() + "," + parent.getTop()
+                        + "-" + parent.getRight() + "," + parent.getBottom());
+            }
+            return;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) parent;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                findAndLogText(group.getChildAt(i), keyword, depth + 1);
+            }
+        }
+    }
+
+    /** 深度优先找子树文本包含关键词的最小 ViewGroup。 */
+    private static View findViewWhoseSubtreeContains(View parent, String keyword) {
+        if (!(parent instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) parent;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (subtreeText(child).contains(keyword)) {
+                return child;
+            }
+        }
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            View found = findViewWhoseSubtreeContains(child, keyword);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private static void setFloatField(Object target, String name, float value) throws Exception {
