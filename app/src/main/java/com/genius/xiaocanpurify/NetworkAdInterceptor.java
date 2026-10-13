@@ -409,7 +409,7 @@ public final class NetworkAdInterceptor {
                 }
 
                 if (isAdOrTrackingUrl(urlStr)) {
-                    MainHook.log("Blocked ad network request");
+                    MainHook.log("Blocked ad network request: " + urlStr);
                     try {
                         return createMockJsonResponse(request, "{\"code\":0,\"data\":{},\"msg\":\"ok\"}");
                     } catch (Throwable t) {
