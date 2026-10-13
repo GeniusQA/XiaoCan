@@ -332,6 +332,38 @@ public final class NetworkAdInterceptor {
         @Override
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if ("intercept".equals(method.getName()) && args != null && args.length == 1) {
+                try {
+                    return handleIntercept(proxy, method, args);
+                } catch (Throwable t) {
+                    // 实测：chain.proceed 里的网络异常（如广告域连接失败
+                    // EAGAIN）经反射包装成 InvocationTargetException，代理
+                    // 接口未声明受检异常，最终变成 UndeclaredThrowableException
+                    // 击穿 OkHttp 异步线程直接闪退。统一降级为 502 响应，
+                    // 宿主按普通网络错误处理
+                    MainHook.log("AdInterceptor degraded to 502: " + t);
+                    try {
+                        Object chain = args[0];
+                        Object request = chain.getClass().getMethod("request").invoke(chain);
+                        return createMockErrorResponse(request);
+                    } catch (Throwable ignored) {
+                        return null;
+                    }
+                }
+            }
+            if ("equals".equals(method.getName())) {
+                return proxy == (args != null && args.length > 0 ? args[0] : null);
+            }
+            if ("hashCode".equals(method.getName())) {
+                return System.identityHashCode(proxy);
+            }
+            if ("toString".equals(method.getName())) {
+                return "XiaoCanPurifyAdInterceptor";
+            }
+            return null;
+        }
+
+        private Object handleIntercept(Object proxy, Method method, Object[] args) throws Throwable {
+            {
                 Object chain = args[0];
                 Method requestMethod = chain.getClass().getMethod("request");
                 Object request = requestMethod.invoke(chain);
@@ -402,16 +434,32 @@ public final class NetworkAdInterceptor {
                 Object response = proceedMethod.invoke(chain, request);
                 return filterPopupPayload(request, urlStr, response);
             }
-            if ("equals".equals(method.getName())) {
-                return proxy == (args != null && args.length > 0 ? args[0] : null);
-            }
-            if ("hashCode".equals(method.getName())) {
-                return System.identityHashCode(proxy);
-            }
-            if ("toString".equals(method.getName())) {
-                return "XiaoCanPurifyAdInterceptor";
-            }
-            return null;
+        }
+
+        /** 502 降级响应：宿主按普通网络错误处理，不中断异步线程。 */
+        private Object createMockErrorResponse(Object request) throws Exception {
+            Class<?> responseClass = Class.forName("okhttp3.Response", false, classLoader);
+            Class<?> responseBuilderClass = Class.forName("okhttp3.Response$Builder", false, classLoader);
+            Class<?> responseBodyClass = Class.forName("okhttp3.ResponseBody", false, classLoader);
+            Class<?> mediaTypeClass = Class.forName("okhttp3.MediaType", false, classLoader);
+            Class<?> protocolClass = Class.forName("okhttp3.Protocol", false, classLoader);
+
+            Method parseMediaType = mediaTypeClass.getMethod("parse", String.class);
+            Object plainType = parseMediaType.invoke(null, "text/plain; charset=utf-8");
+
+            Method createBody = responseBodyClass.getMethod("create", mediaTypeClass, String.class);
+            Object responseBody = createBody.invoke(null, plainType, "network unavailable");
+
+            Object http11 = Enum.valueOf((Class<Enum>) protocolClass, "HTTP_1_1");
+
+            Object builder = responseBuilderClass.getConstructor().newInstance();
+            responseBuilderClass.getMethod("request", request.getClass()).invoke(builder, request);
+            responseBuilderClass.getMethod("protocol", protocolClass).invoke(builder, http11);
+            responseBuilderClass.getMethod("code", int.class).invoke(builder, 502);
+            responseBuilderClass.getMethod("message", String.class).invoke(builder, "Bad Gateway");
+            responseBuilderClass.getMethod("body", responseBodyClass).invoke(builder, responseBody);
+
+            return responseBuilderClass.getMethod("build").invoke(builder);
         }
 
         private static boolean isAdOrTrackingUrl(String url) {
@@ -425,6 +473,9 @@ public final class NetworkAdInterceptor {
                     || url.contains("pangolin")
                     || url.contains("kwad")
                     || url.contains("mobads.baidu.com")
+                    // 米盟广告域：实测连接失败 EAGAIN，连接风暴拖慢全局并
+                    // 触发闪退——拦截后不再发起真实建连
+                    || url.contains("mentamob")
                     || url.contains("buryingapi.xiaocantech.com")
                     || url.contains("sensorsdata.xiaocanapp.com")
                     || url.contains("user_withdraw_dialog_ad")
