@@ -316,13 +316,18 @@ public final class UserPagePurifier {
                 for (String name : new String[]{"banner_notice", "banner_challenge"}) {
                     int id = top.getResources().getIdentifier(
                             name, "id", top.getContext().getPackageName());
-                    if (id == 0) continue;
-                    View bn = top.findViewById(id);
+                    View bn = id != 0 ? top.findViewById(id) : null;
+                    MainHook.log("QBanner: " + name + " id=" + id
+                            + " bn=" + (bn != null)
+                            + " vis=" + (bn != null ? bn.getVisibility() : -1)
+                            + " top=" + top.getClass().getSimpleName());
                     if (bn != null && bn.getVisibility() != View.GONE) {
                         bn.setVisibility(View.GONE);
                         MainHook.log("Hidden " + name + " (qualify banner)");
                     }
                 }
+            } else {
+                MainHook.log("QBanner: menu binding root null");
             }
         }
     }
