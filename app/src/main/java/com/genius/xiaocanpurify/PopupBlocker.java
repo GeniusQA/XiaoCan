@@ -227,11 +227,13 @@ public final class PopupBlocker {
     private static void hookMainViewModelPopups(XposedInterface xposed, ClassLoader cl) {
         try {
             Class<?> vmClass = Class.forName("com.realtech.xiaocan.MainViewModel", false, cl);
+            // 注意：不要拦截 checkSchoolStarts（开学季活动检查，置空会导致
+            // 「我」页活动行整体不渲染）和 takeGiftReq（领取礼物请求，置空
+            // 会导致下单流程「领红包」按钮无任何反应）——这两个是活动功能
+            // 逻辑，弹窗抑制由按内容/类名的 dialog hook 兜底
             String[] targetMethods = {
                     "checkUpdate",
-                    "checkSyceeUpdateDialog",
-                    "checkSchoolStarts",
-                    "takeGiftReq"
+                    "checkSyceeUpdateDialog"
             };
             for (Method m : vmClass.getDeclaredMethods()) {
                 for (String tm : targetMethods) {
