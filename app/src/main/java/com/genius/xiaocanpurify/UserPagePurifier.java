@@ -543,6 +543,13 @@ public final class UserPagePurifier {
             }
             MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
                     + " skip [" + detail + " ]");
+            // 两个及以上入口可见：嵌入只适用于单入口，立即完全拆除并
+            // 恢复活动行（容器链由 filterMenuItems 的祖先链恢复负责）
+            if (visibleEntries >= 2 && embeddedSnapshotView != null) {
+                MainHook.log("EmbedEntry: multiple entries visible, teardown embed");
+                restoreEmbeddedEntry(row);
+                return false;
+            }
             // 嵌入激活时不要因「本轮找不到入口」拆除嵌入：宿主重渲染后
             // 入口异步重建，部分轮次渲染出来前是找不到的——拆除再重嵌
             // 会造成嵌入态/空白态每几秒来回跳（实测截图）。保持嵌入态，
