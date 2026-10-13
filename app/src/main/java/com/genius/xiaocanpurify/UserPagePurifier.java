@@ -1526,6 +1526,23 @@ public final class UserPagePurifier {
                 }
                 restoreTextlessShells(assetRow, 2);
                 restoreAdjacentShells(cardGroup);
+                // 还原资产行末项被清零的底部 margin
+                for (java.util.Map.Entry<View, Integer> e
+                        : SAVED_BOTTOM_MARGINS.entrySet()) {
+                    View v = e.getKey();
+                    if (v == null || v.getLayoutParams()
+                            instanceof android.view.ViewGroup.MarginLayoutParams) {
+                        android.view.ViewGroup.MarginLayoutParams mlp =
+                                v == null ? null
+                                        : (android.view.ViewGroup.MarginLayoutParams)
+                                                v.getLayoutParams();
+                        if (mlp != null && mlp.bottomMargin == 0) {
+                            mlp.bottomMargin = e.getValue();
+                            v.setLayoutParams(mlp);
+                        }
+                    }
+                }
+                SAVED_BOTTOM_MARGINS.clear();
                 return;
             }
             boolean changed = false;
@@ -1540,10 +1557,42 @@ public final class UserPagePurifier {
                 }
             }
             // 灰线/空白实测位于资产行内容容器内部的菜单残留区：
-            // 向内两层清理无文本无图片的空壳/分割线（资产行子项含文本不受影响）
+            // 只清理「无子节点的叶子空壳」（分割线/占位）——容器类一律不碰：
+            // 轮播/列表容器（活动入口宿主）在内容异步到达前看起来是空的，
+            // 误杀 GONE 后宿主把入口渲染进隐藏容器，入口永远不可见
             if (assetRow instanceof ViewGroup
                     && hideShells((ViewGroup) assetRow, 2)) {
                 changed = true;
+            }
+            // 修复历史误杀：恢复被当作空壳 GONE 的轮播/列表容器
+            //（活动入口宿主），内容到达后入口才能渲染
+            if (assetRow instanceof ViewGroup
+                    && restoreContentHosts((ViewGroup) assetRow, 3)) {
+                changed = true;
+            }
+            // 资产行最后一个可见子项的底部 margin 是原「资产行-菜单行」
+            // 间距（实测 38px），菜单独占时表现为资产行下方空白——清零，
+            // 原值缓存供恢复
+            if (assetRow instanceof ViewGroup) {
+                ViewGroup rg = (ViewGroup) assetRow;
+                for (int i = rg.getChildCount() - 1; i >= 0; i--) {
+                    View child = rg.getChildAt(i);
+                    if (child.getVisibility() != View.VISIBLE) continue;
+                    android.view.ViewGroup.MarginLayoutParams mlp =
+                            child.getLayoutParams() instanceof
+                                    android.view.ViewGroup.MarginLayoutParams
+                                    ? (android.view.ViewGroup.MarginLayoutParams)
+                                            child.getLayoutParams() : null;
+                    if (mlp != null && mlp.bottomMargin > 0) {
+                        SAVED_BOTTOM_MARGINS.put(child, mlp.bottomMargin);
+                        mlp.bottomMargin = 0;
+                        child.setLayoutParams(mlp);
+                        changed = true;
+                        MainHook.log("AssetPolish: last item bottomMargin "
+                                + "cleared");
+                    }
+                    break;
+                }
             }
             // 实测内容容器 153px 高而内容仅 115px——空白来自容器/card 的
             // 底部 padding 或 minHeight（菜单区预留）。资产行独占时清除，
@@ -1610,21 +1659,49 @@ public final class UserPagePurifier {
     }
 
     /**
-     * 向内递归隐藏无文本无图片的空壳/分割线（限定深度）。
-     * 返回是否有视图被隐藏。含文本的子树（资产行子项、活动行容器链）不碰。
+     * 向内递归隐藏「无子节点的叶子空壳」（分割线/占位，限定深度）。
+     * 返回是否有视图被隐藏。容器类一律不碰：轮播/列表容器在内容异步
+     * 到达前看起来是空的，误杀 GONE 会让宿主把入口渲染进隐藏容器；
+     * 含文本的子树（资产行子项、活动行容器链）也不碰。
      */
     private static boolean hideShells(ViewGroup group, int depth) {
         boolean changed = false;
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
             if (child.getVisibility() != View.VISIBLE) continue;
+            if (child instanceof ViewGroup) {
+                if (depth > 0 && hideShells((ViewGroup) child, depth - 1)) {
+                    changed = true;
+                }
+                continue;
+            }
             if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
                 child.setVisibility(View.GONE);
                 changed = true;
-                continue;
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * 恢复被误杀 GONE 的内容宿主容器（RecyclerView/ViewPager 等轮播列表）。
+     * 活动入口由宿主异步渲染进这些容器，误杀后入口永远不可见。
+     */
+    private static boolean restoreContentHosts(ViewGroup group, int depth) {
+        boolean changed = false;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            String cn = child.getClass().getName();
+            boolean host = cn.contains("RecyclerView") || cn.contains("ViewPager")
+                    || cn.contains("Banner") || cn.contains("Carousel");
+            if (host && child.getVisibility() == View.GONE) {
+                child.setVisibility(View.VISIBLE);
+                changed = true;
+                MainHook.log("AssetPolish: restored content host "
+                        + child.getClass().getSimpleName());
             }
             if (depth > 0 && child instanceof ViewGroup
-                    && hideShells((ViewGroup) child, depth - 1)) {
+                    && restoreContentHosts((ViewGroup) child, depth - 1)) {
                 changed = true;
             }
         }
@@ -1954,6 +2031,9 @@ public final class UserPagePurifier {
 
     /** 行内等分布局：隐藏子项后清掉权重，避免留下空白占位；原权重缓存供恢复用。 */
     private static final java.util.WeakHashMap<View, Float> SAVED_WEIGHTS = new java.util.WeakHashMap<>();
+    /** 资产行独占时清零的末项底部 margin：原值缓存，入口恢复后还原。 */
+    private static final java.util.WeakHashMap<View, Integer> SAVED_BOTTOM_MARGINS =
+            new java.util.WeakHashMap<>();
 
     private static void collapseLayoutParams(View view) {
         try {
