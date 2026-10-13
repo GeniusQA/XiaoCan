@@ -598,30 +598,31 @@ public final class UserPagePurifier {
         }
         inline.setOnClickListener(v -> {
             try {
-                // 定位真正承载跳转的入口：
-                // 1) 优先原入口（仍挂在树上时）；
-                // 2) 实例已被宿主更换时，按开关找「未被隐藏」的入口——
-                //    不能取第一个找到的视图，那可能是被隐藏的其它入口（点了没反应）
-                View target = null;
-                if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
-                    target = embeddedEntryView;
-                } else {
-                    ViewGroup rowRef = embeddedMenuRow;
-                    if (rowRef != null) {
-                        for (String[] item : MENU_ITEMS) {
-                            if (PurifyPrefs.hide(item[0])) continue;
-                            View v2 = findItemView(rowRef, normalize(item[1]));
-                            if (v2 != null) {
-                                target = v2;
-                                break;
-                            }
-                        }
-                    }
+                View target = resolveEmbeddedEntryTarget(entry);
+                if (target == null) return;
+                // Kuikly 自绘入口的点击语义挂在触摸层（onTouchEvent）上，
+                // 直接 performClick 往往不生效（原入口被 GONE 后其 OnClickListener
+                // 链路也可能已失效）。优先向入口投递一次合成点击（DOWN+UP），
+                // 由入口自身按命中区域分发，命中即返回。
+                if (dispatchSyntheticTapRevealed(target)) {
+                    MainHook.log("EmbedEntry: click -> tap on "
+                            + target.getClass().getSimpleName());
+                    return;
                 }
-                if (target == null) target = entry;
-                // 点击处理可能不在入口本体（如挂在其容器/条目上），沿祖先链找
-                View cur = target;
-                for (int i = 0; i < 6 && cur != null; i++) {
+                // 回退 1：向祖先容器逐级投递合成点击——Kuikly 可能将触摸语义
+                // 挂在容器/条目层而非入口叶子视图上，叶子自身分发会漏掉
+                View cur = target.getParent() instanceof View ? (View) target.getParent() : null;
+                for (int i = 0; i < 3 && cur != null; i++) {
+                    if (dispatchSyntheticTapRevealed(cur)) {
+                        MainHook.log("EmbedEntry: click -> tap on ancestor "
+                                + cur.getClass().getSimpleName());
+                        return;
+                    }
+                    cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+                }
+                // 回退 2：标准 View 入口，转调点击处理（可能挂在其容器/条目上）
+                cur = target;
+                for (int i = 0; i < 8 && cur != null; i++) {
                     if (cur.hasOnClickListeners()) {
                         MainHook.log("EmbedEntry: click -> "
                                 + cur.getClass().getSimpleName()
@@ -631,8 +632,7 @@ public final class UserPagePurifier {
                     }
                     cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
                 }
-                target.performClick();
-                MainHook.log("EmbedEntry: click fallback on entry");
+                MainHook.log("EmbedEntry: click -> no click handler on entry chain");
             } catch (Throwable t) {
                 MainHook.log("EmbedEntry: click error: " + t);
             }
@@ -719,6 +719,97 @@ public final class UserPagePurifier {
         embeddedMenuRow = row;
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
+    }
+
+    /**
+     * 定位当前真正承载跳转的入口视图：
+     * 1) 优先原入口（仍挂在视图树上时）；
+     * 2) 实例已被宿主重渲染更换时，按开关找「未被隐藏」的当前入口——
+     *    不能直接取第一个找到的视图，那可能是被隐藏的其它入口（点了没反应）。
+     */
+    private static View resolveEmbeddedEntryTarget(View fallback) {
+        if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
+            return embeddedEntryView;
+        }
+        ViewGroup rowRef = embeddedMenuRow;
+        if (rowRef != null) {
+            for (String[] item : MENU_ITEMS) {
+                if (PurifyPrefs.hide(item[0])) continue;
+                View v = findItemView(rowRef, normalize(item[1]));
+                if (v != null) return v;
+            }
+        }
+        return fallback;
+    }
+
+    /**
+     * 向入口投递一次合成点击（DOWN+UP）。Kuikly 自绘入口把点击语义做在
+     * 触摸层（onTouchEvent）而非 OnClickListener，performClick 无效；
+     * 由入口自身在其内部按命中区域分发，等同于真实手指点击。
+     * 返回 true 表示事件已被消费（点击语义已触发）。
+     */
+    /**
+     * 带可见性恢复的合成点击。嵌入方案会把原入口及其所在子容器压成 GONE，
+     * 而 Kuikly 等自绘框架的触摸处理普遍带可见性守卫（isShown / visibility
+     * 检查）——直接向 GONE 视图投递事件会被吞掉，表现为「点了没反应」。
+     * 此处在投递前临时把目标到首个可见祖先之间的隐藏链恢复为 VISIBLE
+     * （同步投递、同帧还原，不会产生可见闪烁），投递完成后立即压回。
+     * 返回 true 表示事件已被消费（点击语义已触发）。
+     */
+    private static boolean dispatchSyntheticTapRevealed(View target) {
+        if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) {
+            return false;
+        }
+        if (target.isShown()) {
+            return dispatchSyntheticTap(target);
+        }
+        // 收集目标向上到首个可见祖先之间的隐藏视图（含目标自身）
+        java.util.List<View> revealed = new java.util.ArrayList<>();
+        java.util.List<Integer> prevVis = new java.util.ArrayList<>();
+        try {
+            View cur = target;
+            while (cur != null && !cur.isShown()) {
+                if (cur.getVisibility() != View.VISIBLE) {
+                    revealed.add(cur);
+                    prevVis.add(cur.getVisibility());
+                    cur.setVisibility(View.VISIBLE);
+                }
+                cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+            }
+            return dispatchSyntheticTap(target);
+        } catch (Throwable t) {
+            MainHook.log("EmbedEntry: revealed tap error: " + t);
+            return false;
+        } finally {
+            for (int i = 0; i < revealed.size(); i++) {
+                try {
+                    revealed.get(i).setVisibility(prevVis.get(i));
+                } catch (Throwable ignored) {}
+            }
+        }
+    }
+
+    private static boolean dispatchSyntheticTap(View target) {
+        if (target == null) return false;
+        int w = target.getWidth();
+        int h = target.getHeight();
+        if (w <= 0 || h <= 0) return false;
+        float x = w / 2f;
+        float y = h / 2f;
+        long now = android.os.SystemClock.uptimeMillis();
+        android.view.MotionEvent down = android.view.MotionEvent.obtain(
+                now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0);
+        android.view.MotionEvent up = android.view.MotionEvent.obtain(
+                now, now + 50L, android.view.MotionEvent.ACTION_UP, x, y, 0);
+        boolean consumed;
+        try {
+            consumed = target.dispatchTouchEvent(down);
+            target.dispatchTouchEvent(up);
+        } finally {
+            down.recycle();
+            up.recycle();
+        }
+        return consumed;
     }
 
     /**
