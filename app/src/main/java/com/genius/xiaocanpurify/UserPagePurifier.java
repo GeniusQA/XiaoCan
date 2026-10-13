@@ -476,8 +476,6 @@ public final class UserPagePurifier {
     private static ViewGroup embeddedMenuRow;
     /** 活动行卡片壳是否已被连带收起（壳内无可见资产行内容时）。 */
     private static boolean embeddedCardCollapsed;
-    /** 嵌入跳过日志节流。 */
-    private static long lastEmbedSkipLogMs;
 
     /**
      * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
@@ -498,31 +496,6 @@ public final class UserPagePurifier {
             }
         }
         if (visibleEntries != 1) {
-            // 节流记录：嵌入前置条件不满足时的可见入口数与各入口可见性
-            //（0=入口被隐藏，2+=多个入口），用于排查「入口消失」类问题
-            long nowMs = android.os.SystemClock.uptimeMillis();
-            if (nowMs - lastEmbedSkipLogMs > 1000L) {
-                lastEmbedSkipLogMs = nowMs;
-                StringBuilder detail = new StringBuilder();
-                for (String[] item : MENU_ITEMS) {
-                    View v = findItemView(row, normalize(item[1]));
-                    detail.append(item[1]).append('=')
-                            .append(v == null ? "none"
-                                    : v.getVisibility() == View.VISIBLE ? "V"
-                                            : v.getVisibility() == View.GONE ? "G" : "I")
-                            .append(' ');
-                }
-                MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
-                        + " skip [" + detail.toString().trim() + "]");
-                // 深度诊断：layoutMenu 子树的文本节点转储（含非标准 TextView，
-                // 反射取文本），并从页面根搜索「免费抽奖」实际渲染位置
-                dumpTexts(row, "layoutMenu");
-                View pageRoot = row;
-                while (pageRoot.getParent() instanceof View) {
-                    pageRoot = (View) pageRoot.getParent();
-                }
-                if (pageRoot != row) dumpTexts((ViewGroup) pageRoot, "page");
-            }
             restoreEmbeddedEntry(row);
             return false;
         }
@@ -569,25 +542,15 @@ public final class UserPagePurifier {
 
     /** 执行嵌入；返回 false 表示结构不满足需回退居中。 */
     private static boolean doEmbedSingleEntry(View entry, ViewGroup row) {
-        if (entry.getWidth() <= 0 || entry.getHeight() <= 0) {
-            MainHook.log("EmbedEntry: skip, entry not measured "
-                    + entry.getWidth() + "x" + entry.getHeight());
-            return false;
-        }
-        if (entry.getParent() == null) {
-            MainHook.log("EmbedEntry: skip, entry detached");
-            return false;
-        }
+        if (entry.getWidth() <= 0 || entry.getHeight() <= 0) return false;
+        if (entry.getParent() == null) return false;
         // 布局后宿主可能已再次调整入口数量，重查一遍
         int count = 0;
         for (String[] item : MENU_ITEMS) {
             View v = findItemView(row, normalize(item[1]));
             if (v != null && v.getVisibility() == View.VISIBLE) count++;
         }
-        if (count != 1) {
-            MainHook.log("EmbedEntry: skip, recheck visibleEntries=" + count);
-            return false;
-        }
+        if (count != 1) return false;
 
         // 从活动行向上找到视图树顶端，定位「提现」按钮（精确文案，
         // 避免「可提现蚕豆」中的「提现」子串误匹配）
@@ -1473,35 +1436,58 @@ public final class UserPagePurifier {
                         .append(subtreeHasTextOrImage(child) ? " T" : "")
                         .append(']');
             }
+            // 诊断：内容容器自身的子节点（灰线/空白实测位于容器内部菜单区）
+            StringBuilder rowDiag = new StringBuilder();
+            if (assetRow instanceof ViewGroup) {
+                ViewGroup rg = (ViewGroup) assetRow;
+                for (int i = 0; i < rg.getChildCount(); i++) {
+                    View child = rg.getChildAt(i);
+                    rowDiag.append(child.getClass().getSimpleName())
+                            .append('[').append(child.getWidth()).append('x')
+                            .append(child.getHeight())
+                            .append(child.getVisibility() == View.VISIBLE ? "" : " G")
+                            .append(hasVisibleContent(child) ? " C" : "")
+                            .append(subtreeHasTextOrImage(child) ? " T" : "")
+                            .append(']');
+                }
+            }
             MainHook.log("AssetPolish: card=" + cardGroup.getClass().getSimpleName()
                     + " row=" + assetRow.getClass().getSimpleName()
                     + " gravity=" + (cardGroup instanceof android.widget.LinearLayout
                             ? ((android.widget.LinearLayout) cardGroup).getGravity()
                             : -1)
-                    + " children=" + diag);
-            // 资产行条目容器：assetRow（内容容器）内包含锚点标签的直接子节点
-            View itemsRow = anchor;
-            while (itemsRow.getParent() instanceof View && itemsRow.getParent() != assetRow) {
-                itemsRow = (View) itemsRow.getParent();
-            }
-            if (itemsRow.getParent() != assetRow) itemsRow = null;
+                    + " children=" + diag + " rowChildren=" + rowDiag);
             if (hasVisibleMenuEntryText(cardGroup)) {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
-                //（只还原无文本无图片的空壳，不会碰活动行容器）
-                restoreEmptySiblings(cardGroup, assetRow);
-                if (itemsRow != null && assetRow instanceof ViewGroup) {
-                    restoreEmptySiblings((ViewGroup) assetRow, itemsRow);
+                //（只还原无文本无图片的空壳，不会碰活动行容器与资产行子项开关）
+                for (int i = 0; i < cardGroup.getChildCount(); i++) {
+                    View child = cardGroup.getChildAt(i);
+                    if (child == assetRow) continue;
+                    if (child.getVisibility() == View.GONE
+                            && !subtreeHasTextOrImage(child)) {
+                        child.setVisibility(View.VISIBLE);
+                    }
                 }
+                restoreTextlessShells(assetRow, 2);
                 restoreAdjacentShells(cardGroup);
                 return;
             }
             boolean changed = false;
-            // 卡片层：隐藏资产行内容容器之外的无内容空壳
-            changed |= hideEmptySiblings(cardGroup, assetRow);
-            // 内容容器层（实测资产行与活动行同卡）：隐藏资产行条目旁的
-            // 分割线/空占位——活动行容器链含入口文案，不碰
-            if (itemsRow != null && assetRow instanceof ViewGroup) {
-                changed |= hideEmptySiblings((ViewGroup) assetRow, itemsRow);
+            for (int i = 0; i < cardGroup.getChildCount(); i++) {
+                View child = cardGroup.getChildAt(i);
+                if (child == assetRow || child.getVisibility() != View.VISIBLE) continue;
+                // 含活动入口文案的子树（活动行容器链）不碰，由嵌入/收起逻辑负责；
+                // 其余无可见内容的空壳/分割线整块隐藏
+                if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
+                    child.setVisibility(View.GONE);
+                    changed = true;
+                }
+            }
+            // 灰线/空白实测位于资产行内容容器内部的菜单残留区：
+            // 向内两层清理无文本无图片的空壳/分割线（资产行子项含文本不受影响）
+            if (assetRow instanceof ViewGroup
+                    && hideShells((ViewGroup) assetRow, 2)) {
+                changed = true;
             }
             // 资产行在卡片内垂直居中（卡片高度自适应内容，入口恢复后无副作用）
             if (cardGroup instanceof android.widget.LinearLayout
@@ -1510,19 +1496,6 @@ public final class UserPagePurifier {
                 ((android.widget.LinearLayout) cardGroup).setGravity(
                         android.view.Gravity.CENTER_VERTICAL);
                 changed = true;
-            }
-            // 实测卡片为 MaterialCardView（FrameLayout 系）且内容容器顶部
-            // 对齐、卡片高度固定——给内容容器设垂直居中 gravity，使资产行
-            // 在卡片剩余空间内居中（入口恢复后 gravity 无副作用）
-            android.view.ViewGroup.LayoutParams clp = assetRow.getLayoutParams();
-            if (clp instanceof android.widget.FrameLayout.LayoutParams) {
-                android.widget.FrameLayout.LayoutParams flp =
-                        (android.widget.FrameLayout.LayoutParams) clp;
-                if (flp.gravity != android.view.Gravity.CENTER_VERTICAL) {
-                    flp.gravity = android.view.Gravity.CENTER_VERTICAL;
-                    assetRow.setLayoutParams(flp);
-                    changed = true;
-                }
             }
             // 分割线/空占位可能在卡片外部：实测资产行卡片只有一个子节点
             //（资产行本身），灰线是卡片同级兄弟——清理紧邻卡片前后的
@@ -1548,103 +1521,39 @@ public final class UserPagePurifier {
         }
     }
 
-    /** 文本节点转储上限（单次）。 */
-    private static final int DUMP_TEXT_LIMIT = 60;
-    /** 文本转储节流。 */
-    private static long lastDumpTextMs;
-
     /**
-     * 深度优先转储子树内所有带文本的节点（含 RichFontTextView 等
-     * 非 android.widget.TextView 的自绘文本，反射调用 getText）。
-     * tag 为空串时从页面根搜索「免费抽奖」；非空时按 tag 节流整树转储。
+     * 向内递归隐藏无文本无图片的空壳/分割线（限定深度）。
+     * 返回是否有视图被隐藏。含文本的子树（资产行子项、活动行容器链）不碰。
      */
-    private static void dumpTexts(ViewGroup root, String tag) {
-        long nowMs = android.os.SystemClock.uptimeMillis();
-        boolean searchMode = "page".equals(tag);
-        if (searchMode) {
-            if (nowMs - lastDumpTextMs < 1000L) return;
-            lastDumpTextMs = nowMs;
-            StringBuilder hits = new StringBuilder();
-            collectTextHits(root, "免费抽奖", hits);
-            MainHook.log("TextDump[page] search 免费抽奖 => " + hits);
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        appendTexts(root, sb, new int[]{0});
-        MainHook.log("TextDump[" + tag + "] " + sb);
-    }
-
-    private static void collectTextHits(View v, String keyword, StringBuilder out) {
-        if (out.length() > 600) return;
-        String text = viewText(v);
-        if (text != null && text.contains(keyword)) {
-            out.append(v.getClass().getSimpleName())
-                    .append('[').append(v.getVisibility() == View.VISIBLE ? "V"
-                            : v.getVisibility() == View.GONE ? "G" : "I")
-                    .append("]=\"").append(text, 0, Math.min(text.length(), 24))
-                    .append("\" ");
-        }
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                collectTextHits(g.getChildAt(i), keyword, out);
-            }
-        }
-    }
-
-    private static void appendTexts(View v, StringBuilder out, int[] count) {
-        if (count[0] >= DUMP_TEXT_LIMIT || out.length() > 1500) return;
-        String text = viewText(v);
-        if (text != null && text.length() > 0) {
-            count[0]++;
-            out.append(v.getClass().getSimpleName())
-                    .append('[').append(v.getVisibility() == View.VISIBLE ? "V"
-                            : v.getVisibility() == View.GONE ? "G" : "I")
-                    .append("]=\"").append(text, 0, Math.min(text.length(), 20))
-                    .append("\" ");
-        }
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                appendTexts(g.getChildAt(i), out, count);
-            }
-        }
-    }
-
-    /** 反射读取任意 View 的文本（兼容 RichFontTextView 等自绘文本控件）。 */
-    private static String viewText(View v) {
-        try {
-            Object t = v.getClass().getMethod("getText").invoke(v);
-            return t instanceof CharSequence ? ((CharSequence) t).toString() : null;
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    /** 隐藏 parent 内 keep 之外的无内容子视图（分割线/空占位）。 */
-    private static boolean hideEmptySiblings(ViewGroup parent, View keep) {
+    private static boolean hideShells(ViewGroup group, int depth) {
         boolean changed = false;
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            if (child == keep || child.getVisibility() != View.VISIBLE) continue;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
             if (!hasVisibleContent(child) && !subtreeHasTextOrImage(child)) {
                 child.setVisibility(View.GONE);
                 changed = true;
-                MainHook.log("AssetPolish: hid empty sibling "
-                        + child.getClass().getSimpleName() + " in "
-                        + parent.getClass().getSimpleName());
+                continue;
+            }
+            if (depth > 0 && child instanceof ViewGroup
+                    && hideShells((ViewGroup) child, depth - 1)) {
+                changed = true;
             }
         }
         return changed;
     }
 
-    /** 还原 parent 内 keep 之外此前被隐藏的无内容子视图。 */
-    private static void restoreEmptySiblings(ViewGroup parent, View keep) {
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View child = parent.getChildAt(i);
-            if (child == keep) continue;
+    /** 还原指定深度内此前被隐藏的无文本空壳（分割线/占位）。 */
+    private static void restoreTextlessShells(View parent, int depth) {
+        if (!(parent instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) parent;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
             if (child.getVisibility() == View.GONE && !subtreeHasTextOrImage(child)) {
                 child.setVisibility(View.VISIBLE);
+            }
+            if (depth > 0 && child instanceof ViewGroup) {
+                restoreTextlessShells(child, depth - 1);
             }
         }
     }
