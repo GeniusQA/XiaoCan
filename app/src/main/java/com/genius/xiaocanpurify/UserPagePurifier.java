@@ -307,17 +307,26 @@ public final class UserPagePurifier {
             MainHook.log("Restored layoutMenu after toggles off");
         }
         // 显示态入口的祖先容器若被此前「判空收起」压成 GONE（文案匹配修复
-        // 前富文本读不到导致），恢复容器链；嵌入方案收起的不在此恢复
+        // 前富文本读不到导致），恢复容器链；嵌入方案收起的不在此恢复。
+        // 祖先链爬到页面根为止：菜单整卡壳在 layoutMenu 之上，也可能被
+        // 邻接空壳清理误收起，只恢复包含显示态入口的祖先
         if (embeddedSnapshotView == null && root instanceof ViewGroup) {
+            View pageRoot = getBindingRoot(binding);
             for (String[] item : MENU_ITEMS) {
                 if (PurifyPrefs.hide(item[0])) continue;
+                // 优先在 layoutMenu 内找（便宜）；找不到才全页搜索
+                //（覆盖菜单整卡壳被邻接空壳清理误收起的场景）
                 View v = findItemView(root, normalize(item[1]));
+                if (v == null && pageRoot != null) {
+                    v = findItemView(pageRoot, normalize(item[1]));
+                }
                 if (v == null) continue;
+                // 从入口父级向上爬到页面根（不含），恢复被误收起的 GONE 祖先
                 View cur = v;
-                while (cur != root && cur != null) {
+                while (cur != null) {
                     View p = cur.getParent() instanceof View
                             ? (View) cur.getParent() : null;
-                    if (!(p instanceof ViewGroup)) break;
+                    if (!(p instanceof ViewGroup) || p == pageRoot) break;
                     if (p.getVisibility() == View.GONE && p != embeddedRowView) {
                         p.setVisibility(View.VISIBLE);
                         MainHook.log("Restored entry container: "
@@ -1806,8 +1815,11 @@ public final class UserPagePurifier {
 
     /** 卡片内是否有可见的活动入口文案。 */
     private static boolean hasVisibleMenuEntryText(ViewGroup card) {
+        // 必须用 findItemView（subtreeText 含反射富文本读取）：入口是
+        // Kuikly 富文本控件，findLabelView 只认原生 TextView 会漏检，
+        // 导致「入口明明在显示却被误判为资产行独占」而执行清壳/清 margin
         for (String[] item : MENU_ITEMS) {
-            View label = findLabelView(card, item[1]);
+            View label = findItemView(card, normalize(item[1]));
             if (label != null && label.isShown()) return true;
         }
         return false;
