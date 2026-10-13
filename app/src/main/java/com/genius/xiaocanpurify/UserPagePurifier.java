@@ -543,6 +543,14 @@ public final class UserPagePurifier {
             }
             MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
                     + " skip [" + detail + " ]");
+            // 入口缺失诊断：临时开启 RPC 探针（8 秒），捕获活动入口列表的
+            // 下发接口，为数据层按开关剔除隐藏入口做准备
+            long probeNow = android.os.SystemClock.uptimeMillis();
+            if (probeNow - lastEntryProbeArmMs > 30000L) {
+                lastEntryProbeArmMs = probeNow;
+                NetworkAdInterceptor.armDiscovery(8000);
+                MainHook.log("EmbedEntry: entry missing, RPC discovery armed 8s");
+            }
             // 两个及以上入口可见：嵌入只适用于单入口，立即完全拆除并
             // 恢复活动行（容器链由 filterMenuItems 的祖先链恢复负责）
             if (visibleEntries >= 2 && embeddedSnapshotView != null) {
@@ -2153,6 +2161,8 @@ public final class UserPagePurifier {
             new java.util.WeakHashMap<>();
     /** 页面根入口搜索上次执行时间（5 秒节流）。 */
     private static volatile long lastPageRootSearchMs;
+    /** 入口缺失时 RPC 探针上次布防时间（30 秒节流）。 */
+    private static volatile long lastEntryProbeArmMs;
 
     private static void collapseLayoutParams(View view) {
         try {
