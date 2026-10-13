@@ -27,6 +27,12 @@ final class EnrollmentJumpGuard {
         WINDOW.armTask(SystemClock.uptimeMillis());
     }
 
+    /** 距最近一次用户触摸的毫秒数（无记录返回 Long.MAX_VALUE）。
+     *  供弹窗拦截区分「用户主动点击引发的确认框」与「广告自动弹窗」。 */
+    static long lastTouchAgeMs() {
+        return WINDOW.lastTouchAgeMs(SystemClock.uptimeMillis());
+    }
+
     static void install(XposedInterface xposed, ClassLoader cl) {
         hookSubmissionStart(xposed, cl);
         hookLaunchDialogs(xposed, cl);

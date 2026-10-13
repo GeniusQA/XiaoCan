@@ -21,6 +21,11 @@ final class AutoJumpWindow {
 
     synchronized void onTouch(long now) { lastTouchAt = now; }
 
+    /** 距最近一次用户触摸的毫秒数（无记录返回 Long.MAX_VALUE）。 */
+    synchronized long lastTouchAgeMs(long now) {
+        return lastTouchAt < 0 ? Long.MAX_VALUE : now - lastTouchAt;
+    }
+
     synchronized void onUserInput() {}
 
     synchronized void onManualStoreRequest() { armedAt = -1; }

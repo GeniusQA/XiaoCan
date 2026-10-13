@@ -130,6 +130,14 @@ public final class PopupBlocker {
                 xposed.hook(method).intercept(chain -> {
                     Object dialog = chain.getThisObject();
                     if (!TAOBAO_INSTALL_PROMPTS.containsKey(dialog)) return chain.proceed();
+                    // 用户主动点击「第一步·领红包」后 2 秒内的确认框属于
+                    // 领红包流程本身（跳淘宝闪购领红包），放行；广告场景的
+                    // 自动弹窗无近期触摸，继续拦截
+                    if (EnrollmentJumpGuard.lastTouchAgeMs() < 2000L) {
+                        MainHook.log("Allowed Taobao red-pack prompt (user-initiated)");
+                        TAOBAO_INSTALL_PROMPTS.remove(dialog);
+                        return chain.proceed();
+                    }
                     MainHook.log("Blocked Taobao install coupon prompt");
                     return dialog;
                 });
@@ -139,6 +147,12 @@ public final class PopupBlocker {
             xposed.hook(configure).intercept(chain -> {
                 Object dialog = chain.getArg(2);
                 if (dialog == null) return chain.proceed();
+                // 用户主动点击引发的 configure（绑定确认/取消跳转回调）
+                // 必须放行，否则确认框无回调、跳转链路断；广告自动弹窗
+                // （关掉也会拉起优惠券小程序）无近期触摸，继续吞掉
+                if (EnrollmentJumpGuard.lastTouchAgeMs() < 2000L) {
+                    return chain.proceed();
+                }
                 // Even dismissing this prompt launches a coupon mini-app. Do not attach its callbacks.
                 TAOBAO_INSTALL_PROMPTS.put(dialog, true);
                 return unit;
