@@ -324,6 +324,8 @@ public final class NetworkAdInterceptor {
 
     private static final class AdInterceptorInvocationHandler implements InvocationHandler {
         private final ClassLoader classLoader;
+        /** 轮播列表响应上次 dump 时间（30 秒节流）。 */
+        private static volatile long lastCarouselDumpMs;
 
         AdInterceptorInvocationHandler(ClassLoader classLoader) {
             this.classLoader = classLoader;
@@ -502,6 +504,15 @@ public final class NetworkAdInterceptor {
                 if (discoveryActive() && body.length() > 2) {
                     MainHook.log("RESP[discover] " + url + " => "
                             + body.substring(0, Math.min(body.length(), 300)));
+                }
+                // 轮播列表（活动入口行数据源）响应结构诊断：30 秒节流，
+                // 确认入口字段结构后实现数据层按开关剔除隐藏入口
+                if (urlStr.contains("getcarousellist")
+                        && System.currentTimeMillis() - lastCarouselDumpMs > 30000L
+                        && body.length() > 2) {
+                    lastCarouselDumpMs = System.currentTimeMillis();
+                    MainHook.log("Carousel resp: " + urlStr + " => "
+                            + body.substring(0, Math.min(body.length(), 800)));
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
                 if (body.length() <= 100000) {
