@@ -1,3 +1,5 @@
+package com.genius.xiaocanpurify;
+
 final class AutoJumpWindow {
     private long armedAt = -1;
     private long lastTouchAt = -1;
