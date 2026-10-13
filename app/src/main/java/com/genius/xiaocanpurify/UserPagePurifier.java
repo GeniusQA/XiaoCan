@@ -315,9 +315,9 @@ public final class UserPagePurifier {
                     View smallest = findSmallestContainingAll((ViewGroup) top, new String[]{
                             normalize("订单待免单"), normalize("今日邀")});
                     if (smallest == null) {
-                        // 首次未命中时 dump 横幅区域结构，定位真实视图类型
-                        if (!bannerDiagDumped) {
-                            bannerDiagDumped = true;
+                        // 未命中时 dump 横幅区域结构（早期布局未完成时结果为空，允许重试）
+                        if (bannerDiagAttempts < 5) {
+                            bannerDiagAttempts++;
                             dumpBannerNeighbors(top);
                         }
                         android.util.Log.w("UserPurify", "qualify banner not found");
@@ -872,8 +872,8 @@ public final class UserPagePurifier {
         f.setInt(target, value);
     }
 
-    /** 横幅结构诊断只 dump 一次。 */
-    private static boolean bannerDiagDumped = false;
+    /** 横幅结构诊断尝试次数（早期布局未完成时结果为空，允许多次）。 */
+    private static int bannerDiagAttempts = 0;
 
     /**
      * 横幅结构诊断：全树找含「免单」的 TextView + 资产行的兄弟节点清单，
