@@ -154,9 +154,11 @@ final class EnrollmentJumpGuard {
                     return chain.proceed();
                 });
             }
-            // 探针：应用级 Context 的 startActivity（微信 SDK sendReq 内部
-            // 路径）不经过 Instrumentation——此前探针盲区导致看不到
-            // 「第一步领红包」按钮的拉起是否真的发生
+            // 应用级 Context 的 startActivity（微信 SDK sendReq 内部路径）
+            // 不经过 Instrumentation——是报名外跳保护的拦截盲区。此钩子
+            // 兼做探针与拦截：布防窗口内且无触摸的外部启动一律拦截
+            //（报名后自动外跳小程序）；宿主内部页（下单流程）与触摸过的
+            // 手动跳转放行
             try {
                 Class<?> contextImpl = Class.forName("android.app.ContextImpl", false, cl);
                 int ctxHooks = 0;
@@ -181,12 +183,21 @@ final class EnrollmentJumpGuard {
                                         && (intent.getAction() != null
                                                 || intent.getDataString() != null);
                                 if (external || implicit) {
+                                    long now = SystemClock.uptimeMillis();
+                                    boolean armed = WINDOW.isActive(now);
+                                    boolean manual = WINDOW.manualSinceArm(now);
                                     MainHook.log("CtxProbe: -> "
                                             + (pkg != null ? pkg : "(implicit)")
                                             + " act=" + intent.getAction()
                                             + " data=" + intent.getDataString()
                                             + " cls=" + (intent.getComponent() != null
-                                                    ? intent.getComponent().getClassName() : ""));
+                                                    ? intent.getComponent().getClassName() : "")
+                                            + " armed=" + armed + " manual=" + manual);
+                                    if (armed && !manual) {
+                                        MainHook.log("Blocked automatic external launch"
+                                                + " (ContextImpl)");
+                                        return null;
+                                    }
                                 }
                             }
                         } catch (Throwable ignored) {}
