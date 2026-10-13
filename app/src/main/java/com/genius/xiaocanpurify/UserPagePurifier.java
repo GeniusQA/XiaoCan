@@ -1618,14 +1618,19 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
-                    // 视图数据正常但视觉空白：扫描轮播区域的全部视图（含
-                    // 覆盖层/z-order），排查是否有透明遮挡视图
-                    int[] loc = new int[2];
-                    rv.getLocationOnScreen(loc);
-                    MainHook.log("AssetPolish: carousel screenY=" + loc[1]
-                            + " h=" + rv.getHeight());
-                    dumpBand(rv.getRootView(), loc[1] - 5,
-                            loc[1] + rv.getHeight() + 5, 0);
+                    // 实测（截图+属性采样）：两入口 VISIBLE/alpha=1/无平移，
+                    // 但 Kuikly 纹理层不绘制（仅原生分页指示器上屏）——渲染
+                    // 层与视图树脱同步。翻转 translation 触发硬件层失效，
+                    // 强制 Kuikly 绘制管线重绘该区域
+                    rv.invalidate();
+                    View p = rv.getParent() instanceof View ? (View) rv.getParent() : null;
+                    if (p != null) p.invalidate();
+                    rv.setTranslationX(0.5f);
+                    rv.post(() -> {
+                        try {
+                            rv.setTranslationX(0f);
+                        } catch (Throwable ignored) {}
+                    });
                 }
             }
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
