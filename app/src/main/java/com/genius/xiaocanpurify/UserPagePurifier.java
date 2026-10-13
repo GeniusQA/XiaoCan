@@ -1605,6 +1605,14 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
+                    // 视图数据正常但视觉空白：扫描轮播区域的全部视图（含
+                    // 覆盖层/z-order），排查是否有透明遮挡视图
+                    int[] loc = new int[2];
+                    rv.getLocationOnScreen(loc);
+                    MainHook.log("AssetPolish: carousel screenY=" + loc[1]
+                            + " h=" + rv.getHeight());
+                    dumpBand(rv.getRootView(), loc[1] - 5,
+                            loc[1] + rv.getHeight() + 5, 0);
                 }
             }
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
