@@ -534,6 +534,41 @@ public final class UserPagePurifier {
             }
             MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
                     + " skip [" + detail + " ]");
+            // 嵌入激活时不要因「本轮找不到入口」拆除嵌入：宿主重渲染后
+            // 入口异步重建，部分轮次渲染出来前是找不到的——拆除再重嵌
+            // 会造成嵌入态/空白态每几秒来回跳（实测截图）。保持嵌入态，
+            // 把容器/卡片壳重新压回 GONE 等入口重渲染；仅当用户把
+            // 「免费抽奖」开关改为隐藏时才真正拆除
+            if (embeddedSnapshotView != null) {
+                boolean reset = false;
+                if (embeddedRowView != null
+                        && embeddedRowView.getVisibility() != View.GONE) {
+                    embeddedRowView.setVisibility(View.GONE);
+                    reset = true;
+                }
+                if (embeddedCardCollapsed && embeddedMenuRow != null
+                        && embeddedMenuRow.getVisibility() != View.GONE) {
+                    embeddedMenuRow.setVisibility(View.GONE);
+                    reset = true;
+                }
+                if (embeddedEntryView != null
+                        && embeddedEntryView.getVisibility() != View.GONE) {
+                    embeddedEntryView.setVisibility(View.GONE);
+                }
+                boolean userHide = false;
+                try {
+                    userHide = PurifyPrefs.hide(PurifyPrefs.USER_MENU_LOTTERY);
+                } catch (Throwable ignored) {}
+                if (userHide) {
+                    MainHook.log("EmbedEntry: lottery switch hidden, teardown");
+                    restoreEmbeddedEntry(row);
+                    return false;
+                }
+                if (reset) {
+                    MainHook.log("EmbedEntry: keep embed state while entry re-rendering");
+                }
+                return true;
+            }
             restoreEmbeddedEntry(row);
             return false;
         }
@@ -558,7 +593,8 @@ public final class UserPagePurifier {
             return true;
         }
         // 入口实例变化（宿主重渲染）：清旧快照后重嵌
-        restoreEmbeddedEntry(row);
+        //（不恢复容器显示，避免重嵌完成前闪现一帧空白）
+        restoreEmbeddedEntry(row, false);
 
         final View fEntry = entry;
         final ViewGroup fRow = row;
@@ -1084,6 +1120,14 @@ public final class UserPagePurifier {
 
     /** 撤销嵌入：移除嵌入视图、恢复活动行与原入口显示。 */
     private static void restoreEmbeddedEntry(ViewGroup row) {
+        restoreEmbeddedEntry(row, true);
+    }
+
+    /**
+     * 撤销嵌入。showContainers=false 用于「拆除后立即重嵌」的场景：
+     * 不把活动行容器/卡片壳恢复显示，避免重嵌完成前闪现一帧空白。
+     */
+    private static void restoreEmbeddedEntry(ViewGroup row, boolean showContainers) {
         if (embeddedSnapshotView == null) return;
         try {
             ViewGroup p = embeddedSnapshotView.getParent() instanceof ViewGroup
@@ -1104,13 +1148,14 @@ public final class UserPagePurifier {
         embeddedBtnWrapView = null;
         embeddedSlotListener = null;
         ViewGroup r = embeddedRowView != null ? embeddedRowView : row;
-        if (r != null && r.getVisibility() == View.GONE && hasVisibleChild(r)) {
+        if (showContainers && r != null && r.getVisibility() == View.GONE
+                && hasVisibleChild(r)) {
             r.setVisibility(View.VISIBLE);
             MainHook.log("EmbedEntry: menu row restored");
         }
         // 恢复被连带收起的活动行卡片壳
         ViewGroup shell = embeddedMenuRow;
-        if (embeddedCardCollapsed && shell != null
+        if (showContainers && embeddedCardCollapsed && shell != null
                 && shell.getVisibility() == View.GONE) {
             shell.setVisibility(View.VISIBLE);
             MainHook.log("EmbedEntry: menu card shell restored");
