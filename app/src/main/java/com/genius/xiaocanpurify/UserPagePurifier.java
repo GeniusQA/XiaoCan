@@ -1618,10 +1618,38 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
-                    // 实测（截图+属性采样）：两入口 VISIBLE/alpha=1/无平移，
-                    // 但 Kuikly 纹理层不绘制（仅原生分页指示器上屏）——渲染
-                    // 层与视图树脱同步。翻转 translation 触发硬件层失效，
-                    // 强制 Kuikly 绘制管线重绘该区域
+                    // 决定性判别：把 RecyclerView 自己 draw 到位图并统计
+                    // 非白像素占比（5 秒节流）——
+                    //   有内容 => 显示管线被覆盖/遮挡（SurfaceView 等）；
+                    //   空白   => Kuikly 数据/渲染层没内容
+                    try {
+                        if (nowMs - lastCarouselSampleMs > 5000L
+                                && rv.getWidth() > 0 && rv.getHeight() > 0) {
+                            lastCarouselSampleMs = nowMs;
+                            android.graphics.Bitmap bmp = android.graphics.Bitmap
+                                    .createBitmap(rv.getWidth(), rv.getHeight(),
+                                            android.graphics.Bitmap.Config.ARGB_8888);
+                            android.graphics.Canvas c = new android.graphics.Canvas(bmp);
+                            c.drawColor(android.graphics.Color.WHITE);
+                            rv.draw(c);
+                            int w = bmp.getWidth(), h = bmp.getHeight();
+                            int[] px = new int[w * h];
+                            bmp.getPixels(px, 0, w, 0, 0, w, h);
+                            int nonWhite = 0;
+                            for (int pix : px) {
+                                int r = (pix >> 16) & 0xff, g = (pix >> 8) & 0xff,
+                                        b = pix & 0xff;
+                                if (r < 235 || g < 235 || b < 235) nonWhite++;
+                            }
+                            MainHook.log("AssetPolish: carousel draw nonWhite="
+                                    + nonWhite + "/" + (w * h) + " ("
+                                    + (100 * nonWhite / (w * h)) + "%)");
+                            bmp.recycle();
+                        }
+                    } catch (Throwable t) {
+                        MainHook.log("AssetPolish: carousel draw sample error: " + t);
+                    }
+                    // 强制重绘触发：invalidate + 翻转 translation 引起硬件层失效
                     rv.invalidate();
                     View p = rv.getParent() instanceof View ? (View) rv.getParent() : null;
                     if (p != null) p.invalidate();
@@ -2173,6 +2201,8 @@ public final class UserPagePurifier {
     private static volatile long lastPageRootSearchMs;
     /** 入口缺失时 RPC 探针上次布防时间（30 秒节流）。 */
     private static volatile long lastEntryProbeArmMs;
+    /** 轮播绘制采样上次执行时间（5 秒节流）。 */
+    private static volatile long lastCarouselSampleMs;
 
     private static void collapseLayoutParams(View view) {
         try {
