@@ -300,34 +300,47 @@ public final class UserPagePurifier {
         }
         if (root instanceof ViewGroup) {
             // 单入口优先嵌入蚕豆卡空位（收起活动行）；结构不满足时退回原居中逻辑
-            if (!embedSingleMenuEntryIntoBeanCard((ViewGroup) root)) {
-                centerSingleMenuEntry((ViewGroup) root);
+            try {
+                if (!embedSingleMenuEntryIntoBeanCard((ViewGroup) root)) {
+                    centerSingleMenuEntry((ViewGroup) root);
+                }
+            } catch (Throwable t) {
+                MainHook.log("EmbedCall error: " + t);
             }
         }
         // 免单资格横幅：实为 banner_notice / banner_challenge 轮播卡
         // （RichFontTextView 富文本渲染，非 TextView，文案匹配找不到；且是
         // layout_menu 的兄弟节点，必须从页面根 findViewById）。
         // 宿主每次重渲染都会复位可见性，逐次隐藏。
-        if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
-            View menuRoot = getBindingRoot(binding);
-            if (menuRoot != null) {
-                View top = menuRoot;
-                while (top.getParent() instanceof View) top = (View) top.getParent();
-                for (String name : new String[]{"banner_notice", "banner_challenge"}) {
-                    int id = top.getResources().getIdentifier(
-                            name, "id", top.getContext().getPackageName());
-                    View bn = id != 0 ? top.findViewById(id) : null;
-                    MainHook.log("QBanner: " + name + " id=" + id
-                            + " bn=" + (bn != null)
-                            + " vis=" + (bn != null ? bn.getVisibility() : -1)
-                            + " top=" + top.getClass().getSimpleName());
-                    if (bn != null && bn.getVisibility() != View.GONE) {
-                        bn.setVisibility(View.GONE);
-                        MainHook.log("Hidden " + name + " (qualify banner)");
+        boolean qualify = false;
+        try {
+            qualify = PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY);
+        } catch (Throwable t) {
+            MainHook.log("QBanner: pref error " + t);
+        }
+        if (qualify) {
+            try {
+                View menuRoot = getBindingRoot(binding);
+                if (menuRoot != null) {
+                    View top = menuRoot;
+                    while (top.getParent() instanceof View) top = (View) top.getParent();
+                    for (String name : new String[]{"banner_notice", "banner_challenge"}) {
+                        int id = top.getResources().getIdentifier(
+                                name, "id", top.getContext().getPackageName());
+                        View bn = id != 0 ? top.findViewById(id) : null;
+                        MainHook.log("QBanner: " + name + " id=" + id
+                                + " bn=" + (bn != null)
+                                + " vis=" + (bn != null ? bn.getVisibility() : -1));
+                        if (bn != null && bn.getVisibility() != View.GONE) {
+                            bn.setVisibility(View.GONE);
+                            MainHook.log("Hidden " + name + " (qualify banner)");
+                        }
                     }
+                } else {
+                    MainHook.log("QBanner: menu binding root null");
                 }
-            } else {
-                MainHook.log("QBanner: menu binding root null");
+            } catch (Throwable t) {
+                MainHook.log("QBanner: error " + t);
             }
         }
     }
