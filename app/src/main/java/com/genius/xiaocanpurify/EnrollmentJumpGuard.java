@@ -82,20 +82,27 @@ final class EnrollmentJumpGuard {
                         if (arg instanceof Activity) owner = (Activity) arg;
                     }
                     // 探针：记录所有离开宿主包的跳转尝试（含目标与布防状态），
-                    // 用于定位「下单流程」等页面按钮的跳转路径与拦截情况
+                    // 用于定位「下单流程」等页面按钮的跳转路径与拦截情况。
+                    // 隐式 intent（pkg 为 null，如 meituanwaimai:// scheme）
+                    // 也记录，否则漏掉 scheme 跳转
                     if (intent != null) {
                         String pkg = intent.getComponent() != null
                                 ? intent.getComponent().getPackageName()
                                 : intent.getPackage();
-                        if (pkg != null && !pkg.equals("com.realtech.xiaocan")) {
+                        boolean externalExplicit = pkg != null
+                                && !pkg.equals("com.realtech.xiaocan");
+                        boolean implicit = pkg == null
+                                && (intent.getAction() != null
+                                        || intent.getDataString() != null);
+                        if (externalExplicit || implicit) {
                             long now = SystemClock.uptimeMillis();
                             MainHook.log("JumpProbe: "
                                     + (owner != null ? owner.getClass().getSimpleName() : "?")
-                                    + " -> " + pkg + " "
-                                    + (intent.getComponent() != null
-                                            ? intent.getComponent().getClassName()
-                                            : intent.getAction())
+                                    + " -> " + (pkg != null ? pkg : "(implicit)")
+                                    + " act=" + intent.getAction()
                                     + " data=" + intent.getDataString()
+                                    + " cls=" + (intent.getComponent() != null
+                                            ? intent.getComponent().getClassName() : "")
                                     + " armed=" + WINDOW.isActive(now)
                                     + " manual=" + WINDOW.manualSinceArm(now));
                         }

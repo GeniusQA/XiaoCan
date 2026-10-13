@@ -1413,6 +1413,7 @@ public final class UserPagePurifier {
                         child.setVisibility(View.VISIBLE);
                     }
                 }
+                restoreAdjacentShells(cardGroup);
                 return;
             }
             boolean changed = false;
@@ -1434,9 +1435,41 @@ public final class UserPagePurifier {
                         android.view.Gravity.CENTER_VERTICAL);
                 changed = true;
             }
+            // 分割线/空占位可能在卡片外部：实测资产行卡片只有一个子节点
+            //（资产行本身），灰线是卡片同级兄弟——清理紧邻卡片前后的
+            // 无内容兄弟视图（含活动行卡收起后残留的占位）
+            if (cardGroup.getParent() instanceof ViewGroup) {
+                ViewGroup parent = (ViewGroup) cardGroup.getParent();
+                int idx = parent.indexOfChild(cardGroup);
+                for (int d = idx - 2; d <= idx + 2; d++) {
+                    if (d < 0 || d >= parent.getChildCount() || d == idx) continue;
+                    View sib = parent.getChildAt(d);
+                    if (sib.getVisibility() != View.VISIBLE) continue;
+                    if (!hasVisibleContent(sib) && !subtreeHasTextOrImage(sib)) {
+                        sib.setVisibility(View.GONE);
+                        changed = true;
+                        MainHook.log("AssetPolish: hid adjacent shell "
+                                + sib.getClass().getSimpleName());
+                    }
+                }
+            }
             if (changed) MainHook.log("Asset-only card polished");
         } catch (Throwable t) {
             MainHook.log("polishAssetOnlyCard error: " + t);
+        }
+    }
+
+    /** 入口恢复显示时，还原资产行卡片紧邻的无内容兄弟空壳（分割线/占位）。 */
+    private static void restoreAdjacentShells(ViewGroup cardGroup) {
+        if (!(cardGroup.getParent() instanceof ViewGroup)) return;
+        ViewGroup parent = (ViewGroup) cardGroup.getParent();
+        int idx = parent.indexOfChild(cardGroup);
+        for (int d = idx - 2; d <= idx + 2; d++) {
+            if (d < 0 || d >= parent.getChildCount() || d == idx) continue;
+            View sib = parent.getChildAt(d);
+            if (sib.getVisibility() == View.GONE && !subtreeHasTextOrImage(sib)) {
+                sib.setVisibility(View.VISIBLE);
+            }
         }
     }
 
