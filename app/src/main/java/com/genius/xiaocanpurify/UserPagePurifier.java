@@ -1240,6 +1240,11 @@ public final class UserPagePurifier {
                 String t = subtreeText(v);
                 MainHook.log("BandDiag: d" + depth + " " + v.getClass().getName()
                         + " abs=" + loc[0] + "," + loc[1] + "-" + (loc[0] + w) + "," + (loc[1] + h)
+                        + " vis=" + v.getVisibility()
+                        + " alpha=" + String.format(java.util.Locale.ROOT, "%.2f", v.getAlpha())
+                        + " trX=" + String.format(java.util.Locale.ROOT, "%.0f", v.getTranslationX())
+                        + " trY=" + String.format(java.util.Locale.ROOT, "%.0f", v.getTranslationY())
+                        + " scX=" + String.format(java.util.Locale.ROOT, "%.2f", v.getScaleX())
                         + " textLen=" + t.length()
                         + (t.length() > 0 ? " text=" + t.substring(0, Math.min(30, t.length())) : ""));
             }
