@@ -1452,7 +1452,9 @@ public final class UserPagePurifier {
                 // 入口已恢复显示：还原此前被隐藏的分割线/空占位
                 //（只还原无文本无图片的空壳，不会碰活动行容器）
                 restoreEmptySiblings(cardGroup, assetRow);
-                if (itemsRow != null) restoreEmptySiblings(assetRow, itemsRow);
+                if (itemsRow != null && assetRow instanceof ViewGroup) {
+                    restoreEmptySiblings((ViewGroup) assetRow, itemsRow);
+                }
                 restoreAdjacentShells(cardGroup);
                 return;
             }
@@ -1461,8 +1463,8 @@ public final class UserPagePurifier {
             changed |= hideEmptySiblings(cardGroup, assetRow);
             // 内容容器层（实测资产行与活动行同卡）：隐藏资产行条目旁的
             // 分割线/空占位——活动行容器链含入口文案，不碰
-            if (itemsRow != null) {
-                changed |= hideEmptySiblings(assetRow, itemsRow);
+            if (itemsRow != null && assetRow instanceof ViewGroup) {
+                changed |= hideEmptySiblings((ViewGroup) assetRow, itemsRow);
             }
             // 资产行在卡片内垂直居中（卡片高度自适应内容，入口恢复后无副作用）
             if (cardGroup instanceof android.widget.LinearLayout
