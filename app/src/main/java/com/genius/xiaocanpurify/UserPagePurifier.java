@@ -626,15 +626,31 @@ public final class UserPagePurifier {
                         }
                         rv = rv.getParent() instanceof View ? (View) rv.getParent() : null;
                     }
+                    View rowTop = embeddedMenuRow != null ? embeddedMenuRow : embeddedRowView;
+                    if (rowTop == null || rowTop.getWidth() <= 0 || rowTop.getHeight() <= 0) {
+                        rowTop = target;
+                    }
+                    // 实测：仅靠冻结边界做坐标映射会命中落空（consumed=false）
+                    // ——宿主 Kuikly 反复重渲染会使 GONE 子树的边界漂移失效。
+                    // 先对活动行根做一次同步测量+布局刷新，使恢复 VISIBLE 的
+                    // 子树获得全新的自洽边界，再做坐标映射与投递。
+                    try {
+                        int ws = View.MeasureSpec.makeMeasureSpec(
+                                rowTop.getWidth(), View.MeasureSpec.EXACTLY);
+                        int hs = View.MeasureSpec.makeMeasureSpec(
+                                rowTop.getHeight(), View.MeasureSpec.EXACTLY);
+                        rowTop.measure(ws, hs);
+                        rowTop.layout(rowTop.getLeft(), rowTop.getTop(),
+                                rowTop.getLeft() + rowTop.getWidth(),
+                                rowTop.getTop() + rowTop.getHeight());
+                    } catch (Throwable t) {
+                        MainHook.log("EmbedEntry: relayout refresh failed: " + t);
+                    }
                     View cur = target;
                     float px = target.getWidth() / 2f;
                     float py = target.getHeight() / 2f;
                     // 把入口中心点从入口局部坐标逐层映射到活动行根的局部坐标
                     //（累加 left + translation - scroll，同一冻结快照内自洽）
-                    View rowTop = embeddedMenuRow != null ? embeddedMenuRow : embeddedRowView;
-                    if (rowTop == null || rowTop.getWidth() <= 0 || rowTop.getHeight() <= 0) {
-                        rowTop = target;
-                    }
                     while (cur != null && cur != rowTop
                             && cur.getWidth() > 0 && cur.getHeight() > 0) {
                         px += cur.getLeft() + cur.getTranslationX() - cur.getScrollX();
