@@ -277,6 +277,10 @@ public final class UserPagePurifier {
             root = getBindingRoot(binding);
         }
         if (root == null) return;
+        // 嵌入激活时跳过「恢复类」操作：入口本体/活动行容器由嵌入逻辑
+        // 压回 GONE（入口快照在蚕豆卡中），逐项恢复会与 re-collapse 拉锯，
+        // 把轮播区顶开成空白、免单 banner 复现。仅保留隐藏类操作
+        boolean embedActive = embeddedSnapshotView != null;
         for (String[] item : MENU_ITEMS) {
             View target = findItemView(root, normalize(item[1]));
             if (target == null) continue;
@@ -284,7 +288,7 @@ public final class UserPagePurifier {
                 target.setVisibility(View.GONE);
                 collapseLayoutParams(target);
                 MainHook.log("Hidden user menu item: " + item[1]);
-            } else if (target.getVisibility() == View.GONE) {
+            } else if (!embedActive && target.getVisibility() == View.GONE) {
                 // 开关已关闭但视图仍是历史隐藏态（宿主复用视图不会自动恢复）
                 target.setVisibility(View.VISIBLE);
                 restoreLayoutParams(target);
@@ -293,10 +297,12 @@ public final class UserPagePurifier {
         }
         // 开关从「全隐藏」退回部分隐藏时，恢复之前被 collapseMenuIfEmpty 收起的整行；
         // hasVisibleChild 校验避免覆盖宿主自身的隐藏意图；
-        // 嵌入方案收起的容器（embeddedRowView）不在此恢复，由嵌入还原逻辑负责
+        // 嵌入方案收起的容器/卡片壳（embeddedRowView/embeddedMenuRow）
+        // 不在此恢复，由嵌入还原逻辑负责
         if (root instanceof ViewGroup && root.getVisibility() == View.GONE
                 && hasVisibleChild((ViewGroup) root)
-                && (embeddedSnapshotView == null || embeddedRowView != root)) {
+                && (embeddedSnapshotView == null
+                        || (embeddedRowView != root && embeddedMenuRow != root))) {
             root.setVisibility(View.VISIBLE);
             MainHook.log("Restored layoutMenu after toggles off");
         }
@@ -1564,12 +1570,6 @@ public final class UserPagePurifier {
                     && hideShells((ViewGroup) assetRow, 2)) {
                 changed = true;
             }
-            // 修复历史误杀：恢复被当作空壳 GONE 的轮播/列表容器
-            //（活动入口宿主），内容到达后入口才能渲染
-            if (assetRow instanceof ViewGroup
-                    && restoreContentHosts((ViewGroup) assetRow, 3)) {
-                changed = true;
-            }
             // 资产行最后一个可见子项的底部 margin 是原「资产行-菜单行」
             // 间距（实测 38px），菜单独占时表现为资产行下方空白——清零，
             // 原值缓存供恢复
@@ -1687,27 +1687,6 @@ public final class UserPagePurifier {
      * 恢复被误杀 GONE 的内容宿主容器（RecyclerView/ViewPager 等轮播列表）。
      * 活动入口由宿主异步渲染进这些容器，误杀后入口永远不可见。
      */
-    private static boolean restoreContentHosts(ViewGroup group, int depth) {
-        boolean changed = false;
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            String cn = child.getClass().getName();
-            boolean host = cn.contains("RecyclerView") || cn.contains("ViewPager")
-                    || cn.contains("Banner") || cn.contains("Carousel");
-            if (host && child.getVisibility() == View.GONE) {
-                child.setVisibility(View.VISIBLE);
-                changed = true;
-                MainHook.log("AssetPolish: restored content host "
-                        + child.getClass().getSimpleName());
-            }
-            if (depth > 0 && child instanceof ViewGroup
-                    && restoreContentHosts((ViewGroup) child, depth - 1)) {
-                changed = true;
-            }
-        }
-        return changed;
-    }
-
     /** 还原指定深度内此前被隐藏的无文本空壳（分割线/占位）。 */
     private static void restoreTextlessShells(View parent, int depth) {
         if (!(parent instanceof ViewGroup)) return;
