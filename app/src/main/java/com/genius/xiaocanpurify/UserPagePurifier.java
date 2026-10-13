@@ -1618,13 +1618,15 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
-                    // 决定性判别：把 RecyclerView 自己 draw 到位图并统计
-                    // 非白像素占比（5 秒节流）——
-                    //   有内容 => 显示管线被覆盖/遮挡（SurfaceView 等）；
-                    //   空白   => Kuikly 数据/渲染层没内容
+                    // 自愈：视图内容 vs 屏幕内容对比（PixelCopy API26+）。
+                    // 实测：rv.draw 有内容（4% 非白）但屏幕不显示——硬件渲染
+                    // 管线（RenderNode）没录制内容，而 hit-test 按视图树所以
+                    // 点击有效。仅当「视图有内容但屏幕没有」时执行
+                    // remove+re-add，强制 ViewRootImpl 重建该子树渲染
                     try {
                         if (nowMs - lastCarouselSampleMs > 5000L
-                                && rv.getWidth() > 0 && rv.getHeight() > 0) {
+                                && rv.getWidth() > 0 && rv.getHeight() > 0
+                                && android.os.Build.VERSION.SDK_INT >= 26) {
                             lastCarouselSampleMs = nowMs;
                             android.graphics.Bitmap bmp = android.graphics.Bitmap
                                     .createBitmap(rv.getWidth(), rv.getHeight(),
@@ -1641,24 +1643,21 @@ public final class UserPagePurifier {
                                         b = pix & 0xff;
                                 if (r < 235 || g < 235 || b < 235) nonWhite++;
                             }
+                            boolean hasContent = nonWhite > w * h * 3 / 100;
                             MainHook.log("AssetPolish: carousel draw nonWhite="
                                     + nonWhite + "/" + (w * h) + " ("
                                     + (100 * nonWhite / (w * h)) + "%)");
                             bmp.recycle();
+                            if (hasContent) {
+                                rebuildCarouselRender(rv);
+                            }
+                            if (hasContent) {
+                                rebuildCarouselRender(rv);
+                            }
                         }
                     } catch (Throwable t) {
                         MainHook.log("AssetPolish: carousel draw sample error: " + t);
                     }
-                    // 强制重绘触发：invalidate + 翻转 translation 引起硬件层失效
-                    rv.invalidate();
-                    View p = rv.getParent() instanceof View ? (View) rv.getParent() : null;
-                    if (p != null) p.invalidate();
-                    rv.setTranslationX(0.5f);
-                    rv.post(() -> {
-                        try {
-                            rv.setTranslationX(0f);
-                        } catch (Throwable ignored) {}
-                    });
                 }
             }
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
@@ -1843,6 +1842,74 @@ public final class UserPagePurifier {
      * 恢复被误杀 GONE 的内容宿主容器（RecyclerView/ViewPager 等轮播列表）。
      * 活动入口由宿主异步渲染进这些容器，误杀后入口永远不可见。
      */
+    /**
+     * 轮播渲染自愈检查：PixelCopy 拷贝轮播区域的屏幕实际像素，与视图
+     * 内容对比——「视图有内容但屏幕没有」（RenderNode 未录制）时执行
+     * remove+re-add，强制 ViewRootImpl 重建该子树渲染。
+     */
+    private static void rebuildCarouselRender(ViewGroup rv) {
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastCarouselRebuildMs < 10000L) return;
+            lastCarouselRebuildMs = now;
+            android.app.Activity act = null;
+            android.content.Context ctx = rv.getContext();
+            while (ctx instanceof android.content.ContextWrapper) {
+                if (ctx instanceof android.app.Activity) {
+                    act = (android.app.Activity) ctx;
+                    break;
+                }
+                ctx = ((android.content.ContextWrapper) ctx).getBaseContext();
+            }
+            if (act == null) {
+                doRebuild(rv);
+                return;
+            }
+            int[] loc = new int[2];
+            rv.getLocationOnScreen(loc);
+            android.graphics.Rect rect = new android.graphics.Rect(loc[0], loc[1],
+                    loc[0] + rv.getWidth(), loc[1] + rv.getHeight());
+            android.graphics.Bitmap screen = android.graphics.Bitmap.createBitmap(
+                    rv.getWidth(), rv.getHeight(),
+                    android.graphics.Bitmap.Config.ARGB_8888);
+            android.view.PixelCopy.request(act.getWindow(), rect, screen, result -> {
+                try {
+                    int w = screen.getWidth(), h = screen.getHeight();
+                    int[] px = new int[w * h];
+                    screen.getPixels(px, 0, w, 0, 0, w, h);
+                    int nonWhite = 0;
+                    for (int pix : px) {
+                        int r = (pix >> 16) & 0xff, g = (pix >> 8) & 0xff, b = pix & 0xff;
+                        if (r < 235 || g < 235 || b < 235) nonWhite++;
+                    }
+                    boolean screenBlank = nonWhite < w * h / 100;
+                    MainHook.log("AssetPolish: carousel screen nonWhite="
+                            + nonWhite + "/" + (w * h) + " blank=" + screenBlank
+                            + " (PixelCopy result=" + result + ")");
+                    if (screenBlank) doRebuild(rv);
+                    screen.recycle();
+                } catch (Throwable ignored) {}
+            }, new android.os.Handler(android.os.Looper.getMainLooper()));
+        } catch (Throwable t) {
+            MainHook.log("AssetPolish: rebuild check error: " + t);
+        }
+    }
+
+    /** remove+re-add 轮播 RecyclerView，强制 ViewRootImpl 重建渲染。 */
+    private static void doRebuild(ViewGroup rv) {
+        try {
+            ViewGroup parent = (ViewGroup) rv.getParent();
+            if (parent == null) return;
+            int idx = parent.indexOfChild(rv);
+            android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
+            parent.removeView(rv);
+            parent.addView(rv, idx, lp);
+            MainHook.log("AssetPolish: carousel re-attached to rebuild rendering");
+        } catch (Throwable t) {
+            MainHook.log("AssetPolish: carousel re-attach error: " + t);
+        }
+    }
+
     /** 还原指定深度内此前被隐藏的无文本空壳（分割线/占位）。 */
     private static void restoreTextlessShells(View parent, int depth) {
         if (!(parent instanceof ViewGroup)) return;
@@ -2203,6 +2270,8 @@ public final class UserPagePurifier {
     private static volatile long lastEntryProbeArmMs;
     /** 轮播绘制采样上次执行时间（5 秒节流）。 */
     private static volatile long lastCarouselSampleMs;
+    /** 轮播渲染重建上次执行时间（10 秒节流）。 */
+    private static volatile long lastCarouselRebuildMs;
 
     private static void collapseLayoutParams(View view) {
         try {
