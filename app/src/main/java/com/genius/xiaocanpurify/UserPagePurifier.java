@@ -602,8 +602,17 @@ public final class UserPagePurifier {
                 if (target == null) return;
                 // Kuikly 自绘入口的点击语义挂在触摸层（onTouchEvent）上，
                 // 直接 performClick 往往不生效（原入口被 GONE 后其 OnClickListener
-                // 链路也可能已失效）。优先向入口投递一次合成点击（DOWN+UP），
-                // 由入口自身按命中区域分发，命中即返回。
+                // 链路也可能已失效）。
+                // 优先从窗口根视图按绝对坐标投递：完整复现真实手指触摸的
+                // 逐层命中测试路径。实测直接向入口容器投递局部坐标事件时，
+                // 外层 clickable 容器会消费事件但语义层收不到（DOWN 返回 true
+                // 却不导航）；根视图投递后由 View 树/虚拟视图树自行命中路由。
+                if (dispatchTapThroughRoot(target)) {
+                    MainHook.log("EmbedEntry: click -> root tap on "
+                            + target.getClass().getSimpleName());
+                    return;
+                }
+                // 回退 0：直接向入口投递一次合成点击（DOWN+UP），由入口自身分发
                 if (dispatchSyntheticTapRevealed(target)) {
                     MainHook.log("EmbedEntry: click -> tap on "
                             + target.getClass().getSimpleName());
@@ -743,12 +752,6 @@ public final class UserPagePurifier {
     }
 
     /**
-     * 向入口投递一次合成点击（DOWN+UP）。Kuikly 自绘入口把点击语义做在
-     * 触摸层（onTouchEvent）而非 OnClickListener，performClick 无效；
-     * 由入口自身在其内部按命中区域分发，等同于真实手指点击。
-     * 返回 true 表示事件已被消费（点击语义已触发）。
-     */
-    /**
      * 带可见性恢复的合成点击。嵌入方案会把原入口及其所在子容器压成 GONE，
      * 而 Kuikly 等自绘框架的触摸处理普遍带可见性守卫（isShown / visibility
      * 检查）——直接向 GONE 视图投递事件会被吞掉，表现为「点了没反应」。
@@ -791,11 +794,12 @@ public final class UserPagePurifier {
 
     private static boolean dispatchSyntheticTap(View target) {
         if (target == null) return false;
-        int w = target.getWidth();
-        int h = target.getHeight();
-        if (w <= 0 || h <= 0) return false;
-        float x = w / 2f;
-        float y = h / 2f;
+        return dispatchSyntheticTapAt(target, target.getWidth() / 2f, target.getHeight() / 2f);
+    }
+
+    /** 在视图局部坐标 (x, y) 处向 target 投递一次合成点击（DOWN+UP）。 */
+    private static boolean dispatchSyntheticTapAt(View target, float x, float y) {
+        if (target == null) return false;
         long now = android.os.SystemClock.uptimeMillis();
         android.view.MotionEvent down = android.view.MotionEvent.obtain(
                 now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0);
@@ -810,6 +814,66 @@ public final class UserPagePurifier {
             up.recycle();
         }
         return consumed;
+    }
+
+    /**
+     * 从窗口根视图按绝对坐标投递合成点击——完整复现真实手指触摸的事件路径：
+     * 根视图 dispatchTouchEvent 会沿 View 树逐层命中测试到叶子（Kuikly 等
+     * 自绘框架在根层做虚拟视图命中路由的场景也能被正确覆盖）。
+     * 实测直接向入口容器投递局部坐标事件时，外层 clickable 容器会把 DOWN
+     * 消费掉，但点击语义层收不到事件（返回 true 却不导航）。
+     * 投递前同样临时恢复目标到根之间的隐藏链（GONE 子树会被命中测试跳过），
+     * 完成后立即压回。返回 true 表示事件已被消费。
+     */
+    private static boolean dispatchTapThroughRoot(View target) {
+        if (target == null || target.getWidth() <= 0 || target.getHeight() <= 0) {
+            return false;
+        }
+        // 收集目标向上到首个可见祖先之间的隐藏视图（含目标自身）
+        java.util.List<View> revealed = new java.util.ArrayList<>();
+        java.util.List<Integer> prevVis = new java.util.ArrayList<>();
+        try {
+            View cur = target;
+            while (cur != null && !cur.isShown()) {
+                if (cur.getVisibility() != View.VISIBLE) {
+                    revealed.add(cur);
+                    prevVis.add(cur.getVisibility());
+                    cur.setVisibility(View.VISIBLE);
+                }
+                cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+            }
+            View root = target.getRootView();
+            if (root == null || root.getWidth() <= 0 || root.getHeight() <= 0) {
+                MainHook.log("EmbedEntry: root tap -> no valid root view");
+                return false;
+            }
+            // 计算入口中心点在根视图坐标系下的位置（GONE 期间布局边界
+            // 保持最后一次可见布局的值，恢复 VISIBLE 后即一致）
+            int[] tl = new int[2];
+            target.getLocationOnScreen(tl);
+            int[] rl = new int[2];
+            root.getLocationOnScreen(rl);
+            float x = tl[0] - rl[0] + target.getWidth() / 2f;
+            float y = tl[1] - rl[1] + target.getHeight() / 2f;
+            if (x < 0 || y < 0 || x > root.getWidth() || y > root.getHeight()) {
+                MainHook.log("EmbedEntry: root tap coords out of bounds ("
+                        + (int) x + "," + (int) y + "), root "
+                        + root.getWidth() + "x" + root.getHeight());
+                return false;
+            }
+            MainHook.log("EmbedEntry: root tap at (" + (int) x + "," + (int) y + ") on "
+                    + root.getClass().getSimpleName());
+            return dispatchSyntheticTapAt(root, x, y);
+        } catch (Throwable t) {
+            MainHook.log("EmbedEntry: root tap error: " + t);
+            return false;
+        } finally {
+            for (int i = 0; i < revealed.size(); i++) {
+                try {
+                    revealed.get(i).setVisibility(prevVis.get(i));
+                } catch (Throwable ignored) {}
+            }
+        }
     }
 
     /**
