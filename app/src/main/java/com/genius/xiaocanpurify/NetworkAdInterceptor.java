@@ -507,11 +507,11 @@ public final class NetworkAdInterceptor {
                 }
                 // 轮播列表（活动入口行数据源）响应结构诊断：30 秒节流，
                 // 确认入口字段结构后实现数据层按开关剔除隐藏入口
-                if (urlStr.contains("getcarousellist")
+                if (url.contains("getcarousellist")
                         && System.currentTimeMillis() - lastCarouselDumpMs > 30000L
                         && body.length() > 2) {
                     lastCarouselDumpMs = System.currentTimeMillis();
-                    MainHook.log("Carousel resp: " + urlStr + " => "
+                    MainHook.log("Carousel resp: " + url + " => "
                             + body.substring(0, Math.min(body.length(), 800)));
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
