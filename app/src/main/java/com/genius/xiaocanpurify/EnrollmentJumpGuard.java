@@ -148,21 +148,77 @@ final class EnrollmentJumpGuard {
                     return chain.proceed();
                 });
             }
+            // 探针：应用级 Context 的 startActivity（微信 SDK sendReq 内部
+            // 路径）不经过 Instrumentation——此前探针盲区导致看不到
+            // 「第一步领红包」按钮的拉起是否真的发生
+            try {
+                Class<?> contextImpl = Class.forName("android.app.ContextImpl", false, cl);
+                int ctxHooks = 0;
+                for (Method m : contextImpl.getDeclaredMethods()) {
+                    if (!"startActivity".equals(m.getName())) continue;
+                    xposed.hook(m).intercept(chain -> {
+                        try {
+                            Intent intent = null;
+                            for (Object arg : chain.getArgs()) {
+                                if (arg instanceof Intent) {
+                                    intent = (Intent) arg;
+                                    break;
+                                }
+                            }
+                            if (intent != null) {
+                                String pkg = intent.getComponent() != null
+                                        ? intent.getComponent().getPackageName()
+                                        : intent.getPackage();
+                                boolean external = pkg != null
+                                        && !pkg.equals("com.realtech.xiaocan");
+                                boolean implicit = pkg == null
+                                        && (intent.getAction() != null
+                                                || intent.getDataString() != null);
+                                if (external || implicit) {
+                                    MainHook.log("CtxProbe: -> "
+                                            + (pkg != null ? pkg : "(implicit)")
+                                            + " act=" + intent.getAction()
+                                            + " data=" + intent.getDataString()
+                                            + " cls=" + (intent.getComponent() != null
+                                                    ? intent.getComponent().getClassName() : ""));
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                        return chain.proceed();
+                    });
+                    ctxHooks++;
+                }
+                MainHook.log("CtxProbe hooks: " + ctxHooks);
+            } catch (Throwable t) {
+                MainHook.log("CtxProbe setup failed: " + t.getClass().getSimpleName());
+            }
             Class<?> wx = Class.forName("com.tencent.mm.opensdk.openapi.WXApiImplV10", false, cl);
             for (Method m : wx.getMethods()) {
                 if (!"sendReq".equals(m.getName()) || m.getParameterCount() != 1) continue;
                 xposed.hook(m).intercept(chain -> {
                     Object request = chain.getArg(0);
-                    if (request != null && request.getClass().getName().contains("WXLaunchMiniProgram")) {
-                        MainHook.log("LotteryProbe sendReq WXLaunchMiniProgram " + request);
-                        long now = SystemClock.uptimeMillis();
-                        if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
-                                && WINDOW.isActive(now) && !WINDOW.manualSinceArm(now)) {
-                            MainHook.log("Blocked lottery mini-app launch (LOTTERY_POPUP)");
-                            return false;
+                    boolean isMini = request != null
+                            && request.getClass().getName().contains("WXLaunchMiniProgram");
+                    if (isMini) {
+                        // 输出小程序详情：userName=小程序原始ID path=页面路径
+                        StringBuilder info = new StringBuilder();
+                        for (String f : new String[]{"userName", "path", "extData"}) {
+                            try {
+                                Object v = request.getClass().getField(f).get(request);
+                                info.append(' ').append(f).append('=').append(v);
+                            } catch (Throwable ignored) {}
                         }
+                        MainHook.log("LotteryProbe sendReq WXLaunchMiniProgram" + info);
                     }
-                    return chain.proceed();
+                    long now = SystemClock.uptimeMillis();
+                    Object result = chain.proceed();
+                    if (isMini) {
+                        // sendReq 返回 false = SDK 内部拒绝（未安装/不支持等）
+                        MainHook.log("LotteryProbe sendReq result=" + result
+                                + " armed=" + WINDOW.isActive(now)
+                                + " manual=" + WINDOW.manualSinceArm(now));
+                    }
+                    return result;
                 });
             }
         } catch (Throwable t) {
