@@ -802,9 +802,11 @@ public final class UserPagePurifier {
                     MainHook.log("Hidden user asset item: " + item[1]);
                 }
             } else if (target.getVisibility() == View.GONE) {
-                // 开关已关闭但视图仍是历史隐藏态，恢复显示并还原权重
+                // 开关已关闭但视图仍是历史隐藏态，恢复显示并还原权重；
+                // 同时恢复被历史误 GONE 的资产行祖先（整行被收起的场景）
                 target.setVisibility(View.VISIBLE);
                 restoreLayoutParams(target);
+                restoreAssetAncestors(target);
                 MainHook.log("Restored user asset item: " + item[1]);
             }
         }
@@ -814,13 +816,55 @@ public final class UserPagePurifier {
     private static View enclosingExclusiveContainer(View node, String keyword) {
         View best = node;
         View cur = node;
-        while (cur.getParent() instanceof View) {
+        // 限制爬升层数：宿主重渲染中「卡券/红包」文本可能尚未可读，
+        // 无限爬升会越过资产行整行并把整行 GONE（连带其它未隐藏子项）
+        int depth = 0;
+        while (cur.getParent() instanceof View && depth < 3) {
             View parent = (View) cur.getParent();
             if (subtreeHasOtherEntries(parent, keyword)) break;
             best = parent;
             cur = parent;
+            depth++;
         }
         return best;
+    }
+
+    /**
+     * 恢复被历史误 GONE 的、仅承载资产行的祖先（曾因爬升过度把资产行
+     * 整行隐藏）：向上若干层，只恢复「子树不含活动入口/其它板块文案」
+     * 的 GONE 祖先，避免把活动行或卡片整壳恢复出来。
+     */
+    private static void restoreAssetAncestors(View node) {
+        View cur = node;
+        int depth = 0;
+        while (cur.getParent() instanceof View && depth < 4) {
+            View parent = (View) cur.getParent();
+            String text = subtreeText(parent);
+            boolean otherSection = false;
+            for (String[] it : MENU_ITEMS) {
+                if (text.contains(it[1])) {
+                    otherSection = true;
+                    break;
+                }
+            }
+            if (!otherSection) {
+                for (String key : new String[]{"可提现蚕豆", "累计团员", "信用极好",
+                        "全部订单", "待上传", "上传凭证"}) {
+                    if (text.contains(key)) {
+                        otherSection = true;
+                        break;
+                    }
+                }
+            }
+            if (otherSection) break;
+            if (parent.getVisibility() == View.GONE) {
+                parent.setVisibility(View.VISIBLE);
+                MainHook.log("Restored asset ancestor "
+                        + parent.getClass().getSimpleName());
+            }
+            cur = parent;
+            depth++;
+        }
     }
 
     /** 子树是否出现其它入口/板块文案（与当前关键词互为子串的除外）。 */
@@ -1358,7 +1402,11 @@ public final class UserPagePurifier {
         // 固定高度渲染为空白卡，加上卡片间隙形成截图中的「灰线+空白」。
         // 若卡片壳内已无可见资产行内容，把壳一并 GONE。
         embeddedCardCollapsed = false;
-        if (row.getVisibility() == View.VISIBLE && !rowHasVisibleAssetContent(row)) {
+        // 资产行尚有显示项（未全部隐藏）时不得收壳——壳内可能同时承载
+        // 资产行（元宝/卡券/红包），收壳会把它一并隐藏
+        boolean needAssetRow = !allAssetItemsHidden();
+        if (!needAssetRow && row.getVisibility() == View.VISIBLE
+                && !rowHasVisibleAssetContent(row)) {
             row.setVisibility(View.GONE);
             embeddedCardCollapsed = true;
             MainHook.log("EmbedEntry: empty menu card shell collapsed");
