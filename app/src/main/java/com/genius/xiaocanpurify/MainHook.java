@@ -241,9 +241,10 @@ public final class MainHook extends XposedModule {
             hooked.add(m);
         }
         log("UserMenuDiag methods: " + methods);
-        final java.lang.reflect.Field fList = listField;
         // 数据层按开关剔除隐藏入口：render/renderChallenge 执行前过滤
-        // challengeData 列表，Kuikly 只渲染显示态入口（渲染与数据一致）
+        // challengeData 列表，Kuikly 只渲染显示态入口（渲染与数据一致）。
+        // 只 hook 这两个渲染方法——hook 全部方法会在异常路径返回 null
+        // 击穿宿主渲染协程（实测「我的」页面停在首页）
         final java.lang.reflect.Method renderM;
         final java.lang.reflect.Method renderChallengeM;
         java.lang.reflect.Method rm = null, rcm = null;
@@ -282,32 +283,6 @@ public final class MainHook extends XposedModule {
             } catch (Throwable t) {
                 log("UserMenuDiag: renderChallenge hook failed: " + t);
             }
-        }
-        for (final java.lang.reflect.Method m : hooked) {
-            try {
-                xposed.hook(m).intercept(chain -> {
-                    try {
-                        Object result = chain.proceed();
-                        if (fList != null) {
-                            long now = android.os.SystemClock.uptimeMillis();
-                            if (now - lastMenuListDumpMs > 5000L) {
-                                lastMenuListDumpMs = now;
-                                Object self = chain.getThisObject();
-                                Object v = fList.get(self);
-                                if (v != null) {
-                                    String s = String.valueOf(v);
-                                    log("UserMenuDiag " + m.getName() + " -> "
-                                            + fList.getName() + "="
-                                            + s.substring(0, Math.min(s.length(), 600)));
-                                }
-                            }
-                        }
-                        return result;
-                    } catch (Throwable ignored) {
-                        return null;
-                    }
-                });
-            } catch (Throwable ignored) {}
         }
     }
 
