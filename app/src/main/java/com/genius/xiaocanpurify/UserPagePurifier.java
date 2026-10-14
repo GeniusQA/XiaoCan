@@ -1686,6 +1686,7 @@ public final class UserPagePurifier {
 
     /** 被居中子项挂的布局监听，还原时移除。 */
     private static final java.util.WeakHashMap<View, View.OnLayoutChangeListener> CENTERED_LISTENERS =
+            new java.util.WeakHashMap<>();
 
     private static final java.util.WeakHashMap<View, Integer> SAVED_WIDTHS = new java.util.WeakHashMap<>();
 
