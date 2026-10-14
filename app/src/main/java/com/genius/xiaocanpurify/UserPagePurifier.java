@@ -545,6 +545,14 @@ public final class UserPagePurifier {
                                 hide = true;
                             } else if (sName.contains("MatchPlacement")) {
                                 hide = PurifyPrefs.hide(PurifyPrefs.USER_OTHER_MATCH);
+                            } else if (sName.contains("ChallengeWheel")) {
+                                // 活动行下方「免单资格 + 挑战赛进度」轮播卡：数据
+                                // 由 ShowChallengeWheel 状态驱动（日志确认）。开关
+                                // 开启时整状态吞掉——宿主不渲染，两页（免单页 +
+                                // 挑战赛进度页）与指示器彻底消失；这是唯一可靠路径
+                                //（视图层 GONE 会与 Kuikly 绘制脱同步，实测原生树
+                                // 已 GONE 但绘制层仍显示该卡）。
+                                hide = PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY);
                             }
                             if (hide) {
                                 MainHook.log("Filtered UserCenterViewState: " + sName);

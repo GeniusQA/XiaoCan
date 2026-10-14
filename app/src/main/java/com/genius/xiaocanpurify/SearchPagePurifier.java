@@ -126,8 +126,14 @@ public final class SearchPagePurifier {
             if (now - lastStructDumpMs < 5000L) return;
             lastStructDumpMs = now;
             StringBuilder sb = new StringBuilder();
-            dumpLevel(root, sb, 0, 3);
-            MainHook.log("SearchIntel: page=" + activityName + " struct " + sb);
+            dumpLevel(root, sb, 0, 5);
+            // 原生文本 dump：Flutter/Skia 页面文本为空（用于判定渲染方式）
+            StringBuilder tb = new StringBuilder();
+            collectText(root, tb);
+            String all = tb.toString().replace('\n', '|');
+            MainHook.log("SearchIntel: page=" + activityName + " struct " + sb
+                    + " text=\"" + (all.length() > 120 ? all.substring(0, 120) : all)
+                    + "\"");
         } catch (Throwable ignored) {}
     }
 
