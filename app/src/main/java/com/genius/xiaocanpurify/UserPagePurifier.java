@@ -1058,40 +1058,80 @@ public final class UserPagePurifier {
             Long qLast = QUALIFY_THROTTLE.get(root);
             if (qLast != null && qNow - qLast < 3000L) return;
             QUALIFY_THROTTLE.put(root, qNow);
-            String[][] keySets = {
-                    {"订单待免单"},
-                    {"订单待免单", "今日邀"},
-                    {"可免单", "仅需1人"},
-            };
-            View card = null;
-            for (String[] ks : keySets) {
-                String[] nk = new String[ks.length];
-                for (int i = 0; i < ks.length; i++) nk[i] = normalize(ks[i]);
-                card = findSmallestContainingAll((ViewGroup) root, nk);
-                if (card != null) break;
-            }
-            if (card == null) return;
             boolean restored = false;
-            if (card.getVisibility() != View.VISIBLE) {
-                card.setVisibility(View.VISIBLE);
-                restored = true;
-            }
-            View cur = card;
-            int depth = 0;
-            while (cur.getParent() instanceof View && depth < 4) {
-                View p = (View) cur.getParent();
-                if (subtreeHasOtherSection(subtreeText(p))) break;
-                if (p.getVisibility() == View.GONE) {
-                    p.setVisibility(View.VISIBLE);
-                    restored = true;
+            // 路径 1（主）：按「免单」文本定位横幅卡。实测横幅文案为
+            // 「30000份免单资格大放送」，旧关键词组（订单待免单等）匹配
+            // 不到；且卡片自身多为 VISIBLE、真正被 GONE 的是其祖先容器
+            //（如 RLinearLayout），必须沿链恢复第一个 GONE 祖先
+            java.util.List<View> hits = new java.util.ArrayList<>();
+            collectTextViewsContaining(root, "免单", hits, 4);
+            for (View tv : hits) {
+                String t = String.valueOf(((android.widget.TextView) tv).getText());
+                // 排除活动行「免单资格」入口（4 字）：其祖先（活动行容器）
+                // 可能被单入口嵌入逻辑收起，恢复会破坏嵌入态
+                if (t.length() <= 5) continue;
+                if (embeddedEntryView != null
+                        && isDescendantOrSelf(tv, embeddedEntryView)) continue;
+                View cur = tv;
+                int depth = 0;
+                while (cur != null && depth < 8) {
+                    if (cur.getVisibility() == View.GONE) {
+                        cur.setVisibility(View.VISIBLE);
+                        restored = true;
+                        MainHook.log("Restored qualify banner ancestor "
+                                + cur.getClass().getSimpleName());
+                        break;
+                    }
+                    cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+                    depth++;
                 }
-                cur = p;
-                depth++;
+            }
+            // 路径 2（兜底）：旧文案关键词组，兼容文案变化
+            if (!restored) {
+                String[][] keySets = {
+                        {"订单待免单"},
+                        {"订单待免单", "今日邀"},
+                        {"可免单", "仅需1人"},
+                };
+                View card = null;
+                for (String[] ks : keySets) {
+                    String[] nk = new String[ks.length];
+                    for (int i = 0; i < ks.length; i++) nk[i] = normalize(ks[i]);
+                    card = findSmallestContainingAll((ViewGroup) root, nk);
+                    if (card != null) break;
+                }
+                if (card != null) {
+                    if (card.getVisibility() != View.VISIBLE) {
+                        card.setVisibility(View.VISIBLE);
+                        restored = true;
+                    }
+                    View cur = card;
+                    int depth = 0;
+                    while (cur.getParent() instanceof View && depth < 4) {
+                        View p = (View) cur.getParent();
+                        if (subtreeHasOtherSection(subtreeText(p))) break;
+                        if (p.getVisibility() == View.GONE) {
+                            p.setVisibility(View.VISIBLE);
+                            restored = true;
+                        }
+                        cur = p;
+                        depth++;
+                    }
+                }
             }
             if (restored) {
                 MainHook.log("Restored free-order qualify card");
             }
         } catch (Throwable ignored) {}
+    }
+
+    /** v 是否等于 ref 或位于 ref 子树内（父链比较）。 */
+    private static boolean isDescendantOrSelf(View v, View ref) {
+        for (View cur = v; cur != null;
+                cur = cur.getParent() instanceof View ? (View) cur.getParent() : null) {
+            if (cur == ref) return true;
+        }
+        return false;
     }
 
     /**
@@ -1141,17 +1181,21 @@ public final class UserPagePurifier {
             if (PurifyPrefs.hide(item[0])) {
                 if (target.getVisibility() != View.GONE) {
                     target.setVisibility(View.GONE);
-                    // 清掉行内等分权重，让同行剩余入口重新铺满，UI 不留空洞
-                    collapseLayoutParams(target);
                     MainHook.log("Hidden user asset item: " + item[1]);
                 }
-            } else if (target.getVisibility() == View.GONE) {
-                // 开关已关闭但视图仍是历史隐藏态，恢复显示并还原权重；
-                // 同时恢复被历史误 GONE 的资产行祖先（整行被收起的场景）
-                target.setVisibility(View.VISIBLE);
+            } else {
+                // 开关关闭（不隐藏）：恢复历史隐藏态 + 恢复被误 GONE 的
+                // 资产行祖先；并且【无条件】还原历史被改的布局参数——
+                // 旧逻辑用 collapseLayoutParams 清过同行等分权重/宽度，
+                // 而还原只在 visibility==GONE 时执行：宿主重渲染复位
+                // visibility 后参数永久残留错乱，表现为资产行剩余项被
+                // 挤压/文字宽度为 0（用户截图）。此处改为始终还原。
+                if (target.getVisibility() == View.GONE) {
+                    target.setVisibility(View.VISIBLE);
+                    restoreAssetAncestors(target);
+                    MainHook.log("Restored user asset item: " + item[1]);
+                }
                 restoreLayoutParams(target);
-                restoreAssetAncestors(target);
-                MainHook.log("Restored user asset item: " + item[1]);
             }
         }
     }
