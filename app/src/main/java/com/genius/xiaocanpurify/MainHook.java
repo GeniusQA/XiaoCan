@@ -129,9 +129,9 @@ public final class MainHook extends XposedModule {
         }
 
         try {
-            hookCarouselDiag(classLoader);
+            hookAutoLoopCarouselFix(xposed, classLoader);
         } catch (Throwable t) {
-            log("CarouselDiag install error: " + t);
+            log("AutoLoopCarouselFix install error: " + t);
         }
 
         try {
@@ -216,49 +216,45 @@ public final class MainHook extends XposedModule {
     }
 
     /**
-     * 轮播组件运行时诊断：宿主 classes.dex 为加固壳（静态反编译不可行），
-     * 在宿主进程内反射 dump Kuikly 轮播相关类的类存在性与方法签名，
-     * 确定「翻到空页」问题的 hook 点。
+     * 禁用 Kuikly AutoLoopCarousel 自动翻页。
+     *
+     * 根因（运行时诊断确认）：「我」页活动入口轮播由
+     * {@code UserChallengeViewExtKt.initChallengeView} 用
+     * {@code AutoLoopCarousel(items, autoPlay, interval, ...)} 构建，
+     * 翻页由协程按 autoPlay/interval 循环调用
+     * {@code AutoLoopCarousel$animateToNext} 驱动。被隐藏入口 GONE 后
+     * 第 2 页无内容——Kuikly 绘制层翻到第 2 页即渲染空白（原生视图树
+     * 仍停在第 1 页，故 hit-test 有效、点击可跳转，表现为「入口短暂
+     * 显示后变空白但可点击」）。
+     *
+     * 修复：拦截 animateToNext 使其不执行——轮播恒停在第 1 页（含全部
+     * 可见入口），空页永不出现。手动浏览场景此轮播为纯展示，无影响。
      */
-    private static void hookCarouselDiag(ClassLoader cl) {
-        String[] candidates = {
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$1",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$2",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$3$1",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$4",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$4$1",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$5$1",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$5$3",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$6",
-                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$animateToNext$1",
-                "com.realtech.user.pages.ext.UserChallengeViewExtKt",
-        };
-        for (String name : candidates) {
+    private static void hookAutoLoopCarouselFix(XposedInterface xposed, ClassLoader cl) {
+        final Class<?> kt;
+        try {
+            kt = Class.forName(
+                    "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt", false, cl);
+        } catch (Throwable t) {
+            log("AutoLoopCarouselFix: class not found: " + t);
+            return;
+        }
+        int hooked = 0;
+        for (java.lang.reflect.Method m : kt.getDeclaredMethods()) {
+            if (!"AutoLoopCarousel$animateToNext".equals(m.getName())) continue;
             try {
-                Class<?> c = Class.forName(name, false, cl);
-                StringBuilder sb = new StringBuilder();
-                for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
-                    sb.append(m.getName()).append('(').append(m.getParameterCount())
-                            .append(")->").append(m.getReturnType().getSimpleName())
-                            .append("; ");
-                }
-                StringBuilder fs = new StringBuilder();
-                for (java.lang.reflect.Field f : c.getDeclaredFields()) {
-                    f.setAccessible(true);
-                    fs.append(f.getType().getSimpleName()).append(' ')
-                            .append(f.getName()).append("; ");
-                }
-                log("CarouselDiag " + name.substring(name.lastIndexOf('.') + 1)
-                        + " methods: " + sb);
-                if (fs.length() > 0) {
-                    log("CarouselDiag " + name.substring(name.lastIndexOf('.') + 1)
-                            + " fields: " + fs);
-                }
+                m.setAccessible(true);
+                xposed.hook(m).intercept(chain -> {
+                    // 禁用自动翻页：第 2 页为被隐藏入口的空页，翻页即空白
+                    return null;
+                });
+                hooked++;
             } catch (Throwable t) {
-                log("CarouselDiag " + name + " -> " + t);
+                log("AutoLoopCarouselFix: hook " + m + " failed: " + t);
             }
         }
+        log("AutoLoopCarouselFix: animateToNext hooked x" + hooked
+                + " (auto-advance disabled)");
     }
 
     /**
