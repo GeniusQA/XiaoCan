@@ -1700,6 +1700,32 @@ public final class UserPagePurifier {
                         rv.scrollTo(0, 0);
                         MainHook.log("AssetPolish: carousel snapped back to page 1");
                     }
+                    // 入口列表渲染自愈：实测「入口区空白但仍可点击」时视图树
+                    // 全维度正常（alpha=1/globalVisible=true/loc 正常/items 可见）
+                    // ——Kuikly 渲染层未录制该子树（RenderNode 缺失），
+                    // hit-test 按视图树所以点击有效。对每个新出现的入口列表
+                    // 实例，布局完成后延迟 1.5 秒执行一次 remove+re-add，强制
+                    // ViewRootImpl 重建该子树渲染节点（每个实例只做一次，
+                    // 页面重建产生的新实例再各自自愈一次）
+                    final ViewGroup fRv = rv;
+                    if (!ENTRY_HEALED.containsKey(fRv) && rv.getWidth() > 0) {
+                        ENTRY_HEALED.put(fRv, Boolean.TRUE);
+                        rv.postDelayed(() -> {
+                            try {
+                                if (!fRv.isAttachedToWindow()) return;
+                                if (!(fRv.getParent() instanceof ViewGroup)) return;
+                                ViewGroup p = (ViewGroup) fRv.getParent();
+                                int idx = p.indexOfChild(fRv);
+                                if (idx < 0) return;
+                                ViewGroup.LayoutParams lp = fRv.getLayoutParams();
+                                p.removeView(fRv);
+                                p.addView(fRv, idx, lp);
+                                MainHook.log("EntryHeal: re-attached entry list to rebuild rendering");
+                            } catch (Throwable t) {
+                                MainHook.log("EntryHeal error: " + t);
+                            }
+                        }, 1500L);
+                    }
                 }
             }
             // 入口定位诊断：页面根全树搜索「免费抽奖」可读文本
@@ -2238,6 +2264,9 @@ public final class UserPagePurifier {
     private static volatile long lastPageRootSearchMs;
     /** 待免单横幅/入口链诊断上次执行时间（3 秒节流）。 */
     private static volatile long lastBannerDiagMs;
+    /** 已执行过渲染自愈（remove+re-add）的入口列表实例。 */
+    private static final java.util.WeakHashMap<View, Boolean> ENTRY_HEALED =
+            new java.util.WeakHashMap<>();
 
     /** 清零视图的 LinearLayout weight（缓存原值供 restoreLayoutParams 还原）。 */
     private static void collapseLayoutParams(View view) {
