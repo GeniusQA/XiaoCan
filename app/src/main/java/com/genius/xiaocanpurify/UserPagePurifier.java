@@ -119,7 +119,11 @@ public final class UserPagePurifier {
      */
     private static void filterStateLists(Object state, String sName) {
         boolean menu = sName.contains("Menu") || sName.contains("Challenge");
-        boolean asset = sName.contains("YuanBao");
+        // 资产行不再走状态层过滤：数据层剔除后宿主按剩余项重算卡片高度，
+        // 下方活动行随之上移与资产行挤在一起（用户实测）。改由视图层处理
+        //（GONE 隐藏项让宿主收起空白并重排 + 锁定资产行卡片原高度），
+        // 这样行内正常重排、两行间距保持宿主原样。
+        boolean asset = false;
         if (!menu && !asset) return;
         // 保底日志（5 秒节流）：确认状态层过滤路径确实在运行
         try {
@@ -1208,17 +1212,17 @@ public final class UserPagePurifier {
             new java.util.WeakHashMap<>();
 
     /**
-     * 向上寻找「资产行容器」：从项容器出发，第一个「除当前分支外还有可见
-     * 子视图」的容器即行容器（如元宝项容器的父 = 装三项的行容器）；
-     * 3 层内找不到则返回最上层容器（嵌套场景兜底）。
+     * 向上寻找「资产行卡片容器」：优先 CardView 外壳（宿主资产行卡片，
+     * 锁它的高度才能让下方活动行位置不受行内重排影响）；找不到才退回
+     * 「除当前分支外还有可见子视图」的行容器判据。
      */
     private static View findAssetRowContainer(View target) {
         View cur = target;
-        View last = null;
+        View last = target;
         int depth = 0;
-        while (cur.getParent() instanceof ViewGroup && depth < 3) {
-            ViewGroup p = (ViewGroup) cur.getParent();
-            if (hasOtherVisibleContent(p, cur)) return p;
+        while (cur.getParent() instanceof View && depth < 8) {
+            View p = (View) cur.getParent();
+            if (p.getClass().getName().contains("CardView")) return p;
             last = p;
             cur = p;
             depth++;
