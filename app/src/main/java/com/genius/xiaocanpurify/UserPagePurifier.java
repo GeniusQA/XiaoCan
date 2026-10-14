@@ -104,8 +104,7 @@ public final class UserPagePurifier {
                                     || sName.contains("BaiduAd")
                                     || (sName.contains("MatchPlacement") && PurifyPrefs.hide(PurifyPrefs.USER_OTHER_MATCH))
                                     // 活动行/资产行：仅当全部子项开关都勾选隐藏时才整行拦截；
-                                    // 否则必须放行渲染，由 filterMenuItems/filterAssetItems 逐项过滤，
-                                    // 保证关掉单个开关后对应入口能恢复显示
+                                    // 否则由下方状态层列表过滤处理（框架只渲染剩余项）
                                     || (sName.contains("Challenge") && allMenuItemsHidden())
                                     || (sName.contains("YuanBao") && allAssetItemsHidden());
                             if (hide) {
@@ -1670,15 +1669,25 @@ public final class UserPagePurifier {
                                 .append('[').append(it.getLeft()).append(',')
                                 .append(it.getTranslationX()).append(' ')
                                 .append(it.getWidth()).append('x').append(it.getHeight())
-                                .append(it.getVisibility() == View.VISIBLE ? "" : " G");
+                                .append(it.getVisibility() == View.VISIBLE ? "" : " G")
+                                .append(" a=").append(it.getAlpha());
                         String t = subtreeText(it);
                         if (t.length() > 0) {
                             itemDiag.append(" \"").append(t, 0, Math.min(24, t.length())).append('"');
                         }
                         itemDiag.append(']');
                     }
+                    int[] rvLoc = new int[2];
+                    rv.getLocationOnScreen(rvLoc);
+                    android.graphics.Rect rvClip = new android.graphics.Rect();
+                    boolean rvGlobalVisible = rv.getGlobalVisibleRect(rvClip);
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
+                            + " alpha=" + rv.getAlpha()
+                            + " loc=(" + rvLoc[0] + "," + rvLoc[1] + ")"
+                            + " shown=" + rv.isShown()
+                            + " globalVisible=" + rvGlobalVisible
+                            + " clip=" + rvClip
                             + " items=" + itemDiag);
                     // 实测：对 Kuikly 自绘 RecyclerView 强制 setTranslationX
                     // 会与其渲染管线冲突——刷新完成后宿主重绘时纹理失效，
