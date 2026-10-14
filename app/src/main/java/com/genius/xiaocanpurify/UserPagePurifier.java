@@ -1778,24 +1778,28 @@ public final class UserPagePurifier {
 
         // 原入口一并隐藏：宿主不再复位行可见性（与全隐藏收起的稳定路径一致）
         entry.setVisibility(View.GONE);
-        // 只收起承载入口的子容器：layoutMenu 可能同时承载资产行（元宝/卡券/红包），
-        // 整个 layoutMenu GONE 会把资产行连带藏掉——向上爬到不含资产行关键词的最高层
+        // 只收起「除入口外已无可见内容」的容器。原判据用文本关键词
+        //（元宝/卡券/红包）判断该层是否还装着资产行——Kuikly 自绘视图
+        // 常读不到文本，判据失效会一路向上把承载资产行/免单横幅的容器
+        // 一起 GONE（实测：资产行与免单卡开关均为「不隐藏」却看不到）。
+        // 且旧逻辑在爬升被中断时仍会 GONE 入口的直接父容器——直接父
+        // 常同时承载资产行（layoutMenu），同样误伤。现改为：仅当某层
+        // 「除入口分支外再无可见子视图」时才收起该层，否则一律不动。
         ViewGroup collapseTarget = null;
         View cur = entry;
         while (cur != row && cur != null) {
             View p = cur.getParent() instanceof View ? (View) cur.getParent() : null;
-            if (!(p instanceof ViewGroup)) break;
-            String t = subtreeText(p);
-            if (t.contains("元宝") || t.contains("卡券") || t.contains("红包")) break;
+            if (!(p instanceof ViewGroup) || p == row) break;
+            if (hasOtherVisibleContent((ViewGroup) p, cur)) break;
             collapseTarget = (ViewGroup) p;
             cur = p;
         }
-        if (collapseTarget == null) {
-            collapseTarget = entry.getParent() instanceof ViewGroup
-                    ? (ViewGroup) entry.getParent() : null;
-        }
         if (collapseTarget != null) {
             collapseTarget.setVisibility(View.GONE);
+            MainHook.log("EmbedEntry: collapsed empty entry container "
+                    + collapseTarget.getClass().getSimpleName());
+        } else {
+            MainHook.log("EmbedEntry: entry container kept (has other visible content)");
         }
         // 实测：收起入口子容器后，活动行卡片壳（row=MaterialCardView）仍以
         // 固定高度渲染为空白卡，加上卡片间隙形成截图中的「灰线+空白」。
@@ -1822,6 +1826,18 @@ public final class UserPagePurifier {
         installEmbeddedTapForwarder(slot);
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
+    }
+
+    /** 容器内除 exclude 分支外是否还有可见的直接子视图（不依赖文本）。 */
+    private static boolean hasOtherVisibleContent(ViewGroup parent, View exclude) {
+        try {
+            for (int i = 0; i < parent.getChildCount(); i++) {
+                View c = parent.getChildAt(i);
+                if (c == exclude) continue;
+                if (c.getVisibility() == View.VISIBLE) return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     /** 快照区域点击转发的已安装根视图（避免重复安装/跨页面残留）。 */
