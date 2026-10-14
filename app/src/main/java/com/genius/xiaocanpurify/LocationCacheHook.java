@@ -145,6 +145,16 @@ public final class LocationCacheHook {
             try {
                 if ("onLocationChanged".equals(method.getName()) && args != null && args.length >= 2) {
                     int error = (Integer) args[1];
+                    // 真实硬件定位（gps/fused）永远透传并刷新缓存：设备上其它
+                    // 定位模块会伪造 isProviderEnabled=false，isGpsActuallyEnabled()
+                    // 据此误判「GPS 关闭」，把用户打开 GPS 后的真实定位也替换成
+                    // 缓存回放——顶部地址栏拿不到新定位，入口随之消失
+                    if (isRealHardwareFix(args[0])) {
+                        if (error == errorOk()) {
+                            cacheSnapshot(args[0]);
+                        }
+                        return dispatchOriginal(method, args);
+                    }
                     if (isGpsActuallyEnabled()) {
                         if (error == errorOk()) {
                             // GPS 开启：定位成功，刷新缓存并透传真实位置
@@ -175,6 +185,20 @@ public final class LocationCacheHook {
                 MainHook.log("LocationCache: Tencent listener invoke error: " + t);
                 // 回调异常绝不能逃逸到宿主的 JNI/平台线程边界，否则进程会被 SIGSEGV(SI_USER) 强杀
                 return dispatchOriginalSafe(method, args);
+            }
+        }
+
+        /** 判断 TencentLocation 是否来自真实硬件定位（gps/fused provider）。 */
+        private static boolean isRealHardwareFix(Object location) {
+            if (location == null) return false;
+            try {
+                java.lang.reflect.Method m = location.getClass()
+                        .getMethod("getProvider");
+                Object p = m.invoke(location);
+                String provider = p == null ? "" : String.valueOf(p).toLowerCase();
+                return provider.contains("gps") || provider.contains("fused");
+            } catch (Throwable t) {
+                return false;
             }
         }
 

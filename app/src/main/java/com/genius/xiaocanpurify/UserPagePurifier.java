@@ -1609,6 +1609,45 @@ public final class UserPagePurifier {
                                     ? (View) c2.getParent() : null;
                         }
                         MainHook.log("AssetPolish: assetRow chain " + rc);
+                        // 轮播区（含指示器的高容器）子结构：确认两页是
+                        // 两套子视图还是一个视图切换（入口空白 ⟺ 免单页）
+                        if (assetRow instanceof ViewGroup) {
+                            ViewGroup rg = (ViewGroup) assetRow;
+                            for (int i = 0; i < rg.getChildCount(); i++) {
+                                View child = rg.getChildAt(i);
+                                if (child.getHeight() < 100
+                                        || child.getVisibility() != View.VISIBLE) {
+                                    continue;
+                                }
+                                if (child instanceof android.widget.LinearLayout) {
+                                    continue;
+                                }
+                                if (child.getClass().getName().contains("RecyclerView")) {
+                                    continue;
+                                }
+                                if (!(child instanceof ViewGroup)) continue;
+                                ViewGroup cg = (ViewGroup) child;
+                                if (cg.getChildCount() == 0) continue;
+                                StringBuilder sb = new StringBuilder();
+                                for (int j = 0; j < cg.getChildCount(); j++) {
+                                    View gc = cg.getChildAt(j);
+                                    sb.append(gc.getClass().getSimpleName()).append('[')
+                                            .append(gc.getWidth()).append('x')
+                                            .append(gc.getHeight())
+                                            .append(gc.getVisibility() == View.VISIBLE
+                                                    ? "" : " G");
+                                    String t = subtreeText(gc);
+                                    if (t.length() > 0) {
+                                        sb.append(" \"").append(t, 0,
+                                                Math.min(20, t.length())).append('"');
+                                    }
+                                    sb.append(']');
+                                }
+                                MainHook.log("AssetPolish: carousel area "
+                                        + cg.getClass().getSimpleName()
+                                        + " children=" + sb);
+                            }
+                        }
                     }
                 }
             } catch (Throwable ignored) {}

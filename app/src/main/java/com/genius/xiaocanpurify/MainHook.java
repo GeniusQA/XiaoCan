@@ -135,6 +135,12 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            hookChallengeIndexDiag(xposed, classLoader);
+        } catch (Throwable t) {
+            log("ChallengeIndexDiag install error: " + t);
+        }
+
+        try {
             PopupBlocker.install(xposed, classLoader);
             log("PopupBlocker installed successfully.");
         } catch (Throwable t) {
@@ -306,6 +312,57 @@ public final class MainHook extends XposedModule {
                 log("AutoLoopCarouselFix: AutoLoopCarousel(9) hooked for dump");
             } catch (Throwable t) {
                 log("AutoLoopCarouselFix: AutoLoopCarousel(9) hook failed: " + t);
+            }
+        }
+    }
+
+    /** renderChallengeIndex 上次参数快照（值变化才打日志）。 */
+    private static volatile String lastChallengeIndexArgs;
+
+    /**
+     * 「我」页挑战/免单两页轮播的诊断：UserChallengeViewExtKt
+     * .renderChallengeIndex 是"渲染指定挑战页"的入口（每 3 秒翻页时被
+     * 调用）——dump 其参数类型与值，定位页索引驱动，确认是否可固定
+     * 停留在含入口的页（入口区空白 ⟺ 轮播切到免单页）。
+     */
+    private static void hookChallengeIndexDiag(XposedInterface xposed, ClassLoader cl) {
+        final Class<?> kt;
+        try {
+            kt = Class.forName(
+                    "com.realtech.user.pages.ext.UserChallengeViewExtKt", false, cl);
+        } catch (Throwable t) {
+            log("ChallengeIndexDiag: class not found: " + t);
+            return;
+        }
+        for (java.lang.reflect.Method m : kt.getDeclaredMethods()) {
+            final String name = m.getName();
+            if (!"renderChallengeIndex".equals(name)
+                    && !"access$renderChallengeIndex".equals(name)) {
+                continue;
+            }
+            try {
+                m.setAccessible(true);
+                xposed.hook(m).intercept(chain -> {
+                    try {
+                        StringBuilder sb = new StringBuilder();
+                        for (Object a : chain.getArgs()) {
+                            String s = a == null ? "null"
+                                    : a.getClass().getSimpleName() + "="
+                                            + String.valueOf(a);
+                            if (s.length() > 60) s = s.substring(0, 60);
+                            sb.append('[').append(s).append(']');
+                        }
+                        String snap = name + sb;
+                        if (!snap.equals(lastChallengeIndexArgs)) {
+                            lastChallengeIndexArgs = snap;
+                            log("ChallengeIndex: " + snap);
+                        }
+                    } catch (Throwable ignored) {}
+                    return chain.proceed();
+                });
+                log("ChallengeIndexDiag: " + name + " hooked");
+            } catch (Throwable t) {
+                log("ChallengeIndexDiag: hook " + name + " failed: " + t);
             }
         }
     }
