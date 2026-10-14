@@ -44,6 +44,8 @@ public final class PurifyPrefs {
     public static final String USER_MENU_QUALIFY = "hide_user_menu_qualify";
     // 活动行「签到」入口（接口异常时服务端动态插入）
     public static final String USER_MENU_CHECKIN = "hide_user_menu_checkin";
+    // 活动行「任务领现金」入口（服务端动态下发，此前无对应开关）
+    public static final String USER_MENU_TASK_CASH = "hide_user_menu_task_cash";
     // 「我」页面资产行（元宝 / 卡券 / 红包）子项开关
     public static final String USER_ASSET_YUANBAO = "hide_user_asset_yuanbao";
     public static final String USER_ASSET_COUPON = "hide_user_asset_coupon";

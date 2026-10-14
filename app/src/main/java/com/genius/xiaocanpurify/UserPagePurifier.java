@@ -31,6 +31,10 @@ public final class UserPagePurifier {
         }
     }
 
+    /** StateFilter 保底日志节流（状态类名 -> 上次时间）。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long>
+            STATE_LOG_THROTTLE = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** 活动行入口「文案 -> 隐藏开关」。 */
     private static final String[][] MENU_ITEMS = {
             {PurifyPrefs.USER_MENU_CHALLENGE, "挑战赛"},
@@ -40,6 +44,7 @@ public final class UserPagePurifier {
             {PurifyPrefs.USER_MENU_ELIMINATE, "有奖消消乐"},
             {PurifyPrefs.USER_MENU_QUALIFY, "免单资格"},
             {PurifyPrefs.USER_MENU_CHECKIN, "签到"},
+            {PurifyPrefs.USER_MENU_TASK_CASH, "任务领现金"},
     };
 
     /** 资产行子项「文案 -> 隐藏开关」。 */
@@ -61,6 +66,7 @@ public final class UserPagePurifier {
 
     /** 资产行全部子项都勾选隐藏时返回 true（整行收起）。 */
     private static boolean allAssetItemsHidden() {
+
         for (String[] item : ASSET_ITEMS) {
             if (!PurifyPrefs.hide(item[0])) {
                 return false;
@@ -87,6 +93,8 @@ public final class UserPagePurifier {
                     && s.contains("免单资格")) return true;
             if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_CHECKIN)
                     && (s.contains("签到") || s.contains("签 到"))) return true;
+            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_TASK_CASH)
+                    && s.contains("任务领现金")) return true;
         } catch (Throwable ignored) {}
         return false;
     }
@@ -113,6 +121,17 @@ public final class UserPagePurifier {
         boolean menu = sName.contains("Menu") || sName.contains("Challenge");
         boolean asset = sName.contains("YuanBao");
         if (!menu && !asset) return;
+        // 保底日志（5 秒节流）：确认状态层过滤路径确实在运行
+        try {
+            String key = sName;
+            Long last = STATE_LOG_THROTTLE.get(key);
+            long now = android.os.SystemClock.uptimeMillis();
+            if (last == null || now - last > 5000L) {
+                STATE_LOG_THROTTLE.put(key, now);
+                MainHook.log("StateFilter: enter " + sName
+                        + " fields=" + state.getClass().getDeclaredFields().length);
+            }
+        } catch (Throwable ignored) {}
         try {
             for (Class<?> c = state.getClass(); c != null && c != Object.class;
                     c = c.getSuperclass()) {
@@ -282,19 +301,26 @@ public final class UserPagePurifier {
                             filterStateLists(state, sName);
                         }
                         Object result = chain.proceed();
-                        // 「订单」板块：无稳定 binding 字段，按文案锚点定位整卡
-                        // 隐藏；宿主重渲染会复位，逐次渲染后重放（幂等，已
-                        // GONE 的不重复操作）
-                        if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
-                            try {
-                                Object fragment = chain.getThisObject();
-                                if (fragment != null) {
-                                    Field bf = fragment.getClass().getField("binding");
-                                    Object b = bf.get(fragment);
-                                    if (b != null) hideUserOrderSection(b);
+                        // 渲染后重放（幂等，已隐藏的不重复操作）：
+                        // 1) 资产行（元宝/卡券/红包）——原生布局，逐项按开关过滤
+                        // 2) 「订单」板块——无稳定 binding 字段，按文案锚点整卡隐藏
+                        // 3) 「免单资格卡」横幅——宿主轮播重建会复现，逐次压回
+                        try {
+                            Object fragment = chain.getThisObject();
+                            if (fragment != null) {
+                                Field bf = fragment.getClass().getField("binding");
+                                Object b = bf.get(fragment);
+                                if (b != null) {
+                                    filterAssetItems(b);
+                                    if (PurifyPrefs.hide(PurifyPrefs.USER_ORDER)) {
+                                        hideUserOrderSection(b);
+                                    }
+                                    if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
+                                        hideBindingField(b, "bannerNotice");
+                                    }
                                 }
-                            } catch (Throwable ignored) {}
-                        }
+                            }
+                        } catch (Throwable ignored) {}
                         return result;
                     });
                     MainHook.log("Hooked UserV2Fragment.renderState");
@@ -336,6 +362,8 @@ public final class UserPagePurifier {
             if (allMenuItemsHidden()) {
                 hideBindingLayout(binding, "layoutMenu");
             }
+            // 资产行（原生布局）：逐项按开关过滤（渲染后重放同路径）
+            filterAssetItems(binding);
             if (PurifyPrefs.hide(PurifyPrefs.USER_MERCHANT)) {
                 hideBindingLayout(binding, "layoutUserMerchant");
             }
@@ -678,5 +706,103 @@ public final class UserPagePurifier {
 
     private static String normalize(String text) {
         return text == null ? "" : text.replace(" ", "").replace("\u00a0", "");
+    }
+
+    /* ==================== 资产行（元宝/卡券/红包）UI 层逐项过滤 ==================== */
+    // 资产行是原生 databinding 布局（标签「元宝(1.7w)」等），不经状态层——
+    // 逐项隐藏必须在渲染后按开关对视图操作（幂等，已隐藏的不重复操作）
+
+    /** 行内等分布局：隐藏子项后清掉权重，避免留下空白占位；原权重缓存供恢复用。 */
+    private static final java.util.WeakHashMap<View, Float> SAVED_WEIGHTS =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 隐藏资产行（元宝 / 卡券 / 红包）中被勾选的子项。
+     * 标签文本是精确文案（可带括号计数，如「元宝(1.3w)」），
+     * 命中后向上找最近的可点击父容器整体隐藏，避免只藏文字留下图标。
+     */
+    private static void filterAssetItems(Object binding) {
+        View root = getBindingRoot(binding);
+        if (root == null) return;
+        for (String[] item : ASSET_ITEMS) {
+            View label = findLabelView(root, item[1]);
+            if (label == null) continue;
+            // 向上爬到「子树不含其它入口文案」的最大安全容器：防止整行容器
+            // 可点击时把元宝/卡券/红包同行其它入口一起隐藏
+            View target = enclosingExclusiveContainer(label, item[1]);
+            if (target == null) continue;
+            if (PurifyPrefs.hide(item[0])) {
+                if (target.getVisibility() != View.GONE) {
+                    target.setVisibility(View.GONE);
+                    // 清掉行内等分权重，让同行剩余入口重新铺满，UI 不留空洞
+                    collapseLayoutParams(target);
+                    MainHook.log("Hidden user asset item: " + item[1]);
+                }
+            } else if (target.getVisibility() == View.GONE) {
+                // 开关已关闭但视图仍是历史隐藏态，恢复显示并还原权重
+                target.setVisibility(View.VISIBLE);
+                restoreLayoutParams(target);
+                MainHook.log("Restored user asset item: " + item[1]);
+            }
+        }
+    }
+
+    /** 从命中节点向上爬到「子树不含其它入口文案」的最大安全容器。 */
+    private static View enclosingExclusiveContainer(View node, String keyword) {
+        View best = node;
+        View cur = node;
+        while (cur.getParent() instanceof View) {
+            View parent = (View) cur.getParent();
+            if (subtreeHasOtherEntries(parent, keyword)) break;
+            best = parent;
+            cur = parent;
+        }
+        return best;
+    }
+
+    /** 子树是否出现其它入口/板块文案（与当前关键词互为子串的除外）。 */
+    private static boolean subtreeHasOtherEntries(View view, String keyword) {
+        String text = subtreeText(view);
+        if (text.isEmpty()) return false;
+        for (String[] item : MENU_ITEMS) {
+            if (isExclusionKeyword(keyword, item[1]) && text.contains(item[1])) return true;
+        }
+        for (String[] item : ASSET_ITEMS) {
+            if (isExclusionKeyword(keyword, item[1]) && text.contains(item[1])) return true;
+        }
+        return subtreeHasOtherSection(text)
+                || text.contains("全部订单") || text.contains("待上传");
+    }
+
+    /** 排除词与当前关键词互不为子串时才生效，避免「红包」误伤「红包雨」自身。 */
+    private static boolean isExclusionKeyword(String keyword, String other) {
+        return !keyword.contains(other) && !other.contains(keyword);
+    }
+
+    /** 清零视图的 LinearLayout weight（缓存原值供 restoreLayoutParams 还原）。 */
+    private static void collapseLayoutParams(View view) {
+        try {
+            android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                android.widget.LinearLayout.LayoutParams llp = (android.widget.LinearLayout.LayoutParams) lp;
+                if (!SAVED_WEIGHTS.containsKey(view)) SAVED_WEIGHTS.put(view, llp.weight);
+                llp.weight = 0f;
+                view.setLayoutParams(lp);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 恢复开关关闭前缓存的原有权重，让行内等分布局还原。 */
+    private static void restoreLayoutParams(View view) {
+        try {
+            android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp instanceof android.widget.LinearLayout.LayoutParams) {
+                Float weight = SAVED_WEIGHTS.get(view);
+                if (weight != null) {
+                    ((android.widget.LinearLayout.LayoutParams) lp).weight = weight;
+                    view.setLayoutParams(lp);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 }
