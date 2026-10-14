@@ -308,6 +308,7 @@ public final class PopupBlocker {
                             MainHook.log("Blocked GlobalDialogQueue marketing dialog");
                             return null;
                         }
+                        dumpDialogInfo("GlobalDialogQueue", dialogInfo);
                         return chain.proceed();
                     });
                     MainHook.log("Hooked GlobalDialogQueue.show");
@@ -326,12 +327,31 @@ public final class PopupBlocker {
                             MainHook.log("Blocked DialogQueueManager.showDialog marketing dialog");
                             return null;
                         }
+                        dumpDialogInfo("DialogQueueManager", dialogInfo);
                         return chain.proceed();
                     });
                     MainHook.log("Hooked DialogQueueManager.showDialog");
                     break;
                 }
             }
+        } catch (Throwable ignored) {}
+    }
+
+    /** 弹窗标识 dump 上次时间（3 秒节流）。 */
+    private static volatile long lastDialogInfoDumpMs;
+
+    /**
+     * 诊断：dump 未被拦截的 Kuikly 弹窗队列入参标识，便于按真实标识
+     * 补充关键词（首页免单弹窗 / 关注引导弹窗 / 绑定客服弹窗）。
+     */
+    private static void dumpDialogInfo(String from, Object dialogInfo) {
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastDialogInfoDumpMs < 3000L) return;
+            lastDialogInfoDumpMs = now;
+            String s = String.valueOf(dialogInfo);
+            MainHook.log("DialogQueueInfo(" + from + "): "
+                    + (s.length() > 160 ? s.substring(0, 160) : s));
         } catch (Throwable ignored) {}
     }
 
@@ -360,7 +380,13 @@ public final class PopupBlocker {
                 || t.contains("withdraw")
                 || t.contains("withdrawal")
                 || t.contains("lottery")
-                || t.contains("coupon");
+                || t.contains("coupon")
+                // 首页免单资格弹窗 / 关注引导弹窗 / 绑定客服弹窗
+                || t.contains("qualify")
+                || t.contains("kefu")
+                || t.contains("customer")
+                || t.contains("follow")
+                || t.contains("attention");
     }
 
     private static boolean isMarketingDialogInfo(Object dialogInfo) {
@@ -380,7 +406,16 @@ public final class PopupBlocker {
                 || str.contains("ops")
                 || str.contains("annual")
                 || str.contains("withdraw")
-                || str.contains("withdrawal");
+                || str.contains("withdrawal")
+                // 首页免单资格弹窗 / 订单页关注引导弹窗 / 绑定客服弹窗
+                || str.contains("qualify")
+                || str.contains("free_order")
+                || str.contains("freeorder")
+                || str.contains("kefu")
+                || str.contains("customer")
+                || str.contains("follow")
+                || str.contains("attention")
+                || str.contains("bind");
     }
 
     private static void dismissIfDialog(Object obj) {
