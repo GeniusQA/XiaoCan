@@ -369,17 +369,26 @@ public final class UserPagePurifier {
                 if (menuRoot != null) {
                     View top = menuRoot;
                     while (top.getParent() instanceof View) top = (View) top.getParent();
-                    for (String name : new String[]{"banner_notice", "banner_challenge"}) {
-                        int id = top.getResources().getIdentifier(
-                                name, "id", top.getContext().getPackageName());
-                        View bn = id != 0 ? top.findViewById(id) : null;
-                        MainHook.log("QBanner: " + name + " id=" + id
-                                + " bn=" + (bn != null)
-                                + " vis=" + (bn != null ? bn.getVisibility() : -1));
-                        if (bn != null && bn.getVisibility() != View.GONE) {
-                            bn.setVisibility(View.GONE);
-                            MainHook.log("Hidden " + name + " (qualify banner)");
-                        }
+                    // 只隐藏真正的免单资格横幅 banner_notice。
+                    // banner_challenge 是活动入口轮播容器（challenge=挑战赛），
+                    // 此前被一并 GONE（误当免单横幅）——实测：下拉刷新后宿主
+                    // 重建使其短暂 VISIBLE（入口短暂显示），随即被本逻辑再次
+                    // GONE（入口永久空白）；而 Kuikly 触摸路由不随原生可见性
+                    // 失效，空白区域仍可点击跳转。此处不再隐藏它。
+                    int idNotice = top.getResources().getIdentifier(
+                            "banner_notice", "id", top.getContext().getPackageName());
+                    View bn = idNotice != 0 ? top.findViewById(idNotice) : null;
+                    if (bn != null && bn.getVisibility() != View.GONE) {
+                        bn.setVisibility(View.GONE);
+                        MainHook.log("Hidden banner_notice (qualify banner)");
+                    }
+                    // 恢复历史版本误 GONE 的入口轮播容器
+                    int idChallenge = top.getResources().getIdentifier(
+                            "banner_challenge", "id", top.getContext().getPackageName());
+                    View bc = idChallenge != 0 ? top.findViewById(idChallenge) : null;
+                    if (bc != null && bc.getVisibility() != View.VISIBLE) {
+                        bc.setVisibility(View.VISIBLE);
+                        MainHook.log("Restored banner_challenge (menu carousel container)");
                     }
                 } else {
                     MainHook.log("QBanner: menu binding root null");
