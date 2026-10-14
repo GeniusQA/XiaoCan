@@ -1576,6 +1576,42 @@ public final class UserPagePurifier {
                             ? ((android.widget.LinearLayout) cardGroup).getGravity()
                             : -1)
                     + " children=" + diag + " rowChildren=" + rowDiag);
+            // 诊断：入口区空白机制定位——「待免单」横幅视图链（它到底是
+            // banner_notice 还是独立视图）与入口 RecyclerView 祖先链的
+            // 可见性对照（空白时入口区被谁隐藏/分页状态）
+            try {
+                if (nowMs - lastBannerDiagMs > 3000L) {
+                    lastBannerDiagMs = nowMs;
+                    View pageRoot = getBindingRoot(binding);
+                    if (pageRoot != null) {
+                        View wait = findTextContaining(pageRoot, "待免单");
+                        StringBuilder wc = new StringBuilder();
+                        View c2 = wait;
+                        for (int i = 0; c2 != null && i < 6; i++) {
+                            wc.append(c2.getClass().getSimpleName()).append('[')
+                                    .append(c2.getWidth()).append('x')
+                                    .append(c2.getHeight())
+                                    .append(c2.getVisibility() == View.VISIBLE ? "" : " G")
+                                    .append("]<-");
+                            c2 = c2.getParent() instanceof View
+                                    ? (View) c2.getParent() : null;
+                        }
+                        MainHook.log("AssetPolish: 待免单 chain " + wc);
+                        StringBuilder rc = new StringBuilder();
+                        c2 = assetRow;
+                        for (int i = 0; c2 != null && i < 6; i++) {
+                            rc.append(c2.getClass().getSimpleName()).append('[')
+                                    .append(c2.getWidth()).append('x')
+                                    .append(c2.getHeight())
+                                    .append(c2.getVisibility() == View.VISIBLE ? "" : " G")
+                                    .append("]<-");
+                            c2 = c2.getParent() instanceof View
+                                    ? (View) c2.getParent() : null;
+                        }
+                        MainHook.log("AssetPolish: assetRow chain " + rc);
+                    }
+                }
+            } catch (Throwable ignored) {}
             // 轮播子 item 诊断：两页轮播（入口分页）自动翻到空页时表现为
             // 「入口短暂显示又隐藏」——dump 每个页 item 的边界/可见性/文本
             // 与 RecyclerView 滚动偏移，确认空白页归属
@@ -2152,6 +2188,8 @@ public final class UserPagePurifier {
             new java.util.WeakHashMap<>();
     /** 页面根入口搜索上次执行时间（5 秒节流）。 */
     private static volatile long lastPageRootSearchMs;
+    /** 待免单横幅/入口链诊断上次执行时间（3 秒节流）。 */
+    private static volatile long lastBannerDiagMs;
 
     /** 清零视图的 LinearLayout weight（缓存原值供 restoreLayoutParams 还原）。 */
     private static void collapseLayoutParams(View view) {
