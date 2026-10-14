@@ -1186,6 +1186,29 @@ public final class UserPagePurifier {
     private static final java.util.WeakHashMap<View, Float> SAVED_WEIGHTS =
             new java.util.WeakHashMap<>();
 
+    /** 资产行容器原始高度（minHeight 锁定用；宿主重渲染复位后每次重放补设）。 */
+    private static final java.util.WeakHashMap<View, Integer> ROW_ORIG_H =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 向上寻找「资产行容器」：从项容器出发，第一个「除当前分支外还有可见
+     * 子视图」的容器即行容器（如元宝项容器的父 = 装三项的行容器）；
+     * 3 层内找不到则返回最上层容器（嵌套场景兜底）。
+     */
+    private static View findAssetRowContainer(View target) {
+        View cur = target;
+        View last = null;
+        int depth = 0;
+        while (cur.getParent() instanceof ViewGroup && depth < 3) {
+            ViewGroup p = (ViewGroup) cur.getParent();
+            if (hasOtherVisibleContent(p, cur)) return p;
+            last = p;
+            cur = p;
+            depth++;
+        }
+        return last;
+    }
+
     /**
      * 隐藏资产行（元宝 / 卡券 / 红包）中被勾选的子项。
      * 标签文本是精确文案（可带括号计数，如「元宝(1.3w)」），
@@ -1202,22 +1225,31 @@ public final class UserPagePurifier {
             View target = enclosingExclusiveContainer(label, item[1]);
             if (target == null) continue;
             if (PurifyPrefs.hide(item[0])) {
-                if (target.getVisibility() != View.GONE) {
-                    View parent = target.getParent() instanceof View
-                            ? (View) target.getParent() : null;
-                    int savedH = parent != null ? parent.getHeight() : 0;
-                    target.setVisibility(View.GONE);
-                    // GONE 让宿主收起空白、按剩余项数量重新排版（空位不再
-                    // 保留）；同时把行容器的原高度锁进 minHeight——否则宿主
-                    // 重算行高变矮，下方活动行随之上移与资产行挤在一起
-                    //（用户实测）。minHeight 只影响"最低高度"，剩余项重排
-                    // 照常由宿主完成。
-                    if (savedH > 0 && parent != null
-                            && parent.getMinimumHeight() < savedH) {
-                        parent.setMinimumHeight(savedH);
+                // 行容器 = 向上第一个"还有其它可见子视图"的容器（项容器
+                // 直接父通常是资产行；嵌套时继续向上）
+                View row = findAssetRowContainer(target);
+                if (row != null) {
+                    Integer orig = ROW_ORIG_H.get(row);
+                    if (orig == null && row.getHeight() > 0) {
+                        orig = row.getHeight();
+                        ROW_ORIG_H.put(row, orig);
                     }
-                    MainHook.log("Hidden user asset item: " + item[1]
-                            + " keepH=" + savedH);
+                    // 每次重放都补设 minHeight：宿主重渲染会复位该值，只在
+                    // 首次隐藏时设置会被冲掉（实测活动行仍上移）。GONE 让
+                    // 宿主收起空白、按剩余项数量重排；minHeight 锁住行高，
+                    // 活动行位置不受影响。
+                    if (orig != null && row.getMinimumHeight() < orig) {
+                        row.setMinimumHeight(orig);
+                    }
+                    if (target.getVisibility() != View.GONE) {
+                        target.setVisibility(View.GONE);
+                        MainHook.log("Hidden user asset item: " + item[1]
+                                + " rowH=" + orig + " row="
+                                + row.getClass().getSimpleName());
+                    }
+                } else if (target.getVisibility() != View.GONE) {
+                    target.setVisibility(View.GONE);
+                    MainHook.log("Hidden user asset item: " + item[1] + " (no row)");
                 }
             } else {
                 // 开关关闭（不隐藏）：恢复显示并还原布局参数
