@@ -348,10 +348,26 @@ public final class UserPagePurifier {
                                                     (ViewGroup) layoutMenu);
                                             if (!embedded) {
                                                 // 多入口：宿主按原 5 槽位排版，剩余入口
-                                                // 集中在左侧——用 padding 把可见入口组合
-                                                // 水平居中（原生布局属性，不影响渲染管线）
-                                                ViewGroup rv = findMenuRecycler((ViewGroup) layoutMenu);
-                                                if (rv != null) centerMenuEntriesInRow(rv);
+                                                // 集中在左侧并贴住资产行——用 padding 把
+                                                // 可见入口组合居中并补足上间距（原生布局
+                                                // 属性，不影响渲染管线）。全页扫描节流 2 秒
+                                                try {
+                                                    View centerRoot = getBindingRoot(b);
+                                                    long centerNow = android.os.SystemClock
+                                                            .uptimeMillis();
+                                                    Long centerLast = ENTRY_CENTER_THROTTLE
+                                                            .get(centerRoot);
+                                                    if (centerRoot != null
+                                                            && (centerLast == null
+                                                                    || centerNow - centerLast > 2000L)) {
+                                                        ENTRY_CENTER_THROTTLE.put(centerRoot,
+                                                                centerNow);
+                                                        ViewGroup rv = findEntryRecycler(centerRoot);
+                                                        if (rv != null) {
+                                                            centerMenuEntriesInRow(rv);
+                                                        }
+                                                    }
+                                                } catch (Throwable ignored) {}
                                             }
                                         }
                                     } catch (Throwable ignored) {}
@@ -764,23 +780,40 @@ public final class UserPagePurifier {
      */
     /** 免单卡未命中诊断上次输出时间（10 秒节流）。 */
     private static volatile long lastQualifyMissMs;
+    /** 免单卡全页查找节流（页面根 -> 上次时间，3 秒）。 */
+    private static final java.util.WeakHashMap<View, Long> QUALIFY_THROTTLE =
+            new java.util.WeakHashMap<>();
+    /** 入口居中全页查找节流（页面根 -> 上次时间，2 秒）。 */
+    private static final java.util.WeakHashMap<View, Long> ENTRY_CENTER_THROTTLE =
+            new java.util.WeakHashMap<>();
 
     private static void hideFreeOrderQualifyCard(Object binding) {
         try {
             View root = getBindingRoot(binding);
             if (!(root instanceof ViewGroup)) return;
-            // 多组候选关键词：不同版本横幅文案略有差异，任一组同现即命中
+            long qNow = android.os.SystemClock.uptimeMillis();
+            Long qLast = QUALIFY_THROTTLE.get(root);
+            if (qLast != null && qNow - qLast < 3000L) return;
+            QUALIFY_THROTTLE.put(root, qNow);
+            // 多组候选关键词：不同版本横幅文案略有差异，任一组命中即用。
+            // 「订单待免单」单关键词最优先——命中标题文本容器后向整卡扩展
             String[][] keySets = {
+                    {"订单待免单"},
                     {"订单待免单", "今日邀"},
                     {"可免单", "仅需1人"},
                     {"待免单", "抽免单资格"},
             };
             View card = null;
-            for (String[] ks : keySets) {
+            int hitSet = -1;
+            for (int s = 0; s < keySets.length; s++) {
+                String[] ks = keySets[s];
                 String[] nk = new String[ks.length];
                 for (int i = 0; i < ks.length; i++) nk[i] = normalize(ks[i]);
                 card = findSmallestContainingAll((ViewGroup) root, nk);
-                if (card != null) break;
+                if (card != null) {
+                    hitSet = s;
+                    break;
+                }
             }
             if (card != null && card.getVisibility() != View.GONE) {
                 // 命中最小子树后向上扩展到整卡：祖先仍属横幅（不含其它
@@ -796,8 +829,11 @@ public final class UserPagePurifier {
                     depth++;
                 }
                 full.setVisibility(View.GONE);
-                MainHook.log("Hidden free-order qualify card ("
-                        + full.getClass().getSimpleName() + ")");
+                String t = subtreeText(full);
+                MainHook.log("Hidden free-order qualify card set#" + hitSet
+                        + " " + full.getClass().getSimpleName()
+                        + " " + full.getWidth() + "x" + full.getHeight()
+                        + " txt=" + (t.length() > 40 ? t.substring(0, 40) : t));
             } else if (card == null) {
                 long now = android.os.SystemClock.uptimeMillis();
                 if (now - lastQualifyMissMs > 10000L) {
@@ -982,22 +1018,28 @@ public final class UserPagePurifier {
         f.setInt(target, value);
     }
 
-    /** 在活动行子树里找承载入口的 RecyclerView。 */
-    private static ViewGroup findMenuRecycler(ViewGroup parent) {
-        for (int i = 0; i < parent.getChildCount(); i++) {
-            View c = parent.getChildAt(i);
-            if (!(c instanceof ViewGroup)) continue;
-            if (c.getClass().getName().contains("RecyclerView")) return (ViewGroup) c;
-            ViewGroup deeper = findMenuRecycler((ViewGroup) c);
-            if (deeper != null) return deeper;
+    /** 全页查找承载入口的 RecyclerView（子树含显示态入口文案）。 */
+    private static ViewGroup findEntryRecycler(View root) {
+        if (!(root instanceof ViewGroup)) return null;
+        ViewGroup g = (ViewGroup) root;
+        if (g.getClass().getName().contains("RecyclerView")) {
+            String t = subtreeText(g);
+            for (String[] item : MENU_ITEMS) {
+                if (PurifyPrefs.hide(item[0])) continue;
+                if (t.contains(normalize(item[1]))) return g;
+            }
+        }
+        for (int i = 0; i < g.getChildCount(); i++) {
+            ViewGroup found = findEntryRecycler(g.getChildAt(i));
+            if (found != null) return found;
         }
         return null;
     }
 
     /**
-     * 多入口时把可见入口组合水平居中：宿主按原槽位数排版，隐藏后剩余
-     * 入口集中在左侧。用 padding 补偿（原生布局属性，一次设置幂等，
-     * 不影响 Kuikly 渲染管线）。
+     * 多入口时把可见入口组合水平居中并保证与资产行之间有呼吸间距：
+     * 宿主按原槽位数排版，隐藏后剩余入口集中在左侧且上移贴住资产行。
+     * 用 padding 补偿（原生布局属性，一次设置幂等，不影响渲染管线）。
      */
     private static void centerMenuEntriesInRow(ViewGroup rv) {
         try {
@@ -1014,11 +1056,18 @@ public final class UserPagePurifier {
             }
             int pad = (rv.getWidth() - total) / 2 - firstLeft;
             if (pad < 0) pad = 0;
-            if (rv.getPaddingLeft() != pad) {
-                rv.setPadding(pad, rv.getPaddingTop(), rv.getPaddingRight(),
+            int padTop = rv.getPaddingTop();
+            int minTop = dp(rv, 16);
+            boolean changed = false;
+            if (padTop < minTop) {
+                padTop = minTop;
+                changed = true;
+            }
+            if (rv.getPaddingLeft() != pad || changed) {
+                rv.setPadding(pad, padTop, rv.getPaddingRight(),
                         rv.getPaddingBottom());
-                MainHook.log("CenterMenu: entries centered, pad=" + pad
-                        + " total=" + total);
+                MainHook.log("CenterMenu: entries centered pad=" + pad
+                        + " padTop=" + padTop + " total=" + total);
             }
         } catch (Throwable ignored) {}
     }
@@ -1539,9 +1588,14 @@ public final class UserPagePurifier {
      */
     private static View resolveEmbeddedEntryTarget(View fallback) {
         if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
+            // 单入口时 findItemView 命中的可能是容器（RecyclerView）——
+            // 必须下探到入口叶子，否则点击坐标用容器中心、命中落空
+            View leaf = deepenEntry(embeddedEntryView);
             MainHook.log("EmbedEntry resolve: entry alive "
-                    + embeddedEntryView.getClass().getSimpleName());
-            return embeddedEntryView;
+                    + embeddedEntryView.getClass().getSimpleName()
+                    + " -> leaf " + leaf.getClass().getSimpleName()
+                    + " " + leaf.getWidth() + "x" + leaf.getHeight());
+            return leaf;
         }
         // 宿主重渲染可能更换活动行实例：依次在「当前活动行根」「被收起的
         // 活动行容器」「fallback 子树」中找显示态入口 item——找不到时坐标
@@ -1582,6 +1636,26 @@ public final class UserPagePurifier {
                         : fallback.getClass().getSimpleName()
                                 + " " + fallback.getWidth() + "x" + fallback.getHeight()));
         return fallback;
+    }
+
+    /**
+     * 把可能是容器（RecyclerView 等）的入口引用下探到具体入口叶子，
+     * 便于点击坐标映射到入口实际位置（容器中心 ≠ 入口位置）。
+     */
+    private static View deepenEntry(View v) {
+        if (v == null) return null;
+        try {
+            String text = subtreeText(v);
+            for (String[] item : MENU_ITEMS) {
+                if (PurifyPrefs.hide(item[0])) continue;
+                String kw = normalize(item[1]);
+                if (text.contains(kw)) {
+                    View leaf = findDeepestEntry(v, kw);
+                    if (leaf != v) return leaf;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return v;
     }
 
     /**
