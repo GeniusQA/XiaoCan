@@ -350,8 +350,8 @@ public final class UserPagePurifier {
         // Kuikly 纹理层不绘制入口（实测视图树/属性正常但不上屏，原生手段
         // 均无效）——对显示态入口在其 item 内叠加 100% 原生绘制的替代视图
         //（白底+图标+文字，原生子视图必然上屏），隐藏态入口 GONE 已生效
-        if (embeddedSnapshotView == null) {
-            applyNativeEntryOverlay(root, binding);
+        if (embeddedSnapshotView == null && root instanceof ViewGroup) {
+            applyNativeEntryOverlay((ViewGroup) root, binding);
         }
         // 免单资格横幅：实为 banner_notice / banner_challenge 轮播卡
         // （RichFontTextView 富文本渲染，非 TextView，文案匹配找不到；且是
