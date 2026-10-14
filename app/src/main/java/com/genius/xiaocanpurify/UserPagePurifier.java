@@ -438,37 +438,11 @@ public final class UserPagePurifier {
                         }
                     } catch (Throwable ignored) {}
                 } else {
-                    // RecyclerView 等容器：GONE 兄弟仍占位，可见项的布局位置（getLeft）
-                    // 不为 0——必须以实际位置为基准平移。挂布局监听保持每次布局后都居中
-                    final View fEntry = entry;
-                    final ViewGroup fParent = parent;
-                    View.OnLayoutChangeListener l = (v, l2, t2, r2, b2, ol2, ot2, or2, ob2) -> {
-                        try {
-                            if (!CENTERED_CHILDREN.containsKey(v)) return;
-                            ViewGroup p = v.getParent() instanceof ViewGroup
-                                    ? (ViewGroup) v.getParent() : null;
-                            if (p == null) return;
-                            int pw = p.getWidth();
-                            int iw = v.getWidth();
-                            if (pw > 0 && iw > 0) {
-                                float tx = (pw - iw) / 2f - v.getLeft();
-                                if (Math.abs(v.getTranslationX() - tx) > 0.5f) {
-                                    v.setTranslationX(tx);
-                                }
-                            }
-                        } catch (Throwable ignored) {}
-                    };
-                    fEntry.addOnLayoutChangeListener(l);
-                    CENTERED_LISTENERS.put(fEntry, l);
-                    CENTERED_CHILDREN.put(fEntry, fParent);
-                    fParent.post(() -> {
-                        try {
-                            if (CENTERED_CHILDREN.containsKey(fEntry)) {
-                                l.onLayoutChange(fEntry, 0, 0, 0, 0, 0, 0, 0, 0);
-                            }
-                        } catch (Throwable ignored) {}
-                    });
-                    MainHook.log("Centered single menu entry (recycler translate)");
+                    // RecyclerView 等自绘容器：不再做平移居中——实测对
+                    // Kuikly 自绘视图持续 setTranslationX 会与其渲染管线
+                    // 冲突（纹理失效空白但 hit-test 有效）。单入口场景
+                    // 由嵌入蚕豆卡方案负责排版
+                    MainHook.log("CenterMenu: recycler parent, skip translate centering");
                 }
             }
         } else if (visibleEntries != 1 && !CENTERED_CHILDREN.isEmpty()) {
@@ -1622,23 +1596,16 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
-                    // 入口整体平移至轮播区水平居中：原 5 入口均分一行，隐藏
-                    // 后剩余入口集中在左侧、右侧留白——平移恢复原排版观感
-                    //（hit-test 随 translation 移动，点击位置正确）
-                    int first = Integer.MAX_VALUE;
-                    int last = Integer.MIN_VALUE;
-                    for (int j = 0; j < rv.getChildCount(); j++) {
-                        View it = rv.getChildAt(j);
-                        if (it.getVisibility() != View.VISIBLE) continue;
-                        first = Math.min(first, it.getLeft());
-                        last = Math.max(last, it.getLeft() + it.getWidth());
-                    }
-                    if (first != Integer.MAX_VALUE && rv.getWidth() > 0
-                            && last > first) {
-                        float target = (rv.getWidth() - (last - first)) / 2f - first;
-                        if (Math.abs(rv.getTranslationX() - target) > 0.5f) {
-                            rv.setTranslationX(target);
-                        }
+                    // 实测：对 Kuikly 自绘 RecyclerView 强制 setTranslationX
+                    // 会与其渲染管线冲突——刷新完成后宿主重绘时纹理失效，
+                    // 表现为入口空白但 hit-test 有效（可点击跳转）。平移
+                    // 居中已移除，排版由宿主负责。
+                    // 另实测：轮播为两页（指示器 1/2），被隐藏入口 GONE 后
+                    // 第 2 页为空页，宿主自动翻页时表现为「入口短暂显示后
+                    // 变空白」。强制停在第 1 页（含可见入口），不跟随翻空页。
+                    if (rv.getScrollX() != 0) {
+                        rv.scrollTo(0, 0);
+                        MainHook.log("AssetPolish: carousel snapped back to page 1");
                     }
                 }
             }
