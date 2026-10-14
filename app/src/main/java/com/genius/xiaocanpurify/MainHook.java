@@ -210,9 +210,10 @@ public final class MainHook extends XposedModule {
     }
 
     /**
-     * 「我」页活动行（UserMenuModule）数据诊断：dump 字段/方法表 +
-     * 跟踪 challengeList（入口列表数据）的赋值与内容，定位数据源后
-     * 在数据层按开关剔除隐藏入口。
+     * 「我」页活动行（UserMenuModule）字段/方法表诊断 dump。
+     * 注：不做数据层过滤（challengeData 剔除）——入口隐藏统一由
+     * UserPagePurifier 的 UI 层负责：单入口嵌入蚕豆卡、隐藏态 GONE、
+     * 多入口正常排版，Kuikly 渲染层按过滤后的视图状态绘制。
      */
     private static void hookUserMenuDiag(XposedInterface xposed, ClassLoader cl) {
         final Class<?> module;
@@ -223,132 +224,16 @@ public final class MainHook extends XposedModule {
             return;
         }
         StringBuilder fields = new StringBuilder();
-        java.lang.reflect.Field listField = null;
         for (java.lang.reflect.Field f : module.getDeclaredFields()) {
             f.setAccessible(true);
             fields.append(f.getType().getSimpleName()).append(' ').append(f.getName()).append("; ");
-            if (f.getName().toLowerCase().contains("challengelist")
-                    || f.getName().toLowerCase().contains("menulist")
-                    || f.getName().toLowerCase().contains("entrylist")) {
-                listField = f;
-            }
         }
         log("UserMenuDiag fields: " + fields);
         StringBuilder methods = new StringBuilder();
-        java.util.List<java.lang.reflect.Method> hooked = new java.util.ArrayList<>();
         for (java.lang.reflect.Method m : module.getDeclaredMethods()) {
             methods.append(m.getName()).append('(').append(m.getParameterCount()).append("); ");
-            hooked.add(m);
         }
         log("UserMenuDiag methods: " + methods);
-        // 数据层按开关剔除隐藏入口：render/renderChallenge 执行前过滤
-        // challengeData 列表，Kuikly 只渲染显示态入口（渲染与数据一致）。
-        // 只 hook 这两个渲染方法——hook 全部方法会在异常路径返回 null
-        // 击穿宿主渲染协程（实测「我的」页面停在首页）
-        final java.lang.reflect.Method renderM;
-        final java.lang.reflect.Method renderChallengeM;
-        java.lang.reflect.Method rm = null, rcm = null;
-        for (java.lang.reflect.Method m : hooked) {
-            if ("render".equals(m.getName()) && m.getParameterCount() == 1) rm = m;
-            if ("renderChallenge".equals(m.getName()) && m.getParameterCount() == 1) rcm = m;
-        }
-        renderM = rm;
-        renderChallengeM = rcm;
-        final java.lang.reflect.Field fData = findFieldRecursive(module, "challengeData");
-        if (renderM != null && fData != null) {
-            try {
-                xposed.hook(renderM).intercept(chain -> {
-                    try {
-                        filterChallengeData(fData, chain.getThisObject());
-                    } catch (Throwable ignored) {}
-                    return chain.proceed();
-                });
-                log("UserMenuDiag: render hooked for data filtering");
-            } catch (Throwable t) {
-                log("UserMenuDiag: render hook failed: " + t);
-            }
-        }
-        if (renderChallengeM != null) {
-            try {
-                xposed.hook(renderChallengeM).intercept(chain -> {
-                    try {
-                        Object arg = chain.getArg(0);
-                        if (arg instanceof java.util.List) {
-                            filterEntryList((java.util.List) arg);
-                        }
-                    } catch (Throwable ignored) {}
-                    return chain.proceed();
-                });
-                log("UserMenuDiag: renderChallenge hooked for data filtering");
-            } catch (Throwable t) {
-                log("UserMenuDiag: renderChallenge hook failed: " + t);
-            }
-        }
-    }
-
-    private static volatile long lastMenuListDumpMs;
-
-    /** 在类及其父类中按名查找字段。 */
-    private static java.lang.reflect.Field findFieldRecursive(Class<?> cls, String name) {
-        for (Class<?> c = cls; c != null; c = c.getSuperclass()) {
-            try {
-                java.lang.reflect.Field f = c.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (Throwable ignored) {}
-        }
-        return null;
-    }
-
-    /**
-     * 按开关过滤 challengeData（实例字段）：元素文本命中被隐藏入口关键词
-     * 的条目从列表剔除。列表元素可能是任意 Bean，用 toString 匹配。
-     */
-    private static void filterChallengeData(java.lang.reflect.Field f, Object self) {
-        try {
-            Object v = f.get(self);
-            if (v instanceof java.util.List) {
-                filterEntryList((java.util.List) v);
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    /** 隐藏开关开启且元素文本命中该入口名时剔除。 */
-    private static boolean entryShouldHide(String s) {
-        if (s == null) return false;
-        try {
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_CHALLENGE)
-                    && s.contains("挑战赛")) return true;
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_LOTTERY)
-                    && s.contains("免费抽奖")) return true;
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_SECRET)
-                    && s.contains("对接暗号")) return true;
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_RAIN)
-                    && s.contains("红包雨")) return true;
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_ELIMINATE)
-                    && s.contains("有奖消消乐")) return true;
-            if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_CHECKIN)
-                    && (s.contains("签到") || s.contains("签 到"))) return true;
-        } catch (Throwable ignored) {}
-        return false;
-    }
-
-    /** 就地过滤入口列表：剔除命中隐藏开关的条目。 */
-    @SuppressWarnings("unchecked")
-    private static void filterEntryList(java.util.List list) {
-        if (list == null || list.isEmpty()) return;
-        java.util.Iterator it = list.iterator();
-        boolean removed = false;
-        while (it.hasNext()) {
-            Object e = it.next();
-            if (entryShouldHide(String.valueOf(e))) {
-                it.remove();
-                removed = true;
-            }
-        }
-        if (removed) {
-            log("UserMenuDiag: challengeData filtered, left=" + list.size());
-        }
     }
 
     public static void log(String message) {

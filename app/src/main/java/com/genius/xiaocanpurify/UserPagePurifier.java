@@ -350,9 +350,9 @@ public final class UserPagePurifier {
         // Kuikly 纹理层不绘制入口（实测视图树/属性正常但不上屏，原生手段
         // 均无效）——对显示态入口在其 item 内叠加 100% 原生绘制的替代视图
         //（白底+图标+文字，原生子视图必然上屏），隐藏态入口 GONE 已生效
-        if (embeddedSnapshotView == null && root instanceof ViewGroup) {
-            applyNativeEntryOverlay((ViewGroup) root, binding);
-        }
+        // Kuikly 纹理层与原生视图树曾出现脱同步（入口不绘制），数据层
+        // 过滤生效后渲染层已恢复——不再叠加原生替代视图，保持原有逻辑
+        //（隐藏态入口 GONE、显示态入口由 Kuikly 按过滤后的数据渲染）
         // 免单资格横幅：实为 banner_notice / banner_challenge 轮播卡
         // （RichFontTextView 富文本渲染，非 TextView，文案匹配找不到；且是
         // layout_menu 的兄弟节点，必须从页面根 findViewById）。
@@ -549,14 +549,6 @@ public final class UserPagePurifier {
             }
             MainHook.log("EmbedEntry: visibleEntries=" + visibleEntries
                     + " skip [" + detail + " ]");
-            // 入口缺失诊断：临时开启 RPC 探针（8 秒），捕获活动入口列表的
-            // 下发接口，为数据层按开关剔除隐藏入口做准备
-            long probeNow = android.os.SystemClock.uptimeMillis();
-            if (probeNow - lastEntryProbeArmMs > 30000L) {
-                lastEntryProbeArmMs = probeNow;
-                NetworkAdInterceptor.armDiscovery(8000);
-                MainHook.log("EmbedEntry: entry missing, RPC discovery armed 8s");
-            }
             // 两个及以上入口可见：嵌入只适用于单入口，立即完全拆除并
             // 恢复活动行（容器链由 filterMenuItems 的祖先链恢复负责）
             if (visibleEntries >= 2 && embeddedSnapshotView != null) {
@@ -1088,109 +1080,6 @@ public final class UserPagePurifier {
             return Math.min(lp.width, lp.height);
         }
         return 0;
-    }
-
-    /** 入口替代覆盖视图缓存（entry -> overlay，弱引用随宿主重建失效）。 */
-    private static final java.util.WeakHashMap<View, View> NATIVE_OVERLAYS =
-            new java.util.WeakHashMap<>();
-
-    /**
-     * 对显示态入口在其 item 内叠加原生替代视图。实测 Kuikly 纹理层不绘制
-     * 入口内容（视图树/属性正常但不上屏，invalidate/translation/数据层
-     * 过滤均无效），而原生子视图的绘制不经过 Kuikly 管线，必然上屏。
-     * 隐藏态入口的 GONE 对 Kuikly 生效（实测不绘制），无需覆盖。
-     */
-    private static void applyNativeEntryOverlay(ViewGroup root, Object binding) {
-        View pageRoot = getBindingRoot(binding);
-        for (String[] item : MENU_ITEMS) {
-            if (PurifyPrefs.hide(item[0])) continue;
-            View entry = findItemView(root, normalize(item[1]));
-            if (entry == null && pageRoot != null) {
-                entry = findItemView(pageRoot, normalize(item[1]));
-            }
-            if (!(entry instanceof ViewGroup)) continue;
-            ViewGroup entryGroup = (ViewGroup) entry;
-            if (entryGroup.getVisibility() != View.VISIBLE) continue;
-            View exist = NATIVE_OVERLAYS.get(entryGroup);
-            if (exist != null && exist.getParent() == entryGroup) continue;
-            if (exist != null) NATIVE_OVERLAYS.remove(entryGroup);
-            View rep = buildNativeEntryReplica(entryGroup);
-            if (rep == null) continue;
-            View host = findFirstFrameLayout(entryGroup,
-                    entryGroup.getWidth(), entryGroup.getHeight());
-            if (host == null) host = entryGroup;
-            try {
-                if (host instanceof android.widget.FrameLayout) {
-                    ((android.widget.FrameLayout) host).addView(rep,
-                            new android.widget.FrameLayout.LayoutParams(
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                    android.view.Gravity.CENTER));
-                } else {
-                    ((ViewGroup) host).addView(rep);
-                }
-                NATIVE_OVERLAYS.put(entryGroup, rep);
-                MainHook.log("NativeEntry: overlay applied to " + item[1]);
-            } catch (Throwable t) {
-                MainHook.log("NativeEntry: overlay failed on " + item[1] + ": " + t);
-            }
-        }
-    }
-
-    /** 构建入口的原生替代视图：白底 + 图标 + 深色文字，水平居中。 */
-    private static View buildNativeEntryReplica(ViewGroup entry) {
-        try {
-            android.widget.LinearLayout box = new android.widget.LinearLayout(
-                    entry.getContext());
-            box.setOrientation(android.widget.LinearLayout.HORIZONTAL);
-            box.setGravity(android.view.Gravity.CENTER);
-            box.setBackgroundColor(android.graphics.Color.WHITE);
-            android.widget.ImageView icon = findFirstImageView(entry);
-            if (icon != null && icon.getDrawable() != null) {
-                android.widget.ImageView iv = new android.widget.ImageView(
-                        entry.getContext());
-                iv.setImageDrawable(icon.getDrawable());
-                int size = dp(entry, 22);
-                android.widget.LinearLayout.LayoutParams ip =
-                        new android.widget.LinearLayout.LayoutParams(size, size);
-                ip.rightMargin = dp(entry, 6);
-                box.addView(iv, ip);
-            }
-            String label = subtreeText(entry);
-            if (label.length() > 0) {
-                android.widget.TextView tv = new android.widget.TextView(
-                        entry.getContext());
-                tv.setText(label);
-                android.widget.TextView srcText = findFirstTextView(entry);
-                tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
-                        srcText != null ? srcText.getTextSize() : dp(entry, 14));
-                tv.setTextColor(0xFF333333);
-                box.addView(tv);
-            }
-            return box;
-        } catch (Throwable t) {
-            MainHook.log("NativeEntry: replica build failed: " + t);
-            return null;
-        }
-    }
-
-    /** 深度优先找第一个全尺寸（≥宿主8成）的 FrameLayout 作为覆盖挂载点。 */
-    private static android.widget.FrameLayout findFirstFrameLayout(
-            View parent, int w, int h) {
-        if (parent instanceof android.widget.FrameLayout
-                && parent.getWidth() >= w * 8 / 10
-                && parent.getHeight() >= h * 8 / 10) {
-            return (android.widget.FrameLayout) parent;
-        }
-        if (parent instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) parent;
-            for (int i = 0; i < g.getChildCount(); i++) {
-                android.widget.FrameLayout f =
-                        findFirstFrameLayout(g.getChildAt(i), w, h);
-                if (f != null) return f;
-            }
-        }
-        return null;
     }
 
     /** 深度优先找第一个 ImageView。 */
@@ -1733,50 +1622,23 @@ public final class UserPagePurifier {
                     MainHook.log("AssetPolish: carousel scrollX=" + rv.getScrollX()
                             + " transX=" + rv.getTranslationX()
                             + " items=" + itemDiag);
-                    // 自愈：视图内容 vs 屏幕内容对比（PixelCopy API26+）。
-                    // 实测：rv.draw 有内容（4% 非白）但屏幕不显示——硬件渲染
-                    // 管线（RenderNode）没录制内容，而 hit-test 按视图树所以
-                    // 点击有效。仅当「视图有内容但屏幕没有」时执行
-                    // remove+re-add，强制 ViewRootImpl 重建该子树渲染
-                    try {
-                        if (nowMs - lastCarouselSampleMs > 5000L
-                                && rv.getWidth() > 0 && rv.getHeight() > 0
-                                && android.os.Build.VERSION.SDK_INT >= 26) {
-                            lastCarouselSampleMs = nowMs;
-                            android.graphics.Bitmap bmp = android.graphics.Bitmap
-                                    .createBitmap(rv.getWidth(), rv.getHeight(),
-                                            android.graphics.Bitmap.Config.ARGB_8888);
-                            android.graphics.Canvas c = new android.graphics.Canvas(bmp);
-                            c.drawColor(android.graphics.Color.WHITE);
-                            rv.draw(c);
-                            int w = bmp.getWidth(), h = bmp.getHeight();
-                            int[] px = new int[w * h];
-                            bmp.getPixels(px, 0, w, 0, 0, w, h);
-                            int nonWhite = 0;
-                            for (int pix : px) {
-                                int r = (pix >> 16) & 0xff, g = (pix >> 8) & 0xff,
-                                        b = pix & 0xff;
-                                if (r < 235 || g < 235 || b < 235) nonWhite++;
-                            }
-                            boolean hasContent = nonWhite > w * h * 3 / 100;
-                            MainHook.log("AssetPolish: carousel draw nonWhite="
-                                    + nonWhite + "/" + (w * h) + " ("
-                                    + (100 * nonWhite / (w * h)) + "%)");
-                            bmp.recycle();
-                            if (hasContent) {
-                                // 文字颜色诊断：确认入口 TextView 是否被置白
-                                int[] loc2 = new int[2];
-                                rv.getLocationOnScreen(loc2);
-                                dumpBand(rv.getRootView(), loc2[1] - 5,
-                                        loc2[1] + rv.getHeight() + 5, 0);
-                                rebuildCarouselRender(rv);
-                            }
-                            if (hasContent) {
-                                rebuildCarouselRender(rv);
-                            }
+                    // 入口整体平移至轮播区水平居中：原 5 入口均分一行，隐藏
+                    // 后剩余入口集中在左侧、右侧留白——平移恢复原排版观感
+                    //（hit-test 随 translation 移动，点击位置正确）
+                    int first = Integer.MAX_VALUE;
+                    int last = Integer.MIN_VALUE;
+                    for (int j = 0; j < rv.getChildCount(); j++) {
+                        View it = rv.getChildAt(j);
+                        if (it.getVisibility() != View.VISIBLE) continue;
+                        first = Math.min(first, it.getLeft());
+                        last = Math.max(last, it.getLeft() + it.getWidth());
+                    }
+                    if (first != Integer.MAX_VALUE && rv.getWidth() > 0
+                            && last > first) {
+                        float target = (rv.getWidth() - (last - first)) / 2f - first;
+                        if (Math.abs(rv.getTranslationX() - target) > 0.5f) {
+                            rv.setTranslationX(target);
                         }
-                    } catch (Throwable t) {
-                        MainHook.log("AssetPolish: carousel draw sample error: " + t);
                     }
                 }
             }
@@ -1956,78 +1818,6 @@ public final class UserPagePurifier {
             }
         }
         return changed;
-    }
-
-    /**
-     * 恢复被误杀 GONE 的内容宿主容器（RecyclerView/ViewPager 等轮播列表）。
-     * 活动入口由宿主异步渲染进这些容器，误杀后入口永远不可见。
-     */
-    /**
-     * 轮播渲染自愈检查：PixelCopy 拷贝轮播区域的屏幕实际像素，与视图
-     * 内容对比——「视图有内容但屏幕没有」（RenderNode 未录制）时执行
-     * remove+re-add，强制 ViewRootImpl 重建该子树渲染。
-     */
-    private static void rebuildCarouselRender(ViewGroup rv) {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastCarouselRebuildMs < 10000L) return;
-            lastCarouselRebuildMs = now;
-            android.app.Activity act = null;
-            android.content.Context ctx = rv.getContext();
-            while (ctx instanceof android.content.ContextWrapper) {
-                if (ctx instanceof android.app.Activity) {
-                    act = (android.app.Activity) ctx;
-                    break;
-                }
-                ctx = ((android.content.ContextWrapper) ctx).getBaseContext();
-            }
-            if (act == null) {
-                doRebuild(rv);
-                return;
-            }
-            int[] loc = new int[2];
-            rv.getLocationOnScreen(loc);
-            android.graphics.Rect rect = new android.graphics.Rect(loc[0], loc[1],
-                    loc[0] + rv.getWidth(), loc[1] + rv.getHeight());
-            android.graphics.Bitmap screen = android.graphics.Bitmap.createBitmap(
-                    rv.getWidth(), rv.getHeight(),
-                    android.graphics.Bitmap.Config.ARGB_8888);
-            android.view.PixelCopy.request(act.getWindow(), rect, screen, result -> {
-                try {
-                    int w = screen.getWidth(), h = screen.getHeight();
-                    int[] px = new int[w * h];
-                    screen.getPixels(px, 0, w, 0, 0, w, h);
-                    int nonWhite = 0;
-                    for (int pix : px) {
-                        int r = (pix >> 16) & 0xff, g = (pix >> 8) & 0xff, b = pix & 0xff;
-                        if (r < 235 || g < 235 || b < 235) nonWhite++;
-                    }
-                    boolean screenBlank = nonWhite < w * h / 100;
-                    MainHook.log("AssetPolish: carousel screen nonWhite="
-                            + nonWhite + "/" + (w * h) + " blank=" + screenBlank
-                            + " (PixelCopy result=" + result + ")");
-                    if (screenBlank) doRebuild(rv);
-                    screen.recycle();
-                } catch (Throwable ignored) {}
-            }, new android.os.Handler(android.os.Looper.getMainLooper()));
-        } catch (Throwable t) {
-            MainHook.log("AssetPolish: rebuild check error: " + t);
-        }
-    }
-
-    /** remove+re-add 轮播 RecyclerView，强制 ViewRootImpl 重建渲染。 */
-    private static void doRebuild(ViewGroup rv) {
-        try {
-            ViewGroup parent = (ViewGroup) rv.getParent();
-            if (parent == null) return;
-            int idx = parent.indexOfChild(rv);
-            android.view.ViewGroup.LayoutParams lp = rv.getLayoutParams();
-            parent.removeView(rv);
-            parent.addView(rv, idx, lp);
-            MainHook.log("AssetPolish: carousel re-attached to rebuild rendering");
-        } catch (Throwable t) {
-            MainHook.log("AssetPolish: carousel re-attach error: " + t);
-        }
     }
 
     /** 还原指定深度内此前被隐藏的无文本空壳（分割线/占位）。 */
@@ -2386,13 +2176,8 @@ public final class UserPagePurifier {
             new java.util.WeakHashMap<>();
     /** 页面根入口搜索上次执行时间（5 秒节流）。 */
     private static volatile long lastPageRootSearchMs;
-    /** 入口缺失时 RPC 探针上次布防时间（30 秒节流）。 */
-    private static volatile long lastEntryProbeArmMs;
-    /** 轮播绘制采样上次执行时间（5 秒节流）。 */
-    private static volatile long lastCarouselSampleMs;
-    /** 轮播渲染重建上次执行时间（10 秒节流）。 */
-    private static volatile long lastCarouselRebuildMs;
 
+    /** 清零视图的 LinearLayout weight（缓存原值供 restoreLayoutParams 还原）。 */
     private static void collapseLayoutParams(View view) {
         try {
             android.view.ViewGroup.LayoutParams lp = view.getLayoutParams();
