@@ -241,20 +241,73 @@ public final class MainHook extends XposedModule {
         }
         int hooked = 0;
         for (java.lang.reflect.Method m : kt.getDeclaredMethods()) {
-            if (!"AutoLoopCarousel$animateToNext".equals(m.getName())) continue;
+            String name = m.getName();
+            // Kotlin 编译器的桥接方法 access$AutoLoopCarousel$animateToNext
+            // 才是 lambda/协程实际调用的入口，必须一并拦截
+            boolean isAdvance = "AutoLoopCarousel$animateToNext".equals(name)
+                    || "access$AutoLoopCarousel$animateToNext".equals(name);
+            if (!isAdvance) continue;
             try {
                 m.setAccessible(true);
                 xposed.hook(m).intercept(chain -> {
-                    // 禁用自动翻页：第 2 页为被隐藏入口的空页，翻页即空白
+                    // 禁用自动翻页：空页（免单页被隐藏后）翻页即空白
                     return null;
                 });
                 hooked++;
             } catch (Throwable t) {
-                log("AutoLoopCarouselFix: hook " + m + " failed: " + t);
+                log("AutoLoopCarouselFix: hook " + name + " failed: " + t);
             }
         }
         log("AutoLoopCarouselFix: animateToNext hooked x" + hooked
                 + " (auto-advance disabled)");
+
+        // 两页轮播（1/2 免单信息页、2/2 入口页）：免单页被隐藏后翻到该页
+        // 即空白。本轮先只 dump AutoLoopCarousel(9) 的参数（items 列表
+        // 内容、autoPlay/interval 等）——确认 items 是"页列表"还是"入口
+        // 列表"后再精准过滤（入口列表中含「免单资格」入口，误删风险高）
+        for (java.lang.reflect.Method m : kt.getDeclaredMethods()) {
+            if (!"AutoLoopCarousel".equals(m.getName()) || m.getParameterCount() != 9) {
+                continue;
+            }
+            try {
+                m.setAccessible(true);
+                xposed.hook(m).intercept(chain -> {
+                    try {
+                        Object[] args = chain.getArgs().toArray();
+                        StringBuilder d = new StringBuilder();
+                        for (int i = 0; i < args.length; i++) {
+                            Object a = args[i];
+                            if (a instanceof java.util.List) {
+                                java.util.List list = (java.util.List) a;
+                                StringBuilder sb = new StringBuilder();
+                                int n = 0;
+                                for (Object o : list) {
+                                    if (n++ >= 6) { sb.append("..."); break; }
+                                    String s = String.valueOf(o);
+                                    sb.append('[').append(s.length() > 60
+                                            ? s.substring(0, 60) : s).append(']');
+                                }
+                                d.append(" args[").append(i).append("]List(size=")
+                                        .append(list.size()).append(")=").append(sb);
+                            } else if (a != null) {
+                                String s = String.valueOf(a);
+                                d.append(" args[").append(i).append("]")
+                                        .append(a.getClass().getSimpleName()).append('=')
+                                        .append(s.length() > 30
+                                                ? s.substring(0, 30) : s);
+                            }
+                        }
+                        log("AutoLoopCarousel call:" + d);
+                    } catch (Throwable t) {
+                        log("AutoLoopCarousel dump error: " + t);
+                    }
+                    return chain.proceed();
+                });
+                log("AutoLoopCarouselFix: AutoLoopCarousel(9) hooked for dump");
+            } catch (Throwable t) {
+                log("AutoLoopCarouselFix: AutoLoopCarousel(9) hook failed: " + t);
+            }
+        }
     }
 
     /**
