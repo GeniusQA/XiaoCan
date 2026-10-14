@@ -123,6 +123,13 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            SearchPagePurifier.install(xposed, classLoader);
+            log("SearchPagePurifier installed successfully.");
+        } catch (Throwable t) {
+            log("SearchPagePurifier install error: " + t);
+        }
+
+        try {
             PopupBlocker.install(xposed, classLoader);
             log("PopupBlocker installed successfully.");
         } catch (Throwable t) {

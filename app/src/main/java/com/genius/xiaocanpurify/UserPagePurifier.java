@@ -1202,16 +1202,21 @@ public final class UserPagePurifier {
             View target = enclosingExclusiveContainer(label, item[1]);
             if (target == null) continue;
             if (PurifyPrefs.hide(item[0])) {
-                if (target.getVisibility() != View.GONE) {
-                    target.setVisibility(View.GONE);
-                    MainHook.log("Hidden user asset item: " + item[1]);
+                // 用 INVISIBLE（保留占位）而非 GONE：GONE 会让宿主重新计算
+                // 行内布局——实测会造成活动行上移、与资产行挤在一起，且
+                // Kuikly 自绘层与原生视图树易脱同步（图标/文字错位）。
+                // INVISIBLE 只是不绘制，视图树布局与宿主原样完全一致，
+                // 活动行位置不受任何影响。
+                if (target.getVisibility() != View.INVISIBLE) {
+                    target.setVisibility(View.INVISIBLE);
+                    MainHook.log("Hidden user asset item (invisible): " + item[1]);
                 }
             } else {
-                // 开关关闭（不隐藏）：只还原历史被改的布局参数，【不主动
-                // 恢复可见性】——宿主可能因该项无数据而刻意 GONE，强行
-                // setVisibility(VISIBLE) 会放出空容器/祖先，使卡片高度与
-                // 宿主原布局不同（用户实测：资产行只剩 1-2 项时活动行与
-                // 资产行间距异常，三项齐全时正常）。也不再恢复"祖先"容器。
+                // 开关关闭（不隐藏）：只还原布局参数与可见性，不恢复祖先容器
+                if (target.getVisibility() == View.INVISIBLE) {
+                    target.setVisibility(View.VISIBLE);
+                    MainHook.log("Restored user asset item: " + item[1]);
+                }
                 restoreLayoutParams(target);
             }
         }

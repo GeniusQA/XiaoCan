@@ -82,6 +82,9 @@ public final class PurifyPrefs {
     // 隐藏底部「订单」Tab
     public static final String TAB_ORDER = "hide_tab_order";
 
+    // 搜索页
+    public static final String HIDE_SEARCH_INTEL = "hide_search_intel";
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 

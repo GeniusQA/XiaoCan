@@ -66,6 +66,9 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.USER_OTHER_MATCH, "其他运营匹配模块", "运营位/匹配推广模块"},
                     {PurifyPrefs.USER_BQT, "BQT 营销模块", "BQT 容器营销模块"},
             }},
+            {"搜索页", new String[][]{
+                    {PurifyPrefs.HIDE_SEARCH_INTEL, "「小蚕情报」板块", "搜索页历史搜索下方的商户情报榜单（标题与 5 条商户推荐整块隐藏）"},
+            }},
             {"详情页 / 订单页", new String[][]{
                     {PurifyPrefs.DETAIL_SHARE, "「分享赚豆」浮动入口", "详情页右下角分享赚豆浮标"},
                     {PurifyPrefs.ORDER_CHALLENGE, "霸王餐挑战", "订单页挑战横条与挑战弹窗"},
