@@ -83,7 +83,12 @@ public final class SearchPagePurifier {
 
     private static void apply(View root, String activityName) {
         View title = findTextViewContaining(root, TITLE);
-        if (title == null) return;
+        if (title == null) {
+            // 页面里读不到原生文本（很可能 Flutter/Skia 自绘）：dump 结构
+            // 判定渲染方式，决定后续走通道 hook/网络层而非视图层
+            dumpRootStructure(root, activityName);
+            return;
+        }
         View card = enclosingIntelCard(title, root);
         if (card == null) return;
         // 首次命中时输出一次诊断：宿主页面与卡片链（便于后续精确化）
@@ -109,6 +114,37 @@ public final class SearchPagePurifier {
             MainHook.log("SearchIntel: hidden " + card.getClass().getSimpleName()
                     + " " + card.getWidth() + "x" + card.getHeight());
         }
+    }
+
+    /** 结构 dump 上次时间（5 秒节流）。 */
+    private static volatile long lastStructDumpMs;
+
+    /** 诊断：dump 页面视图结构（3 层），判定是否 Flutter/Skia 自绘页面。 */
+    private static void dumpRootStructure(View root, String activityName) {
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastStructDumpMs < 5000L) return;
+            lastStructDumpMs = now;
+            StringBuilder sb = new StringBuilder();
+            dumpLevel(root, sb, 0, 3);
+            MainHook.log("SearchIntel: page=" + activityName + " struct " + sb);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void dumpLevel(View v, StringBuilder sb, int depth, int maxDepth) {
+        if (v == null) return;
+        sb.append(v.getClass().getSimpleName()).append('[')
+                .append(v.getWidth()).append('x').append(v.getHeight())
+                .append(v.getVisibility() == View.VISIBLE ? "" : " G").append(']');
+        if (depth >= maxDepth || !(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        sb.append('{');
+        int n = Math.min(g.getChildCount(), 8);
+        for (int i = 0; i < n; i++) {
+            dumpLevel(g.getChildAt(i), sb, depth + 1, maxDepth);
+            if (i < n - 1) sb.append(',');
+        }
+        sb.append('}');
     }
 
     /**

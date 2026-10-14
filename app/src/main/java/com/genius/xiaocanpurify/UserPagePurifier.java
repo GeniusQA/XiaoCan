@@ -1129,8 +1129,33 @@ public final class UserPagePurifier {
     private static void hideQualifyCarouselByStructure(Object binding) {
         try {
             View lm = getLayoutRoot(binding, "layoutMenu");
-            if (lm == null || !(lm.getParent() instanceof ViewGroup)) return;
+            if (lm == null || !(lm.getParent() instanceof ViewGroup)) {
+                MainHook.log("QualifyCard: layoutMenu missing (lm="
+                        + (lm != null) + ")");
+                return;
+            }
             ViewGroup card = (ViewGroup) lm.getParent();
+            // 诊断：dump 活动行自身位置/高度与全部兄弟节点结构（类名、top、
+            // 高度、可见性、文本）——定位「轮播控件真名」与「活动行上移」
+            // 的根因（对比隐藏前后 lmTop 即可确认是谁在挤）
+            try {
+                StringBuilder sb = new StringBuilder();
+                sb.append("lmTop=").append(lm.getTop())
+                        .append(" lmH=").append(lm.getHeight()).append(" | ");
+                for (int i = 0; i < card.getChildCount(); i++) {
+                    View c = card.getChildAt(i);
+                    sb.append(c.getClass().getSimpleName()).append('[')
+                            .append(c.getTop()).append('+').append(c.getHeight())
+                            .append(c.getVisibility() == View.VISIBLE ? "" : " G");
+                    String t = subtreeText(c);
+                    if (t.length() > 0) {
+                        sb.append(" \"").append(t, 0, Math.min(16, t.length()))
+                                .append('"');
+                    }
+                    sb.append(']');
+                }
+                MainHook.log("MenuCardDiag: " + sb);
+            } catch (Throwable ignored) {}
             for (int i = 0; i < card.getChildCount(); i++) {
                 View c = card.getChildAt(i);
                 if (c == lm) continue;
