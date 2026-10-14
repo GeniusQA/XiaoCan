@@ -348,24 +348,80 @@ public final class UserPagePurifier {
                 MainHook.log("QualifyDiag: root null");
                 return;
             }
-            java.util.List<View> hits = new java.util.ArrayList<>();
-            collectTextViewsContaining(root, "免单", hits, 4);
-            if (hits.isEmpty()) {
-                MainHook.log("QualifyDiag: no view contains 免单 text");
-            }
-            for (View v : hits) {
-                StringBuilder c = new StringBuilder();
-                View cur = v;
-                for (int i = 0; cur != null && i < 5; i++) {
-                    c.append(cur.getClass().getSimpleName()).append('[')
-                            .append(cur.getWidth()).append('x').append(cur.getHeight())
-                            .append(cur.getVisibility() == View.VISIBLE ? "" : " G")
-                            .append("]<=");
-                    cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+            // 活动行容器（layoutMenu）所在卡片的兄弟节点结构：免单资格红色
+            // 横幅「您有1笔订单待免单」通常作为活动行的兄弟节点存在——dump
+            // 每个子节点的类名/可见性/尺寸/文本，判断它是「宿主未渲染」还是
+            // 「存在但被 GONE」（两种情况的处理方式完全不同）
+            try {
+                View lm = getLayoutRoot(binding, "layoutMenu");
+                if (lm != null && lm.getParent() instanceof ViewGroup) {
+                    ViewGroup card = (ViewGroup) lm.getParent();
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < card.getChildCount(); i++) {
+                        View c = card.getChildAt(i);
+                        sb.append(c.getClass().getSimpleName()).append('[')
+                                .append(c.getWidth()).append('x').append(c.getHeight())
+                                .append(c.getVisibility() == View.VISIBLE ? "" : " G");
+                        String t = subtreeText(c);
+                        if (t.length() > 0) {
+                            sb.append(" \"").append(t, 0, Math.min(24, t.length()))
+                                    .append('"');
+                        }
+                        sb.append(']');
+                    }
+                    MainHook.log("QualifyDiag: menu card("
+                            + card.getClass().getSimpleName()
+                            + " children=" + card.getChildCount() + ") " + sb);
+                } else {
+                    MainHook.log("QualifyDiag: layoutMenu missing for card dump");
                 }
-                String t = String.valueOf(((android.widget.TextView) v).getText());
-                MainHook.log("QualifyDiag: \"" + (t.length() > 24 ? t.substring(0, 24) : t)
-                        + "\" chain " + c);
+            } catch (Throwable t) {
+                MainHook.log("QualifyDiag: card dump error: " + t);
+            }
+            // adContainer 是模块「无条件隐藏」的广告容器：若免单资格横幅被
+            // 宿主归入其中，就会被无条件隐藏（与开关无关）——dump 其内容
+            // 与可见性，确认该横幅是否落在这里
+            try {
+                View ad = null;
+                try {
+                    Field af = binding.getClass().getField("adContainer");
+                    Object o = af.get(binding);
+                    ad = o instanceof View ? (View) o : null;
+                } catch (Throwable ignored) {}
+                if (ad == null) {
+                    MainHook.log("QualifyDiag: adContainer=null");
+                } else {
+                    String t = subtreeText(ad);
+                    MainHook.log("QualifyDiag: adContainer vis=" + ad.getVisibility()
+                            + " " + ad.getWidth() + "x" + ad.getHeight()
+                            + " text=\"" + (t.length() > 40 ? t.substring(0, 40) : t)
+                            + "\"");
+                }
+            } catch (Throwable t2) {
+                MainHook.log("QualifyDiag: adContainer dump error: " + t2);
+            }
+            // 多关键词扫描：确认「您有1笔订单待免单」类文案是否存在
+            for (String kw : new String[]{"免单", "待免单", "您有"}) {
+                java.util.List<View> hits = new java.util.ArrayList<>();
+                collectTextViewsContaining(root, kw, hits, 3);
+                if (hits.isEmpty()) {
+                    MainHook.log("QualifyDiag: no view contains \"" + kw + "\" text");
+                }
+                for (View v : hits) {
+                    StringBuilder c = new StringBuilder();
+                    View cur = v;
+                    for (int i = 0; cur != null && i < 6; i++) {
+                        c.append(cur.getClass().getSimpleName()).append('[')
+                                .append(cur.getWidth()).append('x').append(cur.getHeight())
+                                .append(cur.getVisibility() == View.VISIBLE ? "" : " G")
+                                .append("]<=");
+                        cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
+                    }
+                    String t = String.valueOf(((android.widget.TextView) v).getText());
+                    MainHook.log("QualifyDiag: \"" + kw + "\" \"" 
+                            + (t.length() > 24 ? t.substring(0, 24) : t)
+                            + "\" chain " + c);
+                }
             }
         } catch (Throwable ignored) {}
     }
