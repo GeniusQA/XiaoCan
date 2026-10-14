@@ -130,6 +130,25 @@ public final class UserPagePurifier {
                 STATE_LOG_THROTTLE.put(key, now);
                 MainHook.log("StateFilter: enter " + sName
                         + " fields=" + state.getClass().getDeclaredFields().length);
+                // 诊断：dump ChallengeWheel 字段结构（定位免单卡数据侧隐藏方案）
+                if (sName.contains("ChallengeWheel")) {
+                    StringBuilder fd = new StringBuilder();
+                    for (Class<?> c = state.getClass();
+                            c != null && c != Object.class; c = c.getSuperclass()) {
+                        for (Field f : c.getDeclaredFields()) {
+                            f.setAccessible(true);
+                            try {
+                                Object v = f.get(state);
+                                String s = v == null ? "null" : String.valueOf(v);
+                                if (s.length() > 60) s = s.substring(0, 60);
+                                fd.append(f.getName()).append('(')
+                                        .append(f.getType().getSimpleName())
+                                        .append(")=").append(s).append("; ");
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    MainHook.log("StateFilter: ChallengeWheel fields " + fd);
+                }
             }
         } catch (Throwable ignored) {}
         try {
@@ -325,7 +344,15 @@ public final class UserPagePurifier {
                                     try {
                                         View layoutMenu = getLayoutRoot(b, "layoutMenu");
                                         if (layoutMenu instanceof ViewGroup) {
-                                            embedSingleMenuEntryIntoBeanCard((ViewGroup) layoutMenu);
+                                            boolean embedded = embedSingleMenuEntryIntoBeanCard(
+                                                    (ViewGroup) layoutMenu);
+                                            if (!embedded) {
+                                                // 多入口：宿主按原 5 槽位排版，剩余入口
+                                                // 集中在左侧——用 padding 把可见入口组合
+                                                // 水平居中（原生布局属性，不影响渲染管线）
+                                                ViewGroup rv = findMenuRecycler((ViewGroup) layoutMenu);
+                                                if (rv != null) centerMenuEntriesInRow(rv);
+                                            }
                                         }
                                     } catch (Throwable ignored) {}
                                 }
@@ -735,15 +762,49 @@ public final class UserPagePurifier {
      * 该卡不在 layoutMenu 内，通用最小单项下探只会藏到内部 TextView；
      * 且宿主轮播重建会复现，由 renderState 渲染后路径逐次幂等重放。
      */
+    /** 免单卡未命中诊断上次输出时间（10 秒节流）。 */
+    private static volatile long lastQualifyMissMs;
+
     private static void hideFreeOrderQualifyCard(Object binding) {
         try {
             View root = getBindingRoot(binding);
             if (!(root instanceof ViewGroup)) return;
-            View card = findSmallestContainingAll((ViewGroup) root,
-                    new String[]{normalize("订单待免单"), normalize("今日邀")});
+            // 多组候选关键词：不同版本横幅文案略有差异，任一组同现即命中
+            String[][] keySets = {
+                    {"订单待免单", "今日邀"},
+                    {"可免单", "仅需1人"},
+                    {"待免单", "抽免单资格"},
+            };
+            View card = null;
+            for (String[] ks : keySets) {
+                String[] nk = new String[ks.length];
+                for (int i = 0; i < ks.length; i++) nk[i] = normalize(ks[i]);
+                card = findSmallestContainingAll((ViewGroup) root, nk);
+                if (card != null) break;
+            }
             if (card != null && card.getVisibility() != View.GONE) {
-                card.setVisibility(View.GONE);
-                MainHook.log("Hidden free-order qualify card");
+                // 命中最小子树后向上扩展到整卡：祖先仍属横幅（不含其它
+                // 板块关键词）时继续上爬，避免只藏到内部文本容器留下步骤条
+                View full = card;
+                View cur = card;
+                int depth = 0;
+                while (cur.getParent() instanceof View && depth < 6) {
+                    View p = (View) cur.getParent();
+                    if (subtreeHasOtherSection(subtreeText(p))) break;
+                    full = p;
+                    cur = p;
+                    depth++;
+                }
+                full.setVisibility(View.GONE);
+                MainHook.log("Hidden free-order qualify card ("
+                        + full.getClass().getSimpleName() + ")");
+            } else if (card == null) {
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - lastQualifyMissMs > 10000L) {
+                    lastQualifyMissMs = now;
+                    MainHook.log("QualifyCard: not found by any keyword set"
+                            + " (text unreadable -> need data-side hiding)");
+                }
             }
         } catch (Throwable t) {
             MainHook.log("hideFreeOrderQualifyCard error: " + t);
@@ -919,6 +980,47 @@ public final class UserPagePurifier {
     private static void setIntField(Object target, String name, int value) throws Exception {
         java.lang.reflect.Field f = target.getClass().getField(name);
         f.setInt(target, value);
+    }
+
+    /** 在活动行子树里找承载入口的 RecyclerView。 */
+    private static ViewGroup findMenuRecycler(ViewGroup parent) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View c = parent.getChildAt(i);
+            if (!(c instanceof ViewGroup)) continue;
+            if (c.getClass().getName().contains("RecyclerView")) return (ViewGroup) c;
+            ViewGroup deeper = findMenuRecycler((ViewGroup) c);
+            if (deeper != null) return deeper;
+        }
+        return null;
+    }
+
+    /**
+     * 多入口时把可见入口组合水平居中：宿主按原槽位数排版，隐藏后剩余
+     * 入口集中在左侧。用 padding 补偿（原生布局属性，一次设置幂等，
+     * 不影响 Kuikly 渲染管线）。
+     */
+    private static void centerMenuEntriesInRow(ViewGroup rv) {
+        try {
+            int total = 0;
+            int firstLeft = Integer.MAX_VALUE;
+            for (int i = 0; i < rv.getChildCount(); i++) {
+                View it = rv.getChildAt(i);
+                if (it.getVisibility() != View.VISIBLE || it.getWidth() <= 0) continue;
+                total += it.getWidth();
+                firstLeft = Math.min(firstLeft, it.getLeft());
+            }
+            if (total <= 0 || rv.getWidth() <= total || firstLeft == Integer.MAX_VALUE) {
+                return;
+            }
+            int pad = (rv.getWidth() - total) / 2 - firstLeft;
+            if (pad < 0) pad = 0;
+            if (rv.getPaddingLeft() != pad) {
+                rv.setPadding(pad, rv.getPaddingTop(), rv.getPaddingRight(),
+                        rv.getPaddingBottom());
+                MainHook.log("CenterMenu: entries centered, pad=" + pad
+                        + " total=" + total);
+            }
+        } catch (Throwable ignored) {}
     }
 
     /**
