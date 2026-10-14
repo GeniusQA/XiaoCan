@@ -1098,16 +1098,58 @@ public final class UserPagePurifier {
                         + " " + full.getWidth() + "x" + full.getHeight()
                         + " txt=" + (t.length() > 40 ? t.substring(0, 40) : t));
             } else if (card == null) {
+                // 文案判据失败：该轮播卡由 Kuikly 自绘，文案在原生视图树中
+                // 读不到（日志 proven：not found by any keyword set）。改走
+                // 结构路径：活动行容器（layoutMenu）所在卡片内的轮播控件
+                //（宿主 Banner/ViewPager）即「活动行下方免单+挑战赛轮播卡」。
+                hideQualifyCarouselByStructure(binding);
                 long now = android.os.SystemClock.uptimeMillis();
                 if (now - lastQualifyMissMs > 10000L) {
                     lastQualifyMissMs = now;
                     MainHook.log("QualifyCard: not found by any keyword set"
-                            + " (text unreadable -> need data-side hiding)");
+                            + " -> structure path applied");
                 }
             }
         } catch (Throwable t) {
             MainHook.log("hideFreeOrderQualifyCard error: " + t);
         }
+    }
+
+    /** 结构路径隐藏的轮播控件（供开关关闭时恢复）。 */
+    private static final java.util.WeakHashMap<View, Boolean> QUALIFY_HIDDEN_BY_STRUCT =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 结构路径隐藏「活动行下方免单 + 挑战赛轮播卡」。
+     * 该卡由 Kuikly 自绘，文案在原生视图树中读不到（文案判据必然失败，
+     * 日志已证明）；但其宿主控件是真实 View：位于活动行容器（layoutMenu）
+     * 所在卡片内、类名含 Banner/ViewPager/LoopView。命中控件整体 GONE，
+     * 两页（免单页 + 挑战赛进度页）与指示器一起隐藏。
+     */
+    private static void hideQualifyCarouselByStructure(Object binding) {
+        try {
+            View lm = getLayoutRoot(binding, "layoutMenu");
+            if (lm == null || !(lm.getParent() instanceof ViewGroup)) return;
+            ViewGroup card = (ViewGroup) lm.getParent();
+            for (int i = 0; i < card.getChildCount(); i++) {
+                View c = card.getChildAt(i);
+                if (c == lm) continue;
+                String cls = c.getClass().getName();
+                if (!cls.contains("Banner") && !cls.contains("ViewPager")
+                        && !cls.contains("LoopView")) {
+                    continue;
+                }
+                if (c.getVisibility() != View.GONE) {
+                    c.setVisibility(View.GONE);
+                    QUALIFY_HIDDEN_BY_STRUCT.put(c, Boolean.TRUE);
+                    MainHook.log("Hidden qualify carousel by structure: "
+                            + c.getClass().getSimpleName() + " "
+                            + c.getWidth() + "x" + c.getHeight());
+                } else {
+                    QUALIFY_HIDDEN_BY_STRUCT.put(c, Boolean.TRUE);
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     /**
@@ -1125,6 +1167,19 @@ public final class UserPagePurifier {
             if (qLast != null && qNow - qLast < 3000L) return;
             QUALIFY_THROTTLE.put(root, qNow);
             boolean restored = false;
+            // 结构路径恢复：把结构判据隐藏的轮播控件（Kuikly 自绘卡）放回
+            try {
+                if (!QUALIFY_HIDDEN_BY_STRUCT.isEmpty()) {
+                    for (View v : QUALIFY_HIDDEN_BY_STRUCT.keySet()
+                            .toArray(new View[0])) {
+                        if (v != null && v.getVisibility() == View.GONE) {
+                            v.setVisibility(View.VISIBLE);
+                            MainHook.log("Restored qualify carousel (structure)");
+                        }
+                    }
+                    QUALIFY_HIDDEN_BY_STRUCT.clear();
+                }
+            } catch (Throwable ignored) {}
             // 恢复判据只用精确文案（订单待免单等）。禁止按「免单」泛匹配：
             // 实测会命中底部广告横幅（「30000份免单资格大放送 … 失效」）
             // 的容器并把它从过滤态放出来——它是需要过滤的广告，不是
@@ -1249,6 +1304,22 @@ public final class UserPagePurifier {
                 // 行容器 = 向上第一个"还有其它可见子视图"的容器（项容器
                 // 直接父通常是资产行；嵌套时继续向上）
                 View row = findAssetRowContainer(target);
+                // 尚未完成测量/布局（高 0）时先不隐藏：renderState 重放常
+                // 发生在布局之前，此刻记录会得到 0（实测日志 rowH=null），
+                // minHeight 永远补不上、活动行照样上移。等下一次重放时
+                // 卡片已有真实高度，再记录原高度并隐藏。
+                if (row != null && row.getHeight() <= 0
+                        && target.getVisibility() != View.GONE) {
+                    // 安排一次延迟重试：宿主布局完成后可能不再触发状态
+                    // 重放，否则会永远等不到"可记录原高度"的时机
+                    final Object fb = binding;
+                    row.postDelayed(() -> {
+                        try {
+                            filterAssetItems(fb);
+                        } catch (Throwable ignored) {}
+                    }, 300L);
+                    continue;
+                }
                 if (row != null) {
                     Integer orig = ROW_ORIG_H.get(row);
                     if (orig == null && row.getHeight() > 0) {
@@ -1256,9 +1327,8 @@ public final class UserPagePurifier {
                         ROW_ORIG_H.put(row, orig);
                     }
                     // 每次重放都补设 minHeight：宿主重渲染会复位该值，只在
-                    // 首次隐藏时设置会被冲掉（实测活动行仍上移）。GONE 让
-                    // 宿主收起空白、按剩余项数量重排；minHeight 锁住行高，
-                    // 活动行位置不受影响。
+                    // 首次隐藏时设置会被冲掉。GONE 让宿主收起空白、按剩余
+                    // 项数量重排；minHeight 锁住行高，活动行位置不受影响。
                     if (orig != null && row.getMinimumHeight() < orig) {
                         row.setMinimumHeight(orig);
                     }
