@@ -1202,18 +1202,26 @@ public final class UserPagePurifier {
             View target = enclosingExclusiveContainer(label, item[1]);
             if (target == null) continue;
             if (PurifyPrefs.hide(item[0])) {
-                // 用 INVISIBLE（保留占位）而非 GONE：GONE 会让宿主重新计算
-                // 行内布局——实测会造成活动行上移、与资产行挤在一起，且
-                // Kuikly 自绘层与原生视图树易脱同步（图标/文字错位）。
-                // INVISIBLE 只是不绘制，视图树布局与宿主原样完全一致，
-                // 活动行位置不受任何影响。
-                if (target.getVisibility() != View.INVISIBLE) {
-                    target.setVisibility(View.INVISIBLE);
-                    MainHook.log("Hidden user asset item (invisible): " + item[1]);
+                if (target.getVisibility() != View.GONE) {
+                    View parent = target.getParent() instanceof View
+                            ? (View) target.getParent() : null;
+                    int savedH = parent != null ? parent.getHeight() : 0;
+                    target.setVisibility(View.GONE);
+                    // GONE 让宿主收起空白、按剩余项数量重新排版（空位不再
+                    // 保留）；同时把行容器的原高度锁进 minHeight——否则宿主
+                    // 重算行高变矮，下方活动行随之上移与资产行挤在一起
+                    //（用户实测）。minHeight 只影响"最低高度"，剩余项重排
+                    // 照常由宿主完成。
+                    if (savedH > 0 && parent != null
+                            && parent.getMinimumHeight() < savedH) {
+                        parent.setMinimumHeight(savedH);
+                    }
+                    MainHook.log("Hidden user asset item: " + item[1]
+                            + " keepH=" + savedH);
                 }
             } else {
-                // 开关关闭（不隐藏）：只还原布局参数与可见性，不恢复祖先容器
-                if (target.getVisibility() == View.INVISIBLE) {
+                // 开关关闭（不隐藏）：恢复显示并还原布局参数
+                if (target.getVisibility() == View.GONE) {
                     target.setVisibility(View.VISIBLE);
                     MainHook.log("Restored user asset item: " + item[1]);
                 }
