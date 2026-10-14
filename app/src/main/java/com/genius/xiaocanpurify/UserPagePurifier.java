@@ -1151,17 +1151,11 @@ public final class UserPagePurifier {
                     MainHook.log("Hidden user asset item: " + item[1]);
                 }
             } else {
-                // 开关关闭（不隐藏）：恢复历史隐藏态 + 恢复被误 GONE 的
-                // 资产行祖先；并且【无条件】还原历史被改的布局参数——
-                // 旧逻辑用 collapseLayoutParams 清过同行等分权重/宽度，
-                // 而还原只在 visibility==GONE 时执行：宿主重渲染复位
-                // visibility 后参数永久残留错乱，表现为资产行剩余项被
-                // 挤压/文字宽度为 0（用户截图）。此处改为始终还原。
-                if (target.getVisibility() == View.GONE) {
-                    target.setVisibility(View.VISIBLE);
-                    restoreAssetAncestors(target);
-                    MainHook.log("Restored user asset item: " + item[1]);
-                }
+                // 开关关闭（不隐藏）：只还原历史被改的布局参数，【不主动
+                // 恢复可见性】——宿主可能因该项无数据而刻意 GONE，强行
+                // setVisibility(VISIBLE) 会放出空容器/祖先，使卡片高度与
+                // 宿主原布局不同（用户实测：资产行只剩 1-2 项时活动行与
+                // 资产行间距异常，三项齐全时正常）。也不再恢复"祖先"容器。
                 restoreLayoutParams(target);
             }
         }
@@ -1177,49 +1171,17 @@ public final class UserPagePurifier {
         while (cur.getParent() instanceof View && depth < 3) {
             View parent = (View) cur.getParent();
             if (subtreeHasOtherEntries(parent, keyword)) break;
+            // 可见性判据（文本判据在 Kuikly 自绘视图常失效）：父容器里还有
+            // 别的可见子视图时停止爬升——避免把整个资产行容器 GONE 掉，
+            // 那会连带改变卡片高度与相邻间距（用户实测：资产行只剩 1-2 项
+            // 时活动行间距异常，三项齐全时正常）
+            if (parent instanceof ViewGroup
+                    && hasOtherVisibleContent((ViewGroup) parent, cur)) break;
             best = parent;
             cur = parent;
             depth++;
         }
         return best;
-    }
-
-    /**
-     * 恢复被历史误 GONE 的、仅承载资产行的祖先（曾因爬升过度把资产行
-     * 整行隐藏）：向上若干层，只恢复「子树不含活动入口/其它板块文案」
-     * 的 GONE 祖先，避免把活动行或卡片整壳恢复出来。
-     */
-    private static void restoreAssetAncestors(View node) {
-        View cur = node;
-        int depth = 0;
-        while (cur.getParent() instanceof View && depth < 4) {
-            View parent = (View) cur.getParent();
-            String text = subtreeText(parent);
-            boolean otherSection = false;
-            for (String[] it : MENU_ITEMS) {
-                if (text.contains(it[1])) {
-                    otherSection = true;
-                    break;
-                }
-            }
-            if (!otherSection) {
-                for (String key : new String[]{"可提现蚕豆", "累计团员", "信用极好",
-                        "全部订单", "待上传", "上传凭证"}) {
-                    if (text.contains(key)) {
-                        otherSection = true;
-                        break;
-                    }
-                }
-            }
-            if (otherSection) break;
-            if (parent.getVisibility() == View.GONE) {
-                parent.setVisibility(View.VISIBLE);
-                MainHook.log("Restored asset ancestor "
-                        + parent.getClass().getSimpleName());
-            }
-            cur = parent;
-            depth++;
-        }
     }
 
     /** 子树是否出现其它入口/板块文案（与当前关键词互为子串的除外）。 */
