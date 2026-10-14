@@ -123,6 +123,12 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            hookUserMenuDiag(xposed, classLoader);
+        } catch (Throwable t) {
+            log("UserMenuDiag install error: " + t);
+        }
+
+        try {
             PopupBlocker.install(xposed, classLoader);
             log("PopupBlocker installed successfully.");
         } catch (Throwable t) {
@@ -202,6 +208,69 @@ public final class MainHook extends XposedModule {
 
         log("All XiaoCanPurify hooks successfully initialized!");
     }
+
+    /**
+     * 「我」页活动行（UserMenuModule）数据诊断：dump 字段/方法表 +
+     * 跟踪 challengeList（入口列表数据）的赋值与内容，定位数据源后
+     * 在数据层按开关剔除隐藏入口。
+     */
+    private static void hookUserMenuDiag(XposedInterface xposed, ClassLoader cl) {
+        final Class<?> module;
+        try {
+            module = Class.forName("com.realtech.user.pages.userv2.UserMenuModule", false, cl);
+        } catch (Throwable t) {
+            log("UserMenuDiag: class not found: " + t);
+            return;
+        }
+        StringBuilder fields = new StringBuilder();
+        java.lang.reflect.Field listField = null;
+        for (java.lang.reflect.Field f : module.getDeclaredFields()) {
+            f.setAccessible(true);
+            fields.append(f.getType().getSimpleName()).append(' ').append(f.getName()).append("; ");
+            if (f.getName().toLowerCase().contains("challengelist")
+                    || f.getName().toLowerCase().contains("menulist")
+                    || f.getName().toLowerCase().contains("entrylist")) {
+                listField = f;
+            }
+        }
+        log("UserMenuDiag fields: " + fields);
+        StringBuilder methods = new StringBuilder();
+        java.util.List<java.lang.reflect.Method> hooked = new java.util.ArrayList<>();
+        for (java.lang.reflect.Method m : module.getDeclaredMethods()) {
+            methods.append(m.getName()).append('(').append(m.getParameterCount()).append("); ");
+            hooked.add(m);
+        }
+        log("UserMenuDiag methods: " + methods);
+        final java.lang.reflect.Field fList = listField;
+        for (final java.lang.reflect.Method m : hooked) {
+            try {
+                xposed.hook(m).intercept(chain -> {
+                    try {
+                        Object result = chain.proceed();
+                        if (fList != null) {
+                            long now = android.os.SystemClock.uptimeMillis();
+                            if (now - lastMenuListDumpMs > 5000L) {
+                                lastMenuListDumpMs = now;
+                                Object self = chain.getThisObject();
+                                Object v = fList.get(self);
+                                if (v != null) {
+                                    String s = String.valueOf(v);
+                                    log("UserMenuDiag " + m.getName() + " -> "
+                                            + fList.getName() + "="
+                                            + s.substring(0, Math.min(s.length(), 600)));
+                                }
+                            }
+                        }
+                        return result;
+                    } catch (Throwable ignored) {
+                        return null;
+                    }
+                });
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static volatile long lastMenuListDumpMs;
 
     public static void log(String message) {
         MainHook hook = instance;
