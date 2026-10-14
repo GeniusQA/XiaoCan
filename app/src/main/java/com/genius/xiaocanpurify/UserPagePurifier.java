@@ -337,6 +337,12 @@ public final class UserPagePurifier {
                                     if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
                                         hideBindingField(b, "bannerNotice");
                                         hideFreeOrderQualifyCard(b);
+                                    } else {
+                                        // 开关关闭（不隐藏）：恢复历史被 GONE 的
+                                        // 免单资格横幅实例（开关从开到关后视图
+                                        // 仍是历史隐藏态，宿主复用视图不会自动恢复）
+                                        showBindingField(b, "bannerNotice");
+                                        restoreFreeOrderQualifyCard(b);
                                     }
                                     // 单入口嵌入蚕豆卡：活动行只剩 1 个可见入口时
                                     // 嵌入到「可提现蚕豆/余额」与「提现」按钮中间
@@ -401,6 +407,9 @@ public final class UserPagePurifier {
             // 「免单资格卡」开关：免单资格横幅（下方红色横幅卡）
             if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
                 hideBindingField(binding, "bannerNotice");
+            } else {
+                showBindingField(binding, "bannerNotice");
+                restoreFreeOrderQualifyCard(binding);
             }
             if (PurifyPrefs.hide(PurifyPrefs.FLOATING_WINDOW)) {
                 hideBindingField(binding, "ivFloatingWindow");
@@ -469,6 +478,18 @@ public final class UserPagePurifier {
         } catch (Throwable t) {
             MainHook.log("Failed to hook UserInfoModule: " + t);
         }
+    }
+
+    /** 恢复 binding 字段对应视图的可见性（开关关闭时复位历史隐藏态）。 */
+    private static void showBindingField(Object binding, String fieldName) {
+        try {
+            Field field = binding.getClass().getField(fieldName);
+            View view = (View) field.get(binding);
+            if (view != null && view.getVisibility() != View.VISIBLE) {
+                view.setVisibility(View.VISIBLE);
+                MainHook.log("Restored binding field: " + fieldName);
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static void hideBindingField(Object binding, String fieldName) {
@@ -845,6 +866,56 @@ public final class UserPagePurifier {
         } catch (Throwable t) {
             MainHook.log("hideFreeOrderQualifyCard error: " + t);
         }
+    }
+
+    /**
+     * 恢复历史被隐藏的免单资格横幅（开关从「隐藏」改回「显示」后，
+     * 视图仍是历史 GONE 态；与隐藏同源的关键词定位反向恢复）：
+     * 恢复横幅自身与其「仅承载横幅」的被 GONE 祖先（含其它板块文案
+     * 的祖先不动，避免把无关区域放出）。
+     */
+    private static void restoreFreeOrderQualifyCard(Object binding) {
+        try {
+            View root = getBindingRoot(binding);
+            if (!(root instanceof ViewGroup)) return;
+            long qNow = android.os.SystemClock.uptimeMillis();
+            Long qLast = QUALIFY_THROTTLE.get(root);
+            if (qLast != null && qNow - qLast < 3000L) return;
+            QUALIFY_THROTTLE.put(root, qNow);
+            String[][] keySets = {
+                    {"订单待免单"},
+                    {"订单待免单", "今日邀"},
+                    {"可免单", "仅需1人"},
+            };
+            View card = null;
+            for (String[] ks : keySets) {
+                String[] nk = new String[ks.length];
+                for (int i = 0; i < ks.length; i++) nk[i] = normalize(ks[i]);
+                card = findSmallestContainingAll((ViewGroup) root, nk);
+                if (card != null) break;
+            }
+            if (card == null) return;
+            boolean restored = false;
+            if (card.getVisibility() != View.VISIBLE) {
+                card.setVisibility(View.VISIBLE);
+                restored = true;
+            }
+            View cur = card;
+            int depth = 0;
+            while (cur.getParent() instanceof View && depth < 4) {
+                View p = (View) cur.getParent();
+                if (subtreeHasOtherSection(subtreeText(p))) break;
+                if (p.getVisibility() == View.GONE) {
+                    p.setVisibility(View.VISIBLE);
+                    restored = true;
+                }
+                cur = p;
+                depth++;
+            }
+            if (restored) {
+                MainHook.log("Restored free-order qualify card");
+            }
+        } catch (Throwable ignored) {}
     }
 
     /**
@@ -1385,20 +1456,28 @@ public final class UserPagePurifier {
                     float px = target.getWidth() / 2f;
                     float py = target.getHeight() / 2f;
                     // 诊断：记录入口 → 活动行根 每层的边界、可点击性与监听器，
-                    // 以及入口中心在行根坐标系下的映射结果
+                    // 以及入口中心在行根坐标系下的映射结果；同时选出「最深
+                    // 可点击节点」——Kuikly 原生渲染的入口是真实 View，点击
+                    // 语义挂在自身 onTouchEvent/OnTouchListener 上
                     StringBuilder diag = new StringBuilder();
                     View clickTarget = null;
+                    View deepestClickable = null;
                     while (cur != null && cur.getWidth() > 0 && cur.getHeight() > 0) {
+                        boolean hasL = cur.hasOnClickListeners();
+                        boolean ck = cur.isClickable();
                         diag.append(cur.getClass().getSimpleName())
                                 .append('[').append(cur.getLeft()).append(',')
                                 .append(cur.getTop()).append(' ')
                                 .append(cur.getWidth()).append('x')
                                 .append(cur.getHeight())
-                                .append(cur.isClickable() ? " C" : "")
-                                .append(cur.hasOnClickListeners() ? " L" : "")
+                                .append(ck ? " C" : "")
+                                .append(hasL ? " L" : "")
                                 .append(cur.isShown() ? "" : " H")
                                 .append(']');
-                        if (clickTarget == null && cur.hasOnClickListeners()) {
+                        if (deepestClickable == null && (hasL || ck)) {
+                            deepestClickable = cur;
+                        }
+                        if (clickTarget == null && hasL) {
                             clickTarget = cur;
                         }
                         if (cur == rowTop) break;
@@ -1408,8 +1487,22 @@ public final class UserPagePurifier {
                     }
                     MainHook.log("EmbedEntry: chain " + diag
                             + " -> rowPoint(" + (int) px + "," + (int) py + ")");
-                    // 优先原生点击监听：链上最近的 OnClickListener 最具体，
-                    // performClick 直接触发，无坐标依赖
+                    // 1) 直接向「最深可点击节点」投递合成事件（局部中心点）：
+                    //    dispatchTouchEvent 直接调用会执行该视图自身的
+                    //    OnTouchListener/onTouchEvent——Kuikly 入口的点击语义
+                    //    正挂在此层，且不经父链命中测试，GONE 子树布局冻结
+                    //    导致的坐标漂移不再影响（局部坐标自洽）
+                    if (deepestClickable != null) {
+                        boolean consumed = dispatchSyntheticTapAt(deepestClickable,
+                                deepestClickable.getWidth() / 2f,
+                                deepestClickable.getHeight() / 2f);
+                        MainHook.log("EmbedEntry: click -> direct tap on "
+                                + deepestClickable.getClass().getSimpleName()
+                                + " consumed=" + consumed);
+                        if (consumed) return;
+                    }
+                    // 2) 原生点击监听：链上最近的 OnClickListener，performClick
+                    //    直接触发，无坐标依赖
                     if (clickTarget != null) {
                         MainHook.log("EmbedEntry: click -> performClick on "
                                 + clickTarget.getClass().getSimpleName());
@@ -1417,7 +1510,7 @@ public final class UserPagePurifier {
                         return;
                     }
                     if (cur == rowTop && cur.getWidth() > 0 && cur.getHeight() > 0) {
-                        // 单次从活动行根投递：dispatchTouchEvent 会先跑行根自身的
+                        // 3) 单次从活动行根投递：dispatchTouchEvent 会先跑行根自身的
                         // 触摸监听，再沿子树逐层命中测试到入口——子树内所有层级
                         // 的语义处理器（最外层返回 true 的那个）恰好触发一次，
                         // 不会重复导航
