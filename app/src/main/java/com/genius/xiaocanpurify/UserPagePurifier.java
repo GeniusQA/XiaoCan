@@ -347,10 +347,10 @@ public final class UserPagePurifier {
                                             boolean embedded = embedSingleMenuEntryIntoBeanCard(
                                                     (ViewGroup) layoutMenu);
                                             if (!embedded) {
-                                                // 多入口：宿主按原 5 槽位排版，剩余入口
-                                                // 集中在左侧并贴住资产行——用 padding 把
-                                                // 可见入口组合居中并补足上间距（原生布局
-                                                // 属性，不影响渲染管线）。全页扫描节流 2 秒
+                                                // 多入口：保持宿主原槽位排版（靠左），
+                                                // 仅保证与资产行有呼吸间距并复位历史居中
+                                                // padding（居中会与宿主重渲染拉锯抖动）。
+                                                // 全页扫描节流 2 秒
                                                 try {
                                                     View centerRoot = getBindingRoot(b);
                                                     long centerNow = android.os.SystemClock
@@ -364,7 +364,7 @@ public final class UserPagePurifier {
                                                                 centerNow);
                                                         ViewGroup rv = findEntryRecycler(centerRoot);
                                                         if (rv != null) {
-                                                            centerMenuEntriesInRow(rv);
+                                                            ensureEntrySpacing(rv);
                                                         }
                                                     }
                                                 } catch (Throwable ignored) {}
@@ -1037,37 +1037,16 @@ public final class UserPagePurifier {
     }
 
     /**
-     * 多入口时把可见入口组合水平居中并保证与资产行之间有呼吸间距：
-     * 宿主按原槽位数排版，隐藏后剩余入口集中在左侧且上移贴住资产行。
-     * 用 padding 补偿（原生布局属性，一次设置幂等，不影响渲染管线）。
+     * 多入口排版保持宿主原槽位（不居中——居中会与宿主重渲染拉锯，
+     * 出现左/中抖动）：仅把历史版本设置过的居中 paddingLeft 复位，
+     * 间距由宿主原布局决定（与图三一致）。单入口居中由嵌入方案负责。
      */
-    private static void centerMenuEntriesInRow(ViewGroup rv) {
+    private static void ensureEntrySpacing(ViewGroup rv) {
         try {
-            int total = 0;
-            int firstLeft = Integer.MAX_VALUE;
-            for (int i = 0; i < rv.getChildCount(); i++) {
-                View it = rv.getChildAt(i);
-                if (it.getVisibility() != View.VISIBLE || it.getWidth() <= 0) continue;
-                total += it.getWidth();
-                firstLeft = Math.min(firstLeft, it.getLeft());
-            }
-            if (total <= 0 || rv.getWidth() <= total || firstLeft == Integer.MAX_VALUE) {
-                return;
-            }
-            int pad = (rv.getWidth() - total) / 2 - firstLeft;
-            if (pad < 0) pad = 0;
-            int padTop = rv.getPaddingTop();
-            int minTop = dp(rv, 16);
-            boolean changed = false;
-            if (padTop < minTop) {
-                padTop = minTop;
-                changed = true;
-            }
-            if (rv.getPaddingLeft() != pad || changed) {
-                rv.setPadding(pad, padTop, rv.getPaddingRight(),
+            if (rv.getPaddingLeft() != 0) {
+                rv.setPadding(0, rv.getPaddingTop(), rv.getPaddingRight(),
                         rv.getPaddingBottom());
-                MainHook.log("CenterMenu: entries centered pad=" + pad
-                        + " padTop=" + padTop + " total=" + total);
+                MainHook.log("CenterMenu: left padding reset");
             }
         } catch (Throwable ignored) {}
     }
