@@ -1224,20 +1224,52 @@ public final class UserPagePurifier {
         // 限制爬升层数：宿主重渲染中「卡券/红包」文本可能尚未可读，
         // 无限爬升会越过资产行整行并把整行 GONE（连带其它未隐藏子项）
         int depth = 0;
-        while (cur.getParent() instanceof View && depth < 3) {
+        while (cur.getParent() instanceof View && depth < 4) {
             View parent = (View) cur.getParent();
+            if (!(parent instanceof ViewGroup)) break;
+            // 文本判据：父容器出现其它入口文案即停止
             if (subtreeHasOtherEntries(parent, keyword)) break;
-            // 可见性判据（文本判据在 Kuikly 自绘视图常失效）：父容器里还有
-            // 别的可见子视图时停止爬升——避免把整个资产行容器 GONE 掉，
-            // 那会连带改变卡片高度与相邻间距（用户实测：资产行只剩 1-2 项
-            // 时活动行间距异常，三项齐全时正常）
-            if (parent instanceof ViewGroup
-                    && hasOtherVisibleContent((ViewGroup) parent, cur)) break;
+            // 主判据（可点击项）：父容器里出现其它「可点击项」即停止——
+            // 本项图标与文字同属一项（图标不可点击）、会被越过，隐藏时
+            // 图标+文字一起消失；遇到其它资产项才停，因此不会 GONE 行
+            // 容器/卡片（卡片高度与活动行位置保持宿主原样，仅由宿主做
+            // 资产行内部自动重排）。
+            // 注：不能用「父容器还有任何可见子视图」作为判据——那样会
+            // 停在纯文字视图上，只隐藏文字留下图标（用户截图实测）。
+            if (countOtherClickableBranches((ViewGroup) parent, cur) > 0) break;
             best = parent;
             cur = parent;
             depth++;
         }
         return best;
+    }
+
+    /** 容器内除 exclude 分支外，可见且含可点击视图的兄弟子树数量。 */
+    private static int countOtherClickableBranches(ViewGroup parent, View exclude) {
+        int n = 0;
+        try {
+            for (int i = 0; i < parent.getChildCount(); i++) {
+                View c = parent.getChildAt(i);
+                if (c == exclude) continue;
+                if (c.getVisibility() != View.VISIBLE) continue;
+                if (hasClickableDescendant(c)) n++;
+            }
+        } catch (Throwable ignored) {}
+        return n;
+    }
+
+    /** 子树内是否存在可点击视图（含自身）。 */
+    private static boolean hasClickableDescendant(View v) {
+        try {
+            if (v.isClickable()) return true;
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    if (hasClickableDescendant(g.getChildAt(i))) return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     /** 子树是否出现其它入口/板块文案（与当前关键词互为子串的除外）。 */
