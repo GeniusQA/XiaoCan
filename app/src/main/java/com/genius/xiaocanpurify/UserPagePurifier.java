@@ -347,6 +347,12 @@ public final class UserPagePurifier {
                 MainHook.log("EmbedCall error: " + t);
             }
         }
+        // Kuikly 纹理层不绘制入口（实测视图树/属性正常但不上屏，原生手段
+        // 均无效）——对显示态入口在其 item 内叠加 100% 原生绘制的替代视图
+        //（白底+图标+文字，原生子视图必然上屏），隐藏态入口 GONE 已生效
+        if (embeddedSnapshotView == null) {
+            applyNativeEntryOverlay(root, binding);
+        }
         // 免单资格横幅：实为 banner_notice / banner_challenge 轮播卡
         // （RichFontTextView 富文本渲染，非 TextView，文案匹配找不到；且是
         // layout_menu 的兄弟节点，必须从页面根 findViewById）。
@@ -1082,6 +1088,109 @@ public final class UserPagePurifier {
             return Math.min(lp.width, lp.height);
         }
         return 0;
+    }
+
+    /** 入口替代覆盖视图缓存（entry -> overlay，弱引用随宿主重建失效）。 */
+    private static final java.util.WeakHashMap<View, View> NATIVE_OVERLAYS =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 对显示态入口在其 item 内叠加原生替代视图。实测 Kuikly 纹理层不绘制
+     * 入口内容（视图树/属性正常但不上屏，invalidate/translation/数据层
+     * 过滤均无效），而原生子视图的绘制不经过 Kuikly 管线，必然上屏。
+     * 隐藏态入口的 GONE 对 Kuikly 生效（实测不绘制），无需覆盖。
+     */
+    private static void applyNativeEntryOverlay(ViewGroup root, Object binding) {
+        View pageRoot = getBindingRoot(binding);
+        for (String[] item : MENU_ITEMS) {
+            if (PurifyPrefs.hide(item[0])) continue;
+            View entry = findItemView(root, normalize(item[1]));
+            if (entry == null && pageRoot != null) {
+                entry = findItemView(pageRoot, normalize(item[1]));
+            }
+            if (!(entry instanceof ViewGroup)) continue;
+            ViewGroup entryGroup = (ViewGroup) entry;
+            if (entryGroup.getVisibility() != View.VISIBLE) continue;
+            View exist = NATIVE_OVERLAYS.get(entryGroup);
+            if (exist != null && exist.getParent() == entryGroup) continue;
+            if (exist != null) NATIVE_OVERLAYS.remove(entryGroup);
+            View rep = buildNativeEntryReplica(entryGroup);
+            if (rep == null) continue;
+            View host = findFirstFrameLayout(entryGroup,
+                    entryGroup.getWidth(), entryGroup.getHeight());
+            if (host == null) host = entryGroup;
+            try {
+                if (host instanceof android.widget.FrameLayout) {
+                    ((android.widget.FrameLayout) host).addView(rep,
+                            new android.widget.FrameLayout.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.Gravity.CENTER));
+                } else {
+                    ((ViewGroup) host).addView(rep);
+                }
+                NATIVE_OVERLAYS.put(entryGroup, rep);
+                MainHook.log("NativeEntry: overlay applied to " + item[1]);
+            } catch (Throwable t) {
+                MainHook.log("NativeEntry: overlay failed on " + item[1] + ": " + t);
+            }
+        }
+    }
+
+    /** 构建入口的原生替代视图：白底 + 图标 + 深色文字，水平居中。 */
+    private static View buildNativeEntryReplica(ViewGroup entry) {
+        try {
+            android.widget.LinearLayout box = new android.widget.LinearLayout(
+                    entry.getContext());
+            box.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            box.setGravity(android.view.Gravity.CENTER);
+            box.setBackgroundColor(android.graphics.Color.WHITE);
+            android.widget.ImageView icon = findFirstImageView(entry);
+            if (icon != null && icon.getDrawable() != null) {
+                android.widget.ImageView iv = new android.widget.ImageView(
+                        entry.getContext());
+                iv.setImageDrawable(icon.getDrawable());
+                int size = dp(entry, 22);
+                android.widget.LinearLayout.LayoutParams ip =
+                        new android.widget.LinearLayout.LayoutParams(size, size);
+                ip.rightMargin = dp(entry, 6);
+                box.addView(iv, ip);
+            }
+            String label = subtreeText(entry);
+            if (label.length() > 0) {
+                android.widget.TextView tv = new android.widget.TextView(
+                        entry.getContext());
+                tv.setText(label);
+                android.widget.TextView srcText = findFirstTextView(entry);
+                tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,
+                        srcText != null ? srcText.getTextSize() : dp(entry, 14));
+                tv.setTextColor(0xFF333333);
+                box.addView(tv);
+            }
+            return box;
+        } catch (Throwable t) {
+            MainHook.log("NativeEntry: replica build failed: " + t);
+            return null;
+        }
+    }
+
+    /** 深度优先找第一个全尺寸（≥宿主8成）的 FrameLayout 作为覆盖挂载点。 */
+    private static android.widget.FrameLayout findFirstFrameLayout(
+            View parent, int w, int h) {
+        if (parent instanceof android.widget.FrameLayout
+                && parent.getWidth() >= w * 8 / 10
+                && parent.getHeight() >= h * 8 / 10) {
+            return (android.widget.FrameLayout) parent;
+        }
+        if (parent instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) parent;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                android.widget.FrameLayout f =
+                        findFirstFrameLayout(g.getChildAt(i), w, h);
+                if (f != null) return f;
+            }
+        }
+        return null;
     }
 
     /** 深度优先找第一个 ImageView。 */
