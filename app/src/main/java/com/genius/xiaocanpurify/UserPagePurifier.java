@@ -1059,35 +1059,11 @@ public final class UserPagePurifier {
             if (qLast != null && qNow - qLast < 3000L) return;
             QUALIFY_THROTTLE.put(root, qNow);
             boolean restored = false;
-            // 路径 1（主）：按「免单」文本定位横幅卡。实测横幅文案为
-            // 「30000份免单资格大放送」，旧关键词组（订单待免单等）匹配
-            // 不到；且卡片自身多为 VISIBLE、真正被 GONE 的是其祖先容器
-            //（如 RLinearLayout），必须沿链恢复第一个 GONE 祖先
-            java.util.List<View> hits = new java.util.ArrayList<>();
-            collectTextViewsContaining(root, "免单", hits, 4);
-            for (View tv : hits) {
-                String t = String.valueOf(((android.widget.TextView) tv).getText());
-                // 排除活动行「免单资格」入口（4 字）：其祖先（活动行容器）
-                // 可能被单入口嵌入逻辑收起，恢复会破坏嵌入态
-                if (t.length() <= 5) continue;
-                if (embeddedEntryView != null
-                        && isDescendantOrSelf(tv, embeddedEntryView)) continue;
-                View cur = tv;
-                int depth = 0;
-                while (cur != null && depth < 8) {
-                    if (cur.getVisibility() == View.GONE) {
-                        cur.setVisibility(View.VISIBLE);
-                        restored = true;
-                        MainHook.log("Restored qualify banner ancestor "
-                                + cur.getClass().getSimpleName());
-                        break;
-                    }
-                    cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
-                    depth++;
-                }
-            }
-            // 路径 2（兜底）：旧文案关键词组，兼容文案变化
-            if (!restored) {
+            // 恢复判据只用精确文案（订单待免单等）。禁止按「免单」泛匹配：
+            // 实测会命中底部广告横幅（「30000份免单资格大放送 … 失效」）
+            // 的容器并把它从过滤态放出来——它是需要过滤的广告，不是
+            // 免单资格卡（用户明确否定）。
+            {
                 String[][] keySets = {
                         {"订单待免单"},
                         {"订单待免单", "今日邀"},
@@ -1123,15 +1099,6 @@ public final class UserPagePurifier {
                 MainHook.log("Restored free-order qualify card");
             }
         } catch (Throwable ignored) {}
-    }
-
-    /** v 是否等于 ref 或位于 ref 子树内（父链比较）。 */
-    private static boolean isDescendantOrSelf(View v, View ref) {
-        for (View cur = v; cur != null;
-                cur = cur.getParent() instanceof View ? (View) cur.getParent() : null) {
-            if (cur == ref) return true;
-        }
-        return false;
     }
 
     /**
