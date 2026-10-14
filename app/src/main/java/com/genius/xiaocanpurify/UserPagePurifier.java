@@ -1069,13 +1069,19 @@ public final class UserPagePurifier {
                 }
             }
             if (card != null && card.getVisibility() != View.GONE) {
-                // 命中最小子树后向上扩展到整卡：祖先仍属横幅（不含其它
-                // 板块关键词）时继续上爬，避免只藏到内部文本容器留下步骤条
+                // 向上定位「整卡」：优先找 MaterialCardView/CardView 祖先
+                //（宿主轮播卡外壳，含指示器 1/2 与两页内容——免单页与
+                // 挑战赛进度页）；找不到才退回文本判据。整卡 GONE 后两页
+                // 一起消失，不再随轮播切页复现（用户要求"完全过滤"）。
                 View full = card;
                 View cur = card;
                 int depth = 0;
-                while (cur.getParent() instanceof View && depth < 6) {
+                while (cur.getParent() instanceof View && depth < 8) {
                     View p = (View) cur.getParent();
+                    if (p.getClass().getName().contains("CardView")) {
+                        full = p;
+                        break;
+                    }
                     if (subtreeHasOtherSection(subtreeText(p))) break;
                     full = p;
                     cur = p;
@@ -1122,7 +1128,9 @@ public final class UserPagePurifier {
             {
                 String[][] keySets = {
                         {"订单待免单"},
-                        {"订单待免单", "今日邀"},
+                        {"待免单"},
+                        {"今日邀"},
+                        {"天邀", "挑战赛"},
                         {"可免单", "仅需1人"},
                 };
                 View card = null;
@@ -1137,10 +1145,19 @@ public final class UserPagePurifier {
                         card.setVisibility(View.VISIBLE);
                         restored = true;
                     }
+                    // 向上恢复整卡（优先 CardView 外壳）：轮播指示器与两页
+                    // 内容（免单页/挑战赛进度页）一起回来
                     View cur = card;
                     int depth = 0;
-                    while (cur.getParent() instanceof View && depth < 4) {
+                    while (cur.getParent() instanceof View && depth < 6) {
                         View p = (View) cur.getParent();
+                        if (p.getClass().getName().contains("CardView")) {
+                            if (p.getVisibility() == View.GONE) {
+                                p.setVisibility(View.VISIBLE);
+                                restored = true;
+                            }
+                            break;
+                        }
                         if (subtreeHasOtherSection(subtreeText(p))) break;
                         if (p.getVisibility() == View.GONE) {
                             p.setVisibility(View.VISIBLE);
