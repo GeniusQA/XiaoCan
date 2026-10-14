@@ -1,6 +1,7 @@
 package com.genius.xiaocanpurify;
 
 import android.view.View;
+import android.view.ViewGroup;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
