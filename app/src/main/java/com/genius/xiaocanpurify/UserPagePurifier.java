@@ -871,6 +871,12 @@ public final class UserPagePurifier {
 
     /* ==================== 单入口嵌入蚕豆卡（fork 定制移植） ==================== */
 
+    /** 反射设置 int 型字段（ConstraintLayout.LayoutParams 锚点定位用）。 */
+    private static void setIntField(Object target, String name, int value) throws Exception {
+        java.lang.reflect.Field f = target.getClass().getField(name);
+        f.setInt(target, value);
+    }
+
     /**
      * 活动行只剩一个可见入口时水平居中展示。
      * 关键：操作对象是「入口的直接父容器」——layoutMenu 本身可能是外层容器，
