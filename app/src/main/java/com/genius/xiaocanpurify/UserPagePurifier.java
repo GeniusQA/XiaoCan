@@ -871,22 +871,7 @@ public final class UserPagePurifier {
 
     /* ==================== 单入口嵌入蚕豆卡（fork 定制移植） ==================== */
 
-                    MainHook.log("QBanner: menu binding root null");
-                }
-            } catch (Throwable t) {
-                MainHook.log("QBanner: error " + t);
-            }
-        }
-    }
-
-    /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
-    private static final java.util.WeakHashMap<View, ViewGroup> CENTERED_CHILDREN = new java.util.WeakHashMap<>();
-    /** 被居中子项挂的布局监听，还原时移除。 */
-    private static final java.util.WeakHashMap<View, View.OnLayoutChangeListener> CENTERED_LISTENERS =
-            new java.util.WeakHashMap<>();
-    private static final java.util.WeakHashMap<View, Integer> SAVED_WIDTHS = new java.util.WeakHashMap<>();
-
-
+    /**
      * 活动行只剩一个可见入口时水平居中展示。
      * 关键：操作对象是「入口的直接父容器」——layoutMenu 本身可能是外层容器，
      * 入口实际排在嵌套的横向 LinearLayout 里，对外层设 gravity 不生效。
@@ -965,24 +950,11 @@ public final class UserPagePurifier {
         }
     }
 
-    /* ==================== 单入口嵌入蚕豆卡空位 ==================== */
-
-    /** 嵌入的紧凑入口视图（原入口图标+文字的横排重建）。 */
-    private static View embeddedSnapshotView;
-    /** 被快照的原始入口（宿主重渲染后实例变化时需重新嵌入）。 */
-    private static View embeddedEntryView;
-    /** 被收起的活动行（还原时恢复显示）。 */
-    private static ViewGroup embeddedRowView;
-    /** 承载嵌入视图的槽位/锚点视图（ConstraintLayout 平移定位用）。 */
-    private static ViewGroup embeddedSlotView;
-    private static View embeddedLeftColView;
-    private static View embeddedBtnWrapView;
-    private static View.OnLayoutChangeListener embeddedSlotListener;
-    /** 活动行根视图（点击时重新定位当前入口实例，宿主重渲染会更换实例）。 */
-    private static ViewGroup embeddedMenuRow;
-    /** 活动行卡片壳是否已被连带收起（壳内无可见资产行内容时）。 */
-    private static boolean embeddedCardCollapsed;
-
+    /**
+     * 活动行只剩一个可见入口时，把入口嵌入上方「可提现蚕豆」卡中
+     * 「可提现蚕豆/余额」与「提现」按钮之间的空位，并收起活动行。
+     * 入口视图可能挂在 RecyclerView 内，直接 reparent 有回收崩溃风险，
+     * 因此采用位图快照 + 点击代理（快照点击转调原入口 performClick）。
      *
      * @return true 表示已按嵌入方案处理（成功调度或已嵌入），调用方无需再做居中
      */
@@ -1409,7 +1381,6 @@ public final class UserPagePurifier {
      * 2) 实例已被宿主重渲染更换时，按开关找「未被隐藏」的当前入口——
      *    不能直接取第一个找到的视图，那可能是被隐藏的其它入口（点了没反应）。
      */
-
     private static View resolveEmbeddedEntryTarget(View fallback) {
         if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
             return embeddedEntryView;
@@ -1542,7 +1513,6 @@ public final class UserPagePurifier {
     }
 
     /** 深度优先找第一个 ImageView。 */
-
     private static android.widget.ImageView findFirstImageView(View parent) {
         if (parent instanceof android.widget.ImageView) {
             return (android.widget.ImageView) parent;
@@ -1574,7 +1544,7 @@ public final class UserPagePurifier {
         return null;
     }
 
-
+    /** 把嵌入视图定位到左列之后、提现按钮之前的空位（与左列垂直居中对齐）。 */
     private static void positionEmbeddedSnapshot() {
         try {
             if (embeddedSnapshotView == null || embeddedSlotView == null
@@ -1601,7 +1571,6 @@ public final class UserPagePurifier {
     }
 
     /** 撤销嵌入：移除嵌入视图、恢复活动行与原入口显示。 */
-
     private static void restoreEmbeddedEntry(ViewGroup row) {
         restoreEmbeddedEntry(row, true);
     }
@@ -1649,7 +1618,6 @@ public final class UserPagePurifier {
     }
 
     /** 查找文本精确等于关键词的 TextView（深度优先）。 */
-
     private static View findExactTextView(ViewGroup parent, String keyword) {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
@@ -1665,16 +1633,9 @@ public final class UserPagePurifier {
         return null;
     }
 
-
     private static int dp(View v, int value) {
         return (int) (value * v.getResources().getDisplayMetrics().density + 0.5f);
     }
-
-    /**
-     * 活动行过滤后若已没有任何可见子项（如服务端当期未下发未被隐藏的入口，
-     * 或剩余入口的活动已结束），把整行收起，避免留下空白板块。
-     * 只做「空则收起」，不反向强制显示，避免覆盖宿主自身的隐藏意图。
-     */
 
     private static boolean hasVisibleChild(ViewGroup group) {
         for (int i = 0; i < group.getChildCount(); i++) {
@@ -1695,6 +1656,10 @@ public final class UserPagePurifier {
         }
     }
 
+    /**
+     * 在布局中查找"只承载该文案的最小子项"：命中节点若还包含其它入口文案，
+     * 说明它是整行容器而非单项，继续向内下探，保证隐藏的是单项而不是整行。
+     */
     private static View findItemView(View parent, String keyword) {
         if (!(parent instanceof ViewGroup)) return null;
         ViewGroup group = (ViewGroup) parent;
@@ -1715,5 +1680,37 @@ public final class UserPagePurifier {
         }
         return null;
     }
+
+    /** 被居中处理过的子项 -> 其直接父容器；入口数量恢复后按记录还原等分布局。 */
+    private static final java.util.WeakHashMap<View, ViewGroup> CENTERED_CHILDREN = new java.util.WeakHashMap<>();
+
+    /** 被居中子项挂的布局监听，还原时移除。 */
+    private static final java.util.WeakHashMap<View, View.OnLayoutChangeListener> CENTERED_LISTENERS =
+
+    private static final java.util.WeakHashMap<View, Integer> SAVED_WIDTHS = new java.util.WeakHashMap<>();
+
+    /** 嵌入的紧凑入口视图（原入口图标+文字的横排重建）。 */
+    private static View embeddedSnapshotView;
+
+    /** 被快照的原始入口（宿主重渲染后实例变化时需重新嵌入）。 */
+    private static View embeddedEntryView;
+
+    /** 被收起的活动行（还原时恢复显示）。 */
+    private static ViewGroup embeddedRowView;
+
+    /** 承载嵌入视图的槽位/锚点视图（ConstraintLayout 平移定位用）。 */
+    private static ViewGroup embeddedSlotView;
+
+    private static View embeddedLeftColView;
+
+    private static View embeddedBtnWrapView;
+
+    private static View.OnLayoutChangeListener embeddedSlotListener;
+
+    /** 活动行根视图（点击时重新定位当前入口实例，宿主重渲染会更换实例）。 */
+    private static ViewGroup embeddedMenuRow;
+
+    /** 活动行卡片壳是否已被连带收起（壳内无可见资产行内容时）。 */
+    private static boolean embeddedCardCollapsed;
 
 }
