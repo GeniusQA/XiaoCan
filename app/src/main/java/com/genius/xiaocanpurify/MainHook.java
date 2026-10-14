@@ -129,6 +129,12 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            hookCarouselDiag(classLoader);
+        } catch (Throwable t) {
+            log("CarouselDiag install error: " + t);
+        }
+
+        try {
             PopupBlocker.install(xposed, classLoader);
             log("PopupBlocker installed successfully.");
         } catch (Throwable t) {
@@ -207,6 +213,52 @@ public final class MainHook extends XposedModule {
         }
 
         log("All XiaoCanPurify hooks successfully initialized!");
+    }
+
+    /**
+     * 轮播组件运行时诊断：宿主 classes.dex 为加固壳（静态反编译不可行），
+     * 在宿主进程内反射 dump Kuikly 轮播相关类的类存在性与方法签名，
+     * 确定「翻到空页」问题的 hook 点。
+     */
+    private static void hookCarouselDiag(ClassLoader cl) {
+        String[] candidates = {
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$1",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$2",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$3$1",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$4",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$4$1",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$5$1",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$5$3",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$6",
+                "com.realtech.xiaocankuikly.widget.AutoLoopCarouselKt$AutoLoopCarousel$animateToNext$1",
+                "com.realtech.user.pages.ext.UserChallengeViewExtKt",
+        };
+        for (String name : candidates) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                StringBuilder sb = new StringBuilder();
+                for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                    sb.append(m.getName()).append('(').append(m.getParameterCount())
+                            .append(")->").append(m.getReturnType().getSimpleName())
+                            .append("; ");
+                }
+                StringBuilder fs = new StringBuilder();
+                for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                    f.setAccessible(true);
+                    fs.append(f.getType().getSimpleName()).append(' ')
+                            .append(f.getName()).append("; ");
+                }
+                log("CarouselDiag " + name.substring(name.lastIndexOf('.') + 1)
+                        + " methods: " + sb);
+                if (fs.length() > 0) {
+                    log("CarouselDiag " + name.substring(name.lastIndexOf('.') + 1)
+                            + " fields: " + fs);
+                }
+            } catch (Throwable t) {
+                log("CarouselDiag " + name + " -> " + t);
+            }
+        }
     }
 
     /**
