@@ -1638,8 +1638,87 @@ public final class UserPagePurifier {
         embeddedEntryView = entry;
         embeddedRowView = collapseTarget;
         embeddedMenuRow = row;
+        // 安装快照区域点击转发：实测快照经 translation 定位在槽位可视
+        // 边界之外时，触摸命中测试不可达（视觉可见但点击无任何回调，
+        // 连快照自身 OnClickListener 都不触发）——由根视图按屏幕矩形
+        // 代转一次 performClick（根视图 OnTouchListener 先于全部子视图
+        // 命中测试执行，是否可达均能兜住；消费手势避免双重触发）
+        installEmbeddedTapForwarder(slot);
         MainHook.log("EmbedEntry: compact entry embedded into bean card, row collapsed");
         return true;
+    }
+
+    /** 快照区域点击转发的已安装根视图（避免重复安装/跨页面残留）。 */
+    private static View tapForwardRoot;
+    /** 当前手势 DOWN 是否落在嵌入快照的屏幕矩形内。 */
+    private static volatile boolean embeddedTapInside;
+
+    /**
+     * 在锚点所在根视图上安装「快照区域点击转发」。
+     * 触摸事件首先到达根视图的 OnTouchListener（ViewGroup.dispatchTouchEvent
+     * 中 mOnTouchListener 先于 onInterceptTouchEvent 与子视图命中测试）——
+     * DOWN 落在快照屏幕矩形内时消费整个手势，UP 时触发快照 performClick
+     *（走快照自身的 OnClickListener，即嵌入入口的点击逻辑）。
+     */
+    private static void installEmbeddedTapForwarder(View anchor) {
+        try {
+            if (anchor == null) return;
+            final View root = anchor.getRootView();
+            if (root == null) return;
+            if (tapForwardRoot == root) return;
+            if (tapForwardRoot != null) {
+                try {
+                    tapForwardRoot.setOnTouchListener(null);
+                } catch (Throwable ignored) {}
+                tapForwardRoot = null;
+            }
+            root.setOnTouchListener((v, ev) -> {
+                try {
+                    View snap = embeddedSnapshotView;
+                    if (snap == null || snap.getParent() == null
+                            || !snap.isShown() || snap.getWidth() <= 0) {
+                        embeddedTapInside = false;
+                        return false;
+                    }
+                    int[] loc = new int[2];
+                    snap.getLocationOnScreen(loc);
+                    float rx = ev.getRawX(), ry = ev.getRawY();
+                    boolean inside = rx >= loc[0] && rx <= loc[0] + snap.getWidth()
+                            && ry >= loc[1] && ry <= loc[1] + snap.getHeight();
+                    switch (ev.getActionMasked()) {
+                        case android.view.MotionEvent.ACTION_DOWN:
+                            embeddedTapInside = inside;
+                            if (inside) {
+                                MainHook.log("EmbedEntry: tap forwarder DOWN inside snapshot");
+                            }
+                            return inside;
+                        case android.view.MotionEvent.ACTION_MOVE:
+                            return embeddedTapInside;
+                        case android.view.MotionEvent.ACTION_UP: {
+                            boolean fire = embeddedTapInside;
+                            embeddedTapInside = false;
+                            if (fire) {
+                                MainHook.log("EmbedEntry: tap forwarded -> snapshot performClick");
+                                snap.performClick();
+                            }
+                            return fire;
+                        }
+                        case android.view.MotionEvent.ACTION_CANCEL:
+                            embeddedTapInside = false;
+                            return false;
+                        default:
+                            return false;
+                    }
+                } catch (Throwable t) {
+                    return false;
+                }
+            });
+            tapForwardRoot = root;
+            MainHook.log("EmbedEntry: tap forwarder installed on root "
+                    + root.getClass().getSimpleName());
+        } catch (Throwable t) {
+            MainHook.log("EmbedEntry: tap forwarder install failed: " + t);
+        }
     }
 
     /** 活动行卡片壳内是否存在可见的资产行内容（有则不能收起壳）。 */
@@ -1931,6 +2010,14 @@ public final class UserPagePurifier {
      * 不把活动行容器/卡片壳恢复显示，避免重嵌完成前闪现一帧空白。
      */
     private static void restoreEmbeddedEntry(ViewGroup row, boolean showContainers) {
+        // 拆除快照区域点击转发（跨页面/停止嵌入时避免残留拦截）
+        if (tapForwardRoot != null) {
+            try {
+                tapForwardRoot.setOnTouchListener(null);
+            } catch (Throwable ignored) {}
+            tapForwardRoot = null;
+        }
+        embeddedTapInside = false;
         if (embeddedSnapshotView == null) return;
         try {
             ViewGroup p = embeddedSnapshotView.getParent() instanceof ViewGroup
