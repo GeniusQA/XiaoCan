@@ -326,6 +326,8 @@ public final class NetworkAdInterceptor {
         private final ClassLoader classLoader;
         /** 轮播列表响应上次 dump 时间（30 秒节流）。 */
         private static volatile long lastCarouselDumpMs;
+        /** 入口配置响应上次 dump 时间（30 秒节流）。 */
+        private static volatile long lastMenuCfgDumpMs;
 
         AdInterceptorInvocationHandler(ClassLoader classLoader) {
             this.classLoader = classLoader;
@@ -521,6 +523,16 @@ public final class NetworkAdInterceptor {
                         lastCarouselDumpMs = System.currentTimeMillis();
                         MainHook.log("Carousel resp: " + mn + " => "
                                 + body.substring(0, Math.min(body.length(), 1200)));
+                    }
+                    // 活动入口行数据源诊断：CheckUserInGroup（实验分组下发
+                    // challengeList 入口配置）/ ismemberbysilkid 响应 dump，
+                    // 定位 challengeList 数据结构后实现数据层按开关剔除
+                    if ((mn.contains("checkuseringroup")
+                            || mn.contains("ismemberbysilkid"))
+                            && System.currentTimeMillis() - lastMenuCfgDumpMs > 30000L) {
+                        lastMenuCfgDumpMs = System.currentTimeMillis();
+                        MainHook.log("MenuCfg resp: " + mn + " => "
+                                + body.substring(0, Math.min(body.length(), 1500)));
                     }
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
