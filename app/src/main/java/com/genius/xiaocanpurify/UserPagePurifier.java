@@ -1389,17 +1389,66 @@ public final class UserPagePurifier {
      */
     private static View resolveEmbeddedEntryTarget(View fallback) {
         if (embeddedEntryView != null && embeddedEntryView.getParent() != null) {
+            MainHook.log("EmbedEntry resolve: entry alive "
+                    + embeddedEntryView.getClass().getSimpleName());
             return embeddedEntryView;
         }
-        ViewGroup rowRef = embeddedMenuRow;
-        if (rowRef != null) {
+        // 宿主重渲染可能更换活动行实例：依次在「当前活动行根」「被收起的
+        // 活动行容器」「fallback 子树」中找显示态入口 item——找不到时坐标
+        // 会退化为 fallback 中心（落空：consumed 但无导航）
+        ViewGroup[] refs = new ViewGroup[]{embeddedMenuRow, embeddedRowView};
+        for (ViewGroup rowRef : refs) {
+            if (rowRef == null) continue;
             for (String[] item : MENU_ITEMS) {
                 if (PurifyPrefs.hide(item[0])) continue;
                 View v = findItemView(rowRef, normalize(item[1]));
-                if (v != null) return v;
+                if (v != null) {
+                    // 只剩单入口时 findItemView 第一轮直接命中容器（子树只含
+                    // 该文案）——继续下探到入口叶子：坐标映射与点击链才正确
+                    View leaf = findDeepestEntry(v, normalize(item[1]));
+                    MainHook.log("EmbedEntry resolve: found in "
+                            + (rowRef == embeddedMenuRow ? "menuRow" : "rowView")
+                            + " -> leaf " + leaf.getClass().getSimpleName()
+                            + " " + leaf.getWidth() + "x" + leaf.getHeight());
+                    return leaf;
+                }
             }
         }
+        if (fallback != null) {
+            for (String[] item : MENU_ITEMS) {
+                if (PurifyPrefs.hide(item[0])) continue;
+                View v = findItemView(fallback, normalize(item[1]));
+                if (v != null) {
+                    View leaf = findDeepestEntry(v, normalize(item[1]));
+                    MainHook.log("EmbedEntry resolve: found in fallback subtree -> leaf "
+                            + leaf.getClass().getSimpleName()
+                            + " " + leaf.getWidth() + "x" + leaf.getHeight());
+                    return leaf;
+                }
+            }
+        }
+        MainHook.log("EmbedEntry resolve: fallback self "
+                + (fallback == null ? "null"
+                        : fallback.getClass().getSimpleName()
+                                + " " + fallback.getWidth() + "x" + fallback.getHeight()));
         return fallback;
+    }
+
+    /**
+     * 向子树中含目标文案的分支持续下探，返回「只承载该文案」的最深层视图
+     * （入口叶子）。单入口场景 findItemView 会直接命中容器，必须下探后
+     * 才能得到入口真实位置（否则合成点击坐标落在容器中心、命中落空）。
+     */
+    private static View findDeepestEntry(View v, String keyword) {
+        if (!(v instanceof ViewGroup)) return v;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            if (subtreeText(c).contains(keyword)) {
+                return findDeepestEntry(c, keyword);
+            }
+        }
+        return v;
     }
 
     /**
