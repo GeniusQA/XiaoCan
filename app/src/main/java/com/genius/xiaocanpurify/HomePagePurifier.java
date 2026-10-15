@@ -776,6 +776,35 @@ public final class HomePagePurifier {
         } catch (Throwable t) { MainHook.log("Home guard: " + t); }
     }
 
+    /** 工具栏结构 dump 上次时间（60 秒节流）。 */
+    private static volatile long lastToolbarDumpMs;
+
+    /** 诊断：递归 dump 视图树（资源 id 名/类名/窗口Y坐标/可见性，限深）。 */
+    private static void dumpViewTree(View v, StringBuilder sb, int depth, int maxDepth) {
+        if (v == null) return;
+        String idName = "no-id";
+        try {
+            int id = v.getId();
+            if (id != View.NO_ID) {
+                idName = v.getResources().getResourceEntryName(id);
+            }
+        } catch (Throwable ignored) {}
+        int[] loc = new int[2];
+        v.getLocationInWindow(loc);
+        sb.append(v.getClass().getSimpleName()).append('@').append(idName)
+                .append('[').append(loc[1]).append('+').append(v.getHeight())
+                .append(v.getVisibility() == View.VISIBLE ? "" : " G").append(']');
+        if (depth >= maxDepth || !(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        sb.append('{');
+        int n = Math.min(g.getChildCount(), 8);
+        for (int i = 0; i < n; i++) {
+            dumpViewTree(g.getChildAt(i), sb, depth + 1, maxDepth);
+            if (i < n - 1) sb.append(',');
+        }
+        sb.append('}');
+    }
+
     private static void enforceHome(Object binding) {
         if (PurifyPrefs.hide(PurifyPrefs.HOME_FAB)) {
             collapseView(asView(field(binding, "layoutFab")));
@@ -791,6 +820,18 @@ public final class HomePagePurifier {
         View toolbar = asView(field(binding, "toolBar"));
         boolean headerCollapsed = PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER);
         if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
+            // 诊断：dump 工具栏子树（id/类名/窗口Y坐标）——定位左上角地址
+            // 栏视图，后续把列表上移锚点从「搜索框底部」改为「地址栏底部」
+            // 以保留地址入口（当前地址栏被列表上移盖住）
+            try {
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - lastToolbarDumpMs > 60000L) {
+                    lastToolbarDumpMs = now;
+                    StringBuilder sb = new StringBuilder();
+                    dumpViewTree(toolbar, sb, 0, 3);
+                    MainHook.log("ToolbarDiag: " + sb);
+                }
+            } catch (Throwable ignored) {}
             // The title bar is taller than the search pill, and that spare band is transparent,
             // so the gray page background shows through. Pin the list to the pill itself.
             View search = findViewByName(toolbar, "search_view");
