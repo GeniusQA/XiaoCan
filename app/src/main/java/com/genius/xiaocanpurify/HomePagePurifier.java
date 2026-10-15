@@ -856,6 +856,17 @@ public final class HomePagePurifier {
         }
         View root = asView(binding);
         if (root instanceof ViewGroup) {
+            // 诊断：dump 页面根结构（4 层，含 id 名）——fl_banner 内没有
+            // 地址栏、toolBar 字段为 null，地址栏在页面其它容器，在此定位
+            try {
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - lastToolbarDumpMs > 60000L) {
+                    lastToolbarDumpMs = now;
+                    StringBuilder sb = new StringBuilder();
+                    dumpViewTree(root, sb, 0, 4);
+                    MainHook.log("RootDiag: " + sb);
+                }
+            } catch (Throwable ignored) {}
             cleanHomeTree((ViewGroup) root);
             collapseMerchantCouponTabs((ViewGroup) root);
         }
