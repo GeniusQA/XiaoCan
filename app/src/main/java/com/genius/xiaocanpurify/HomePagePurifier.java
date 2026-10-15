@@ -776,6 +776,35 @@ public final class HomePagePurifier {
         } catch (Throwable t) { MainHook.log("Home guard: " + t); }
     }
 
+    /** 工具栏/fl_banner 结构 dump 上次时间（60 秒节流）。 */
+    private static volatile long lastToolbarDumpMs;
+
+    /** 诊断：递归 dump 视图树（资源 id 名/类名/窗口Y坐标/可见性，限深）。 */
+    private static void dumpViewTree(View v, StringBuilder sb, int depth, int maxDepth) {
+        if (v == null) return;
+        String idName = "no-id";
+        try {
+            int id = v.getId();
+            if (id != View.NO_ID) {
+                idName = v.getResources().getResourceEntryName(id);
+            }
+        } catch (Throwable ignored) {}
+        int[] loc = new int[2];
+        v.getLocationInWindow(loc);
+        sb.append(v.getClass().getSimpleName()).append('@').append(idName)
+                .append('[').append(loc[1]).append('+').append(v.getHeight())
+                .append(v.getVisibility() == View.VISIBLE ? "" : " G").append(']');
+        if (depth >= maxDepth || !(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        sb.append('{');
+        int n = Math.min(g.getChildCount(), 10);
+        for (int i = 0; i < n; i++) {
+            dumpViewTree(g.getChildAt(i), sb, depth + 1, maxDepth);
+            if (i < n - 1) sb.append(',');
+        }
+        sb.append('}');
+    }
+
     private static void enforceHome(Object binding) {
         if (PurifyPrefs.hide(PurifyPrefs.HOME_FAB)) {
             collapseView(asView(field(binding, "layoutFab")));
@@ -791,6 +820,16 @@ public final class HomePagePurifier {
         View toolbar = asView(field(binding, "toolBar"));
         boolean headerCollapsed = PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER);
         if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
+            // 诊断：dump 工具栏子树（id/类名/窗口Y坐标）——定位地址栏视图
+            try {
+                long now = android.os.SystemClock.uptimeMillis();
+                if (now - lastToolbarDumpMs > 60000L) {
+                    lastToolbarDumpMs = now;
+                    StringBuilder sb = new StringBuilder();
+                    dumpViewTree(toolbar, sb, 0, 4);
+                    MainHook.log("ToolbarDiag: " + sb);
+                }
+            } catch (Throwable ignored) {}
             // 列表上移锚点改为「工具栏顶部」：新版宿主把左上角地址栏入口
             // 挪进了工具栏（搜索框上方），此前锚点为搜索框底部，上移的列表
             // 把地址栏盖住导致入口消失。clipToPadding(true) 使 padding 区不
@@ -916,6 +955,15 @@ public final class HomePagePurifier {
             View child = group.getChildAt(i);
             String id = getViewIdName(child);
             if ("fl_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
+                // 诊断：dump fl_banner 容器内部结构（4 层，含 id 名）——
+                // 确认地址栏视图是否在其中及其 id 名
+                try {
+                    if (child instanceof ViewGroup) {
+                        StringBuilder fb = new StringBuilder();
+                        dumpViewTree(child, fb, 0, 4);
+                        MainHook.log("FlBannerDiag: " + fb);
+                    }
+                } catch (Throwable ignored) {}
                 // 3.21.5 把左上角地址栏入口放进了 fl_banner 容器——GONE 容器
                 // 会连带隐藏地址栏（用户逐个开关实测确认）。改为：保留容器，
                 // 清空活动背景，折叠容器内的图片类子视图（活动大图）；

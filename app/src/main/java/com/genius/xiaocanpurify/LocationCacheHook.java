@@ -779,7 +779,13 @@ public final class LocationCacheHook {
                                     if (isStatic && arg instanceof android.content.Context) continue;
                                     scan.scan(arg, 0);
                                 }
-                                scan.commitIfPlausible();
+                                // POI 跟随问题止血：暂禁用选点捕获写入。用户实测
+                                // 进入「选择地址」页点「当前地址/重新定位」也会走
+                                // pickLocation，把宿主 WiFi 定位的坐标（锦江区）
+                                // 写入缓存。改为仅 dump 聚合结果，按真实数据
+                                // 恢复「仅搜索选点」的精准判据。
+                                MainHook.log("PickLocation scan: " + scan.describe());
+                                // scan.commitIfPlausible();
                             } catch (Throwable ignored) {
                             }
                             return chain.proceed();
@@ -873,6 +879,16 @@ public final class LocationCacheHook {
                     plainStrings.append(value);
                 }
             }
+        }
+
+        /** 诊断：聚合结果摘要（不写入）。 */
+        String describe() {
+            double lat = !Double.isNaN(latHint) ? latHint : latRange;
+            double lng = !Double.isNaN(lngHint) ? lngHint : lngRange;
+            String addr = addressHint != null ? addressHint
+                    : (titleHint != null ? titleHint : "");
+            return "lat=" + lat + " lng=" + lng + " addr="
+                    + (addr.length() > 40 ? addr.substring(0, 40) : addr);
         }
 
         /** 扫描结束后择优写入：命名命中 > 中国范围数值兜底；地址 > 标题 > 最长普通字符串。 */
