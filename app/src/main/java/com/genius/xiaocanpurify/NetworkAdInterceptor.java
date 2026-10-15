@@ -565,6 +565,16 @@ public final class NetworkAdInterceptor {
                     MainHook.log("Lottery prize payload detected, arming jump guard: " + url);
                     EnrollmentJumpGuard.armNow();
                 }
+                // 诊断：dump 商家/附近列表类请求与响应片段——判断请求用的
+                // 是注入的缓存坐标还是宿主自取的其它坐标（锦江区来源定位）
+                String ul = url.toLowerCase(Locale.ROOT);
+                if (ul.contains("merchant") || ul.contains("shop")
+                        || ul.contains("store") || ul.contains("nearby")
+                        || ul.contains("home")) {
+                    MainHook.log("MerchantReq: " + url);
+                    MainHook.log("MerchantResp: " + body.substring(0,
+                            Math.min(300, body.length())));
+                }
                 if (!PopupMarkers.contains(body)) {
                     return response;
                 }
