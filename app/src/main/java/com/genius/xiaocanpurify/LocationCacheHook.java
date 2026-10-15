@@ -149,7 +149,7 @@ public final class LocationCacheHook {
                     // 定位模块会伪造 isProviderEnabled=false，isGpsActuallyEnabled()
                     // 据此误判「GPS 关闭」，把用户打开 GPS 后的真实定位也替换成
                     // 缓存回放——顶部地址栏拿不到新定位，入口随之消失
-                    if (isRealHardwareFix(args[0])) {
+                    if (isRealHardwareFix(args[0]) && hasSatelliteEvidence(args[0])) {
                         if (error == errorOk()) {
                             cacheSnapshot(args[0]);
                         }
@@ -157,8 +157,8 @@ public final class LocationCacheHook {
                     }
                     if (isGpsActuallyEnabled()) {
                         if (error == errorOk()) {
-                            // GPS 开启：定位成功，刷新缓存并透传真实位置
-                            cacheSnapshot(args[0]);
+                            // GPS 开启但非 gps 卫星 fix（fused/network 伪装）：
+                            // 透传给宿主使用，但不入账（避免覆盖 GPS 缓存）
                             return dispatchOriginal(method, args);
                         }
                         // GPS 开启但本次定位失败：有缓存则回放成功回调，屏蔽失败回调
@@ -633,6 +633,29 @@ public final class LocationCacheHook {
      * App 自己的逆地理与本模块捕获的是同一次定位，GPS 关闭回放时
      * 位置对象直接携带该地址，App 展示与模块缓存完全一致。
      */
+    /**
+     * Location 是否携带 GPS 卫星证据（extras.satellites）。
+     * 真 GPS 硬件 fix 由系统写入卫星数；SDK/系统把 WiFi 网络定位伪装成
+     * provider=gps 回调时（GPS 关闭仍在覆盖缓存，用户实测锦江区 POI）
+     * 没有该证据——凭此区分真假 GPS 定位。
+     */
+    private static boolean hasSatelliteEvidence(Object loc) {
+        try {
+            if (loc instanceof android.location.Location) {
+                android.os.Bundle ex = ((android.location.Location) loc).getExtras();
+                return ex != null && (ex.containsKey("satellites")
+                        || ex.containsKey("satellitesCount"));
+            }
+            java.lang.reflect.Method m = loc.getClass().getMethod("getExtras");
+            Object ex = m.invoke(loc);
+            if (ex instanceof android.os.Bundle) {
+                android.os.Bundle b = (android.os.Bundle) ex;
+                return b.containsKey("satellites") || b.containsKey("satellitesCount");
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     /** 读取缓存地址文本（供首页地址栏回填；无缓存返回 null）。 */
     public static String cachedAddressText() {
         try {
@@ -1021,7 +1044,13 @@ public final class LocationCacheHook {
                                                     // 缓存被锦江区等网络定位覆盖（用户实测）。
                                                     // GPS 开启时 fused fix 走
                                                     // isGpsActuallyEnabled()==true 的入账分支，不受影响。
-                                                    boolean realHardwareFix = "gps".equals(fixProvider);
+                                                    // 真实 GPS 硬件定位 = provider=gps 且携带
+                                                    // 卫星证据（extras.satellites）——MIUI 融合
+                                                    // 定位/腾讯 SDK 会把 WiFi 网络定位伪装成
+                                                    // provider=gps 回调（无卫星证据），GPS 关闭时
+                                                    // 凭此覆盖缓存（用户实测锦江区 POI）
+                                                    boolean realHardwareFix = "gps".equals(fixProvider)
+                                                            && hasSatelliteEvidence(loc);
                                                     if (!realHardwareFix && !isGpsActuallyEnabled()) {
                                                         // GPS 关闭：屏蔽降级网络定位，改为回放缓存；
                                                         // 无缓存则丢弃回调（宿主按定位失败处理）
