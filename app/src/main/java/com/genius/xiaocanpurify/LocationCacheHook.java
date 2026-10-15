@@ -254,6 +254,17 @@ public final class LocationCacheHook {
             if (tencentLocation == null) return;
             double lat = readDouble(tencentLocation, "getLatitude");
             double lng = readDouble(tencentLocation, "getLongitude");
+            // 诊断：入账时机的 provider 与 GPS 实际状态（定位缓存被
+            // WiFi 定位覆盖的来源定位）
+            String prov = "";
+            try {
+                Object p = tencentLocation.getClass().getMethod("getProvider")
+                        .invoke(tencentLocation);
+                prov = p == null ? "" : String.valueOf(p);
+            } catch (Throwable ignored) {}
+            MainHook.log("LocationCache: cacheSnapshot called prov=" + prov
+                    + " lat=" + lat + " lng=" + lng
+                    + " gpsEnabled=" + isGpsActuallyEnabled());
             if (lat == 0.0 && lng == 0.0) return;
             // 回放回声过滤：GPS 关闭时本模块回放缓存定位，回放对象会再次进入监听器。
             // 坐标与缓存完全一致即为回声而非新定位，跳过重复入账——
@@ -1184,6 +1195,8 @@ public final class LocationCacheHook {
     private static void recordFrameworkLocation(double lat, double lng) {
         // 仅在 GPS 开启时被调用（GPS 关闭的网络定位在调用前已被屏蔽），
         // 缓存始终跟随最新 GPS 真实位置
+        MainHook.log("LocationCache: recordFramework called lat=" + lat + " lng=" + lng
+                + " gpsEnabled=" + isGpsActuallyEnabled());
         if (lat == 0.0 && lng == 0.0) return;
         // 回放回声过滤（同 cacheSnapshot）：跳过本模块回放缓存造成的重复入账
         if (isEchoOfCache(lat, lng)) {
