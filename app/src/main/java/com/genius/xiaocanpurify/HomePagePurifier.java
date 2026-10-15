@@ -819,17 +819,21 @@ public final class HomePagePurifier {
         View rv = asView(field(binding, "rv"));
         View toolbar = asView(field(binding, "toolBar"));
         boolean headerCollapsed = PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER);
-        if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
-            // 诊断：dump 工具栏子树（id/类名/窗口Y坐标）——定位地址栏视图
+        // 诊断：dump 工具栏子树（id/类名/窗口Y坐标）——定位地址栏视图
+        //（无条件 dump：此前放在 height>0 分支内，启动早期未布局时不输出；
+        //  节流 10 秒，布局完成后会再 dump 一次带真实坐标的）
+        if (toolbar != null) {
             try {
                 long now = android.os.SystemClock.uptimeMillis();
-                if (now - lastToolbarDumpMs > 60000L) {
+                if (now - lastToolbarDumpMs > 10000L) {
                     lastToolbarDumpMs = now;
                     StringBuilder sb = new StringBuilder();
-                    dumpViewTree(toolbar, sb, 0, 4);
+                    dumpViewTree(toolbar, sb, 0, 5);
                     MainHook.log("ToolbarDiag: " + sb);
                 }
             } catch (Throwable ignored) {}
+        }
+        if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
             // 列表上移锚点改为「工具栏顶部」：新版宿主把左上角地址栏入口
             // 挪进了工具栏（搜索框上方），此前锚点为搜索框底部，上移的列表
             // 把地址栏盖住导致入口消失。clipToPadding(true) 使 padding 区不
