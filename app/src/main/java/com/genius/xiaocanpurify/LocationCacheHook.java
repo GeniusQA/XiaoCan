@@ -1069,7 +1069,17 @@ public final class LocationCacheHook {
                                                         return null;
                                                     }
                                                     handled.set(true);
-                                                    recordFrameworkLocation(loc.getLatitude(), loc.getLongitude());
+                                                    // 入账只认「真 GPS 硬件 fix」（provider=gps
+                                                    // 且携带卫星证据）：GPS 关闭时 MIUI 的
+                                                    // isProviderEnabled(GPS) 仍可能返回 true
+                                                    //（关的是 App 定位权限而非系统服务），伪装
+                                                    // gps 的 WiFi fix 会经由 isGpsActuallyEnabled
+                                                    // 的 true 分支入账覆盖缓存（用户实测锦江区）
+                                                    if (realHardwareFix) {
+                                                        recordFrameworkLocation(
+                                                                loc.getLatitude(),
+                                                                loc.getLongitude());
+                                                    }
                                                     return method.invoke(orig, mArgs);
                                                 }
                                                 return method.invoke(orig, mArgs);
