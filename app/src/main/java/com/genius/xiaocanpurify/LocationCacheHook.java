@@ -646,6 +646,13 @@ public final class LocationCacheHook {
                 return ex != null && (ex.containsKey("satellites")
                         || ex.containsKey("satellitesCount"));
             }
+            // 腾讯 TencentLocation：卫星数不在 extras.satellites（SDK 版本
+            // 相关），用 getGPSRssi>0（GPS 信号强度，网络定位为 -1/0）判定
+            try {
+                java.lang.reflect.Method rssi = loc.getClass().getMethod("getGPSRssi");
+                Object v = rssi.invoke(loc);
+                if (v instanceof Integer && (Integer) v > 0) return true;
+            } catch (Throwable ignored) {}
             java.lang.reflect.Method m = loc.getClass().getMethod("getExtras");
             Object ex = m.invoke(loc);
             if (ex instanceof android.os.Bundle) {
