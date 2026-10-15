@@ -778,6 +778,9 @@ public final class HomePagePurifier {
 
     /** 工具栏/fl_banner 结构 dump 上次时间（60 秒节流）。 */
     private static volatile long lastToolbarDumpMs;
+    /** 已挂布局变化监听的地址栏视图（防重复挂）。 */
+    private static final java.util.WeakHashMap<View, Boolean> ADDR_HOOKED =
+            new java.util.WeakHashMap<>();
 
     /** 诊断：递归 dump 视图树（资源 id 名/类名/窗口Y坐标/可见性，限深）。 */
     private static void dumpViewTree(View v, StringBuilder sb, int depth, int maxDepth) {
@@ -840,14 +843,27 @@ public final class HomePagePurifier {
             // 遮挡）。保留 fl_banner 容器清理（清背景+折叠图片子视图）与
             // Banner 数据层过滤——容器内容为空后高度自然塌陷，列表由宿主
             // 自行上移，布局结构恢复宿主原样（地址栏显示），净化效果不变。
-            // 地址栏恢复：宿主可能残留折叠态（layout_address GONE），恢复
-            // 显示并把缓存地址回填进 tv_address（宿主地址文本来自定位回调，
-            // 回放缓存的地址在部分路径下未同步到该控件）。
+            // 地址栏持续对抗：宿主在定位回调地址为空时会 GONE layout_address
+            //（3.21.5 布局：地址栏在搜索框上方、与 logo 同行），恢复后又被
+            // 宿主覆盖。挂布局变化监听——宿主每次 GONE，布局/绘制阶段立即
+            // 恢复 VISIBLE（拉锯但视觉最终显示），并持续回填缓存地址文本。
             try {
                 View addrBar = findViewByName(toolbar, "layout_address");
-                if (addrBar != null && addrBar.getVisibility() != View.VISIBLE) {
-                    addrBar.setVisibility(View.VISIBLE);
-                    MainHook.log("HomeAddress: restored layout_address");
+                if (addrBar != null) {
+                    if (addrBar.getVisibility() != View.VISIBLE) {
+                        addrBar.setVisibility(View.VISIBLE);
+                        MainHook.log("HomeAddress: restored layout_address");
+                    }
+                    if (!ADDR_HOOKED.containsKey(addrBar)) {
+                        ADDR_HOOKED.put(addrBar, Boolean.TRUE);
+                        addrBar.addOnLayoutChangeListener(
+                                (v, l, t, r, b, ol, ot, or2, ob) -> {
+                                    if (v.getVisibility() != View.VISIBLE) {
+                                        v.setVisibility(View.VISIBLE);
+                                        MainHook.log("HomeAddress: re-restored on layout");
+                                    }
+                                });
+                    }
                 }
                 View addrText = findViewByName(toolbar, "tv_address");
                 if (addrText instanceof android.widget.TextView) {
