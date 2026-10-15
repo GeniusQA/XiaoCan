@@ -188,7 +188,13 @@ public final class LocationCacheHook {
             }
         }
 
-        /** 判断 TencentLocation 是否来自真实硬件定位（gps/fused provider）。 */
+        /**
+         * 判断 TencentLocation 是否来自真实 GPS 硬件定位。
+         * 仅认 provider 含 "gps"：MIUI 等系统的 fused 融合定位在 GPS 关闭时
+         * 也会产出 provider=fused 的 WiFi/基站融合 fix，此前被当作真实硬件
+         * 定位透传入账，导致 GPS 关闭时缓存被网络定位坐标覆盖（用户实测）。
+         * GPS 开启时 fused fix 走 isGpsActuallyEnabled()==true 的入账分支，不受影响。
+         */
         private static boolean isRealHardwareFix(Object location) {
             if (location == null) return false;
             try {
@@ -196,7 +202,7 @@ public final class LocationCacheHook {
                         .getMethod("getProvider");
                 Object p = m.invoke(location);
                 String provider = p == null ? "" : String.valueOf(p).toLowerCase();
-                return provider.contains("gps") || provider.contains("fused");
+                return provider.contains("gps");
             } catch (Throwable t) {
                 return false;
             }
@@ -963,8 +969,14 @@ public final class LocationCacheHook {
                                                     // 仅针对 network 降级定位
                                                     String fixProvider =
                                                             loc.getProvider() == null ? "" : loc.getProvider();
-                                                    boolean realHardwareFix = "gps".equals(fixProvider)
-                                                            || "fused".equals(fixProvider);
+                                                    // 仅认 provider=gps 为真实硬件定位：MIUI 等
+                                                    // 系统的 fused 融合定位在 GPS 关闭时也会产出
+                                                    // provider=fused 的 WiFi/基站融合 fix，此前被
+                                                    // 当作真实硬件定位放行入账，导致 GPS 关闭时
+                                                    // 缓存被锦江区等网络定位覆盖（用户实测）。
+                                                    // GPS 开启时 fused fix 走
+                                                    // isGpsActuallyEnabled()==true 的入账分支，不受影响。
+                                                    boolean realHardwareFix = "gps".equals(fixProvider);
                                                     if (!realHardwareFix && !isGpsActuallyEnabled()) {
                                                         // GPS 关闭：屏蔽降级网络定位，改为回放缓存；
                                                         // 无缓存则丢弃回调（宿主按定位失败处理）
