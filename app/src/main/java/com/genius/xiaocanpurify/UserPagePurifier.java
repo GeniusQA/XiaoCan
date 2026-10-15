@@ -175,45 +175,6 @@ public final class UserPagePurifier {
                 STATE_LOG_THROTTLE.put(key, now);
                 MainHook.log("StateFilter: enter " + sName
                         + " fields=" + state.getClass().getDeclaredFields().length);
-                // 诊断：dump ChallengeWheel 字段结构（定位免单卡数据侧隐藏方案）
-                if (sName.contains("ChallengeWheel")) {
-                    StringBuilder fd = new StringBuilder();
-                    for (Class<?> c = state.getClass();
-                            c != null && c != Object.class; c = c.getSuperclass()) {
-                        for (Field f : c.getDeclaredFields()) {
-                            f.setAccessible(true);
-                            try {
-                                Object v = f.get(state);
-                                String s = v == null ? "null" : String.valueOf(v);
-                                if (s.length() > 60) s = s.substring(0, 60);
-                                fd.append(f.getName()).append('(')
-                                        .append(f.getType().getSimpleName())
-                                        .append(")=").append(s).append("; ");
-                            } catch (Throwable ignored) {}
-                        }
-                    }
-                    MainHook.log("StateFilter: ChallengeWheel fields " + fd);
-                }
-                // 诊断：dump YuanBao（资产行状态）字段——免单横幅显示在
-                // 资产行卡片内部，数据可能与资产行同源
-                if (sName.contains("YuanBao")) {
-                    StringBuilder yd = new StringBuilder();
-                    for (Class<?> c = state.getClass();
-                            c != null && c != Object.class; c = c.getSuperclass()) {
-                        for (Field f : c.getDeclaredFields()) {
-                            f.setAccessible(true);
-                            try {
-                                Object v = f.get(state);
-                                String s = v == null ? "null" : String.valueOf(v);
-                                if (s.length() > 80) s = s.substring(0, 80);
-                                yd.append(f.getName()).append('(')
-                                        .append(f.getType().getSimpleName())
-                                        .append(")=").append(s).append("; ");
-                            } catch (Throwable ignored) {}
-                        }
-                    }
-                    MainHook.log("YuanBaoDiag fields " + yd);
-                }
             }
         } catch (Throwable ignored) {}
         try {
@@ -234,10 +195,6 @@ public final class UserPagePurifier {
                         before.append('[').append(s.length() > 40
                                 ? s.substring(0, 40) : s).append(']');
                     }
-                    // 诊断：入口数据列表完整项（反射 String 字段 + 完整
-                    // toString，10 秒节流）——确认「免单资格」等入口是否在
-                    // 宿主下发数据中、是否被我们的判据剔除
-                    dumpStateListFull(sName, f.getName(), list);
                     int removed = 0;
                     try {
                         java.util.Iterator it = list.iterator();
@@ -285,227 +242,6 @@ public final class UserPagePurifier {
             }
         } catch (Throwable t) {
             MainHook.log("StateFilter error: " + t);
-        }
-    }
-
-    /** 开关现值 dump 上次时间（30 秒节流）。 */
-    private static volatile long lastSwitchDumpMs;
-    /** 状态流打印上次时间（3 秒节流）。 */
-    private static volatile long lastStateFlowMs;
-    /** 状态列表完整内容 dump 上次时间（10 秒节流）。 */
-    private static volatile long lastStateListDumpMs;
-    /** 免单卡视图诊断上次时间（10 秒节流）。 */
-    private static volatile long lastQualifyDiagMs;
-
-    /** dump 当前「我」页相关隐藏开关现值（确认 UI 开关与判据一致）。 */
-    private static void dumpUserSwitches() {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastSwitchDumpMs < 30000L) return;
-            lastSwitchDumpMs = now;
-            String[][] sw = {
-                    {"挑战赛", PurifyPrefs.USER_MENU_CHALLENGE},
-                    {"免费抽奖", PurifyPrefs.USER_MENU_LOTTERY},
-                    {"对接暗号", PurifyPrefs.USER_MENU_SECRET},
-                    {"红包雨", PurifyPrefs.USER_MENU_RAIN},
-                    {"消消乐", PurifyPrefs.USER_MENU_ELIMINATE},
-                    {"免单资格", PurifyPrefs.USER_MENU_QUALIFY},
-                    {"签到", PurifyPrefs.USER_MENU_CHECKIN},
-                    {"任务领现金", PurifyPrefs.USER_MENU_TASK_CASH},
-                    {"元宝", PurifyPrefs.USER_ASSET_YUANBAO},
-                    {"卡券", PurifyPrefs.USER_ASSET_COUPON},
-                    {"红包", PurifyPrefs.USER_ASSET_REDPACKET},
-                    {"订单", PurifyPrefs.USER_ORDER},
-                    {"商家", PurifyPrefs.USER_MERCHANT},
-                    {"VIP轮播", PurifyPrefs.USER_VIP_CAROUSEL},
-                    {"电商", PurifyPrefs.USER_COMMERCE},
-                    {"通知", PurifyPrefs.USER_NOTICE},
-                    {"客服", PurifyPrefs.USER_SERVICE},
-                    {"新人提示", PurifyPrefs.USER_NEW_USER_TIP},
-                    {"奖金", PurifyPrefs.USER_BONUS},
-                    {"赚钱", PurifyPrefs.USER_EARN},
-                    {"其它赛事", PurifyPrefs.USER_OTHER_MATCH},
-                    {"BQT", PurifyPrefs.USER_BQT},
-                    {"悬浮窗", PurifyPrefs.FLOATING_WINDOW},
-            };
-            StringBuilder sb = new StringBuilder();
-            for (String[] s : sw) {
-                sb.append(s[0]).append('=').append(PurifyPrefs.hide(s[1]) ? 1 : 0)
-                        .append(' ');
-            }
-            MainHook.log("Switches: " + sb);
-        } catch (Throwable ignored) {}
-    }
-
-    /** 打印宿主下发的状态类名（3 秒节流），确认是否存在免单相关状态。 */
-    private static void logStateFlow(String sName) {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastStateFlowMs < 3000L) return;
-            lastStateFlowMs = now;
-            MainHook.log("StateFlow: " + sName);
-        } catch (Throwable ignored) {}
-    }
-
-    /** dump 状态内列表字段的完整内容（反射 String 字段 + 完整 toString）。 */
-    private static void dumpStateListFull(String sName, String fieldName, List list) {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastStateListDumpMs < 10000L) return;
-            lastStateListDumpMs = now;
-            StringBuilder sb = new StringBuilder();
-            int n = 0;
-            for (Object o : list) {
-                if (n++ >= 10) {
-                    sb.append("...");
-                    break;
-                }
-                if (o == null) {
-                    sb.append("{null}");
-                    continue;
-                }
-                sb.append('{').append(o.getClass().getSimpleName());
-                for (Class<?> c = o.getClass(); c != null && c != Object.class;
-                        c = c.getSuperclass()) {
-                    for (Field f : c.getDeclaredFields()) {
-                        if (f.getType() != String.class) continue;
-                        try {
-                            f.setAccessible(true);
-                            Object v = f.get(o);
-                            if (v != null) {
-                                sb.append(' ').append(f.getName()).append('=').append(v);
-                            }
-                        } catch (Throwable ignored) {}
-                    }
-                }
-                String ts = String.valueOf(o);
-                if (ts.length() > 160) ts = ts.substring(0, 160);
-                sb.append(" TS=").append(ts).append('}');
-            }
-            MainHook.log("StateDump: " + sName + "." + fieldName
-                    + " size=" + list.size() + " " + sb);
-        } catch (Throwable ignored) {}
-    }
-
-    /** 免单卡视图诊断：bannerNotice 字段状态 + 含「免单」文本的视图链。 */
-    private static void diagQualifyCard(Object binding) {
-        try {
-            long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastQualifyDiagMs < 10000L) return;
-            lastQualifyDiagMs = now;
-            try {
-                Field f = binding.getClass().getField("bannerNotice");
-                Object v = f.get(binding);
-                if (v instanceof View) {
-                    View bn = (View) v;
-                    MainHook.log("QualifyDiag: bannerNotice vis=" + bn.getVisibility()
-                            + " " + bn.getWidth() + "x" + bn.getHeight()
-                            + " shown=" + bn.isShown());
-                } else {
-                    MainHook.log("QualifyDiag: bannerNotice="
-                            + (v == null ? "null" : v.getClass().getSimpleName()));
-                }
-            } catch (Throwable t) {
-                MainHook.log("QualifyDiag: bannerNotice field: " + t);
-            }
-            View root = getBindingRoot(binding);
-            if (!(root instanceof ViewGroup)) {
-                MainHook.log("QualifyDiag: root null");
-                return;
-            }
-            // 活动行容器（layoutMenu）所在卡片的兄弟节点结构：免单资格红色
-            // 横幅「您有1笔订单待免单」通常作为活动行的兄弟节点存在——dump
-            // 每个子节点的类名/可见性/尺寸/文本，判断它是「宿主未渲染」还是
-            // 「存在但被 GONE」（两种情况的处理方式完全不同）
-            try {
-                View lm = getLayoutRoot(binding, "layoutMenu");
-                if (lm != null && lm.getParent() instanceof ViewGroup) {
-                    ViewGroup card = (ViewGroup) lm.getParent();
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < card.getChildCount(); i++) {
-                        View c = card.getChildAt(i);
-                        sb.append(c.getClass().getSimpleName()).append('[')
-                                .append(c.getWidth()).append('x').append(c.getHeight())
-                                .append(c.getVisibility() == View.VISIBLE ? "" : " G");
-                        String t = subtreeText(c);
-                        if (t.length() > 0) {
-                            sb.append(" \"").append(t, 0, Math.min(24, t.length()))
-                                    .append('"');
-                        }
-                        sb.append(']');
-                    }
-                    MainHook.log("QualifyDiag: menu card("
-                            + card.getClass().getSimpleName()
-                            + " children=" + card.getChildCount() + ") " + sb);
-                } else {
-                    MainHook.log("QualifyDiag: layoutMenu missing for card dump");
-                }
-            } catch (Throwable t) {
-                MainHook.log("QualifyDiag: card dump error: " + t);
-            }
-            // adContainer 是模块「无条件隐藏」的广告容器：若免单资格横幅被
-            // 宿主归入其中，就会被无条件隐藏（与开关无关）——dump 其内容
-            // 与可见性，确认该横幅是否落在这里
-            try {
-                View ad = null;
-                try {
-                    Field af = binding.getClass().getField("adContainer");
-                    Object o = af.get(binding);
-                    ad = o instanceof View ? (View) o : null;
-                } catch (Throwable ignored) {}
-                if (ad == null) {
-                    MainHook.log("QualifyDiag: adContainer=null");
-                } else {
-                    String t = subtreeText(ad);
-                    MainHook.log("QualifyDiag: adContainer vis=" + ad.getVisibility()
-                            + " " + ad.getWidth() + "x" + ad.getHeight()
-                            + " text=\"" + (t.length() > 40 ? t.substring(0, 40) : t)
-                            + "\"");
-                }
-            } catch (Throwable t2) {
-                MainHook.log("QualifyDiag: adContainer dump error: " + t2);
-            }
-            // 多关键词扫描：确认「您有1笔订单待免单」类文案是否存在
-            for (String kw : new String[]{"免单", "待免单", "您有"}) {
-                java.util.List<View> hits = new java.util.ArrayList<>();
-                collectTextViewsContaining(root, kw, hits, 3);
-                if (hits.isEmpty()) {
-                    MainHook.log("QualifyDiag: no view contains \"" + kw + "\" text");
-                }
-                for (View v : hits) {
-                    StringBuilder c = new StringBuilder();
-                    View cur = v;
-                    for (int i = 0; cur != null && i < 6; i++) {
-                        c.append(cur.getClass().getSimpleName()).append('[')
-                                .append(cur.getWidth()).append('x').append(cur.getHeight())
-                                .append(cur.getVisibility() == View.VISIBLE ? "" : " G")
-                                .append("]<=");
-                        cur = cur.getParent() instanceof View ? (View) cur.getParent() : null;
-                    }
-                    String t = String.valueOf(((android.widget.TextView) v).getText());
-                    MainHook.log("QualifyDiag: \"" + kw + "\" \"" 
-                            + (t.length() > 24 ? t.substring(0, 24) : t)
-                            + "\" chain " + c);
-                }
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    /** 收集自身文本包含关键词的 TextView（深度优先，最多 max 个）。 */
-    private static void collectTextViewsContaining(View v, String kw,
-                                                   java.util.List<View> out, int max) {
-        if (v == null || out.size() >= max) return;
-        if (v instanceof android.widget.TextView) {
-            CharSequence cs = ((android.widget.TextView) v).getText();
-            if (cs != null && cs.toString().contains(kw)) {
-                out.add(v);
-            }
-        }
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount() && out.size() < max; i++) {
-                collectTextViewsContaining(g.getChildAt(i), kw, out, max);
-            }
         }
     }
 
@@ -581,10 +317,6 @@ public final class UserPagePurifier {
                         Object state = chain.getArg(0);
                         if (state != null) {
                             String sName = state.getClass().getSimpleName();
-                            // 诊断：开关现值 dump（30 秒节流）+ 状态流打印
-                            //（3 秒节流，确认宿主下发了哪些状态、是否含免单相关）
-                            dumpUserSwitches();
-                            logStateFlow(sName);
                             boolean hide = false;
                             if (sName.contains("ChallengeWheel")) {
                                 // 活动行下方「免单资格 + 挑战赛进度」轮播卡。
@@ -648,9 +380,6 @@ public final class UserPagePurifier {
                                         // 仍是历史隐藏态，宿主复用视图不会自动恢复）
                                         showBindingField(b, "bannerNotice");
                                         restoreFreeOrderQualifyCard(b);
-                                        // 诊断：免单横幅当前是否存在于视图树、
-                                        // bannerNotice 字段状态与含「免单」文本视图链
-                                        diagQualifyCard(b);
                                     }
                                     // 单入口嵌入蚕豆卡：活动行只剩 1 个可见入口时
                                     // 嵌入到「可提现蚕豆/余额」与「提现」按钮中间
@@ -1246,38 +975,6 @@ public final class UserPagePurifier {
                 return;
             }
             ViewGroup card = (ViewGroup) lm.getParent();
-            // 诊断：dump 活动行自身位置/高度与全部兄弟节点结构（类名、top、
-            // 高度、可见性、文本）——定位「轮播控件真名」与「活动行上移」
-            // 的根因（对比隐藏前后 lmTop 即可确认是谁在挤）
-            try {
-                StringBuilder sb = new StringBuilder();
-                sb.append("lmTop=").append(lm.getTop())
-                        .append(" lmH=").append(lm.getHeight()).append(" | ");
-                for (int i = 0; i < card.getChildCount(); i++) {
-                    View c = card.getChildAt(i);
-                    sb.append(c.getClass().getSimpleName()).append('[')
-                            .append(c.getTop()).append('+').append(c.getHeight())
-                            .append(c.getVisibility() == View.VISIBLE ? "" : " G");
-                    String t = subtreeText(c);
-                    if (t.length() > 0) {
-                        sb.append(" \"").append(t, 0, Math.min(16, t.length()))
-                                .append('"');
-                    }
-                    sb.append(']');
-                }
-                MainHook.log("MenuCardDiag: " + sb);
-                // 资产行卡片内部结构（2 层）：免单横幅显示在资产行卡内、
-                // 文本 Kuikly 自绘读不到——dump 内部找它的宿主控件
-                for (int i = 0; i < card.getChildCount(); i++) {
-                    View c = card.getChildAt(i);
-                    if (!(c instanceof ViewGroup)) continue;
-                    if (!subtreeText(c).contains("元宝")) continue;
-                    StringBuilder ib = new StringBuilder();
-                    dumpLevel(c, ib, 0, 2);
-                    MainHook.log("AssetCardDiag: " + ib);
-                    break;
-                }
-            } catch (Throwable ignored) {}
             for (int i = 0; i < card.getChildCount(); i++) {
                 View c = card.getChildAt(i);
                 if (c == lm) continue;
@@ -1421,23 +1118,6 @@ public final class UserPagePurifier {
     /** 资产行容器原始高度（minHeight 锁定用；宿主重渲染复位后每次重放补设）。 */
     private static final java.util.WeakHashMap<View, Integer> ROW_ORIG_H =
             new java.util.WeakHashMap<>();
-
-    /** 递归 dump 视图子树（限深，top+height 定位）。 */
-    private static void dumpLevel(View v, StringBuilder sb, int depth, int maxDepth) {
-        if (v == null) return;
-        sb.append(v.getClass().getSimpleName()).append('[')
-                .append(v.getTop()).append('+').append(v.getHeight())
-                .append(v.getVisibility() == View.VISIBLE ? "" : " G").append(']');
-        if (depth >= maxDepth || !(v instanceof ViewGroup)) return;
-        ViewGroup g = (ViewGroup) v;
-        sb.append('{');
-        int n = Math.min(g.getChildCount(), 10);
-        for (int i = 0; i < n; i++) {
-            dumpLevel(g.getChildAt(i), sb, depth + 1, maxDepth);
-            if (i < n - 1) sb.append(',');
-        }
-        sb.append('}');
-    }
 
     /**
      * 向上寻找「资产行卡片容器」：优先 CardView 外壳（宿主资产行卡片，
