@@ -194,6 +194,26 @@ public final class UserPagePurifier {
                     }
                     MainHook.log("StateFilter: ChallengeWheel fields " + fd);
                 }
+                // 诊断：dump YuanBao（资产行状态）字段——免单横幅显示在
+                // 资产行卡片内部，数据可能与资产行同源
+                if (sName.contains("YuanBao")) {
+                    StringBuilder yd = new StringBuilder();
+                    for (Class<?> c = state.getClass();
+                            c != null && c != Object.class; c = c.getSuperclass()) {
+                        for (Field f : c.getDeclaredFields()) {
+                            f.setAccessible(true);
+                            try {
+                                Object v = f.get(state);
+                                String s = v == null ? "null" : String.valueOf(v);
+                                if (s.length() > 80) s = s.substring(0, 80);
+                                yd.append(f.getName()).append('(')
+                                        .append(f.getType().getSimpleName())
+                                        .append(")=").append(s).append("; ");
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                    MainHook.log("YuanBaoDiag fields " + yd);
+                }
             }
         } catch (Throwable ignored) {}
         try {
@@ -1207,6 +1227,17 @@ public final class UserPagePurifier {
                     sb.append(']');
                 }
                 MainHook.log("MenuCardDiag: " + sb);
+                // 资产行卡片内部结构（2 层）：免单横幅显示在资产行卡内、
+                // 文本 Kuikly 自绘读不到——dump 内部找它的宿主控件
+                for (int i = 0; i < card.getChildCount(); i++) {
+                    View c = card.getChildAt(i);
+                    if (!(c instanceof ViewGroup)) continue;
+                    if (!subtreeText(c).contains("元宝")) continue;
+                    StringBuilder ib = new StringBuilder();
+                    dumpLevel(c, ib, 0, 2);
+                    MainHook.log("AssetCardDiag: " + ib);
+                    break;
+                }
             } catch (Throwable ignored) {}
             for (int i = 0; i < card.getChildCount(); i++) {
                 View c = card.getChildAt(i);
@@ -1342,6 +1373,23 @@ public final class UserPagePurifier {
     /** 资产行容器原始高度（minHeight 锁定用；宿主重渲染复位后每次重放补设）。 */
     private static final java.util.WeakHashMap<View, Integer> ROW_ORIG_H =
             new java.util.WeakHashMap<>();
+
+    /** 递归 dump 视图子树（限深，top+height 定位）。 */
+    private static void dumpLevel(View v, StringBuilder sb, int depth, int maxDepth) {
+        if (v == null) return;
+        sb.append(v.getClass().getSimpleName()).append('[')
+                .append(v.getTop()).append('+').append(v.getHeight())
+                .append(v.getVisibility() == View.VISIBLE ? "" : " G").append(']');
+        if (depth >= maxDepth || !(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        sb.append('{');
+        int n = Math.min(g.getChildCount(), 10);
+        for (int i = 0; i < n; i++) {
+            dumpLevel(g.getChildAt(i), sb, depth + 1, maxDepth);
+            if (i < n - 1) sb.append(',');
+        }
+        sb.append('}');
+    }
 
     /**
      * 向上寻找「资产行卡片容器」：优先 CardView 外壳（宿主资产行卡片，
