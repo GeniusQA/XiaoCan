@@ -145,7 +145,7 @@ public final class LocationCacheHook {
             try {
                 if ("onLocationChanged".equals(method.getName()) && args != null && args.length >= 2) {
                     int error = (Integer) args[1];
-                    // 真实硬件定位（gps/fused）永远透传并刷新缓存：设备上其它
+                    // 真实 GPS 硬件定位永远透传并刷新缓存：设备上其它
                     // 定位模块会伪造 isProviderEnabled=false，isGpsActuallyEnabled()
                     // 据此误判「GPS 关闭」，把用户打开 GPS 后的真实定位也替换成
                     // 缓存回放——顶部地址栏拿不到新定位，入口随之消失
@@ -961,7 +961,7 @@ public final class LocationCacheHook {
                                                         && mArgs != null && mArgs.length >= 1
                                                         && mArgs[0] instanceof Location) {
                                                     Location loc = (Location) mArgs[0];
-                                                    // gps/fused 定位只可能来自真实 GPS 硬件，永远放行——
+                                                    // gps 定位只可能来自真实 GPS 硬件，永远放行——
                                                     // 不能信任 isGpsActuallyEnabled()：设备上其它定位类
                                                     // 模块/应用会伪造 isProviderEnabled=false，误判成
                                                     // 「GPS 关闭」会把 Flutter 插件请求的真实定位拦截成
