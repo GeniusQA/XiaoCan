@@ -1192,6 +1192,33 @@ public final class UserPagePurifier {
             new java.util.WeakHashMap<>();
 
     /**
+     * 在资产行卡片内部递归寻找轮播 RecyclerView（高 &gt; 120）并 GONE——
+     * 免单横幅页的宿主控件（AssetCardDiag 实测 RecyclerView[124+202]，
+     * item 内容 Kuikly 自绘、文本读不到，文案判据必然失败）。
+     * 命中控件记入 QUALIFY_HIDDEN_BY_STRUCT 供开关关闭时恢复。
+     */
+    private static void hideCarouselInAssetCard(ViewGroup assetCard) {
+        try {
+            for (int i = 0; i < assetCard.getChildCount(); i++) {
+                View c = assetCard.getChildAt(i);
+                String cls = c.getClass().getName();
+                if (cls.contains("RecyclerView") && c.getHeight() > 120) {
+                    if (c.getVisibility() != View.GONE) {
+                        c.setVisibility(View.GONE);
+                        MainHook.log("Hidden qualify banner carousel: "
+                                + c.getWidth() + "x" + c.getHeight());
+                    }
+                    QUALIFY_HIDDEN_BY_STRUCT.put(c, Boolean.TRUE);
+                    continue;
+                }
+                if (c instanceof ViewGroup) {
+                    hideCarouselInAssetCard((ViewGroup) c);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /**
      * 结构路径隐藏「活动行下方免单 + 挑战赛轮播卡」。
      * 该卡由 Kuikly 自绘，文案在原生视图树中读不到（文案判据必然失败，
      * 日志已证明）；但其宿主控件是真实 View：位于活动行容器（layoutMenu）
@@ -1245,6 +1272,15 @@ public final class UserPagePurifier {
                 String cls = c.getClass().getName();
                 if (!cls.contains("Banner") && !cls.contains("ViewPager")
                         && !cls.contains("LoopView")) {
+                    // 资产行卡片内部：免单横幅页的宿主是卡内的轮播
+                    // RecyclerView（AssetCardDiag 实测 RecyclerView[124+202]，
+                    // item 内容 Kuikly 自绘、文本读不到）——GONE 它，免单
+                    // 横幅页随之消失（挑战赛进度页已由 ChallengeWheel 数据
+                    // 清空负责）
+                    if (c instanceof ViewGroup
+                            && subtreeText(c).contains("元宝")) {
+                        hideCarouselInAssetCard((ViewGroup) c);
+                    }
                     continue;
                 }
                 if (c.getVisibility() != View.GONE) {
