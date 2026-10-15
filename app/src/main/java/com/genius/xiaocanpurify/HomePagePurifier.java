@@ -833,34 +833,16 @@ public final class HomePagePurifier {
                 }
             } catch (Throwable ignored) {}
         }
-        if (headerCollapsed && rv != null && toolbar != null && toolbar.getHeight() > 0) {
-            // 列表上移锚点改为「工具栏顶部」：新版宿主把左上角地址栏入口
-            // 挪进了工具栏（搜索框上方），此前锚点为搜索框底部，上移的列表
-            // 把地址栏盖住导致入口消失。clipToPadding(true) 使 padding 区不
-            // 绘制列表内容，工具栏区域显示工具栏自身（地址栏+搜索框），
-            // 顶部 Banner 区仍被覆盖；上游(1.2)的灰色空带问题由 padding
-            // 全覆盖工具栏高度自然消除。
-            int[] toolbarLocation = new int[2];
-            int[] listLocation = new int[2];
-            toolbar.getLocationInWindow(toolbarLocation);
-            rv.getLocationInWindow(listLocation);
-            int toolbarBottom = toolbarLocation[1] + toolbar.getHeight();
-            int top = Math.max(0, toolbarLocation[1] - listLocation[1]);
-            if (!rv.canScrollVertically(-1)) {
-                View row = topmostContent(rv);
-                if (row != null) {
-                    int[] rowLocation = new int[2];
-                    row.getLocationInWindow(rowLocation);
-                    int gap = rowLocation[1] - toolbarBottom;
-                    if (gap > 1) top = Math.max(0, rv.getPaddingTop() - gap);
-                }
-            }
-            if (rv.getPaddingTop() != top) rv.setPadding(rv.getPaddingLeft(), top, rv.getPaddingRight(), rv.getPaddingBottom());
-            if (rv instanceof ViewGroup) ((ViewGroup) rv).setClipToPadding(true);
-            // 地址栏恢复：宿主按「列表已滚动」折叠地址栏（layout_address
-            // GONE，ToolbarDiag 实测）——列表上移（padding）触发了该判定。
-            // 强制恢复显示，并把缓存地址回填进 tv_address（宿主地址文本
-            // 来自定位回调，回放缓存的地址在部分路径下未同步到该控件）。
+        if (headerCollapsed && toolbar != null) {
+            // 不再上移列表：实测列表 padding 触发宿主「折叠标题栏」逻辑
+            //（ll_collapse_title_bar），把左上角地址栏（layout_address）
+            // GONE，搜索框顶到 logo 行（用户截图：开模块后地址栏被搜索框
+            // 遮挡）。保留 fl_banner 容器清理（清背景+折叠图片子视图）与
+            // Banner 数据层过滤——容器内容为空后高度自然塌陷，列表由宿主
+            // 自行上移，布局结构恢复宿主原样（地址栏显示），净化效果不变。
+            // 地址栏恢复：宿主可能残留折叠态（layout_address GONE），恢复
+            // 显示并把缓存地址回填进 tv_address（宿主地址文本来自定位回调，
+            // 回放缓存的地址在部分路径下未同步到该控件）。
             try {
                 View addrBar = findViewByName(toolbar, "layout_address");
                 if (addrBar != null && addrBar.getVisibility() != View.VISIBLE) {
