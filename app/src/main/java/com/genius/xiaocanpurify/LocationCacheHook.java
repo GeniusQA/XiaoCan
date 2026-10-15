@@ -675,6 +675,14 @@ public final class LocationCacheHook {
 
     public static void injectAddressIntoSnapshot(String address) {
         if (address == null || address.isEmpty()) return;
+        // GPS 关闭时不注入：宿主的逆地理基于其自取的 WiFi 定位坐标（与
+        // 缓存坐标不同源），注入会把锦江区地址覆盖进成华区的缓存快照，
+        // 造成「坐标是成华区、POI 地址却是锦江区」的错配（用户实测）。
+        // 只在 GPS 真实定位生效时同步地址。
+        if (!isGpsActuallyEnabled()) {
+            MainHook.log("LocationCache: skip address inject (gps off): " + address);
+            return;
+        }
         lastAddress = address;
         try {
             SharedPreferences p = getPrefs();
