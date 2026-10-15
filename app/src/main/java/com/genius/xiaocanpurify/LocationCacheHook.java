@@ -597,6 +597,13 @@ public final class LocationCacheHook {
             MainHook.log("LocationCache: address push skipped (empty)");
             return;
         }
+        // GPS 关闭时跳过：宿主的逆地理基于其自取的 WiFi 定位（与缓存坐标
+        // 不同源），推送会以「缓存坐标 + 锦江区地址」的错配组合改写模块
+        // 设置页的 POI 展示（用户实测：坐标成华区、POI 锦江区）
+        if (!isGpsActuallyEnabled()) {
+            MainHook.log("LocationCache: address push skipped (gps off): " + address);
+            return;
+        }
         lastAddress = address;
         try {
             // 用内存坐标：prefs 是异步写入，逆地理响应返回时可能还没落盘
