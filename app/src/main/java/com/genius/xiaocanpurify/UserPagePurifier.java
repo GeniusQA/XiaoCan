@@ -525,7 +525,17 @@ public final class UserPagePurifier {
                             dumpUserSwitches();
                             logStateFlow(sName);
                             boolean hide = false;
-                            if (sName.contains("Menu") || sName.contains("Challenge")) {
+                            if (sName.contains("ChallengeWheel")) {
+                                // 活动行下方「免单资格 + 挑战赛进度」轮播卡：上游
+                                // (Jessire/XiaoCanPurify 1.2) 在 renderState 层把含
+                                // "Challenge" 的状态一并吞掉（return null，宿主不
+                                // 渲染）——该卡与活动行同为状态驱动渲染，与网络层
+                                // 无关。这里按「免单资格卡」开关独立控制。
+                                // 注意必须放在 Menu/Challenge 分支之前：
+                                // ShowChallengeWheel 也含 "Challenge"，放后面会被
+                                // 抢先命中导致吞不掉（实测日志只有 enter 无 Filtered）。
+                                hide = PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY);
+                            } else if (sName.contains("Menu") || sName.contains("Challenge")) {
                                 // 活动行：全部入口开关都开启（隐藏）时才整行拦截；
                                 // 否则放行渲染，由状态层列表过滤剔除被隐藏的入口
                                 hide = allMenuItemsHidden();
@@ -545,14 +555,6 @@ public final class UserPagePurifier {
                                 hide = true;
                             } else if (sName.contains("MatchPlacement")) {
                                 hide = PurifyPrefs.hide(PurifyPrefs.USER_OTHER_MATCH);
-                            } else if (sName.contains("ChallengeWheel")) {
-                                // 活动行下方「免单资格 + 挑战赛进度」轮播卡：数据
-                                // 由 ShowChallengeWheel 状态驱动（日志确认）。开关
-                                // 开启时整状态吞掉——宿主不渲染，两页（免单页 +
-                                // 挑战赛进度页）与指示器彻底消失；这是唯一可靠路径
-                                //（视图层 GONE 会与 Kuikly 绘制脱同步，实测原生树
-                                // 已 GONE 但绘制层仍显示该卡）。
-                                hide = PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY);
                             }
                             if (hide) {
                                 MainHook.log("Filtered UserCenterViewState: " + sName);
