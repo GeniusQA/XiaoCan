@@ -123,7 +123,9 @@ public final class SearchPagePurifier {
     private static void dumpRootStructure(View root, String activityName) {
         try {
             long now = android.os.SystemClock.uptimeMillis();
-            if (now - lastStructDumpMs < 5000L) return;
+            // 60 秒节流：该 dump 每条都很大，高频输出会把 logcat 缓冲冲掉，
+            // 导致「我」页等其它关键诊断日志丢失
+            if (now - lastStructDumpMs < 60000L) return;
             lastStructDumpMs = now;
             StringBuilder sb = new StringBuilder();
             dumpLevel(root, sb, 0, 5);
