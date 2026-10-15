@@ -565,6 +565,18 @@ public final class NetworkAdInterceptor {
                     MainHook.log("Lottery prize payload detected, arming jump guard: " + url);
                     EnrollmentJumpGuard.armNow();
                 }
+                // 诊断：定位「免单横幅 + 挑战赛进度轮播」的数据接口——
+                // 结构化 JSON 里没有渲染文案（客户端拼装），用数据侧关键词
+                // 匹配，dump URL 与响应体片段后按接口精准拦截
+                if (body.contains("免单") || body.contains("待免单")
+                        || body.contains("challengeWheel")
+                        || body.contains("challenge_wheel")
+                        || body.contains("ChallengeWheel")) {
+                    MainHook.log("QualifyDataResp: url=" + url
+                            + " len=" + body.length()
+                            + " body=" + body.substring(0,
+                                    Math.min(400, body.length())));
+                }
                 if (!PopupMarkers.contains(body)) {
                     return response;
                 }
