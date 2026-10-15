@@ -265,6 +265,15 @@ public final class LocationCacheHook {
             MainHook.log("LocationCache: cacheSnapshot called prov=" + prov
                     + " lat=" + lat + " lng=" + lng
                     + " gpsEnabled=" + isGpsActuallyEnabled());
+            // 诊断：入账调用栈——GPS 关闭时仍有 prov=gps 的写入，定位来源
+            StringBuilder st = new StringBuilder();
+            StackTraceElement[] se = Thread.currentThread().getStackTrace();
+            for (int i = 3; i < se.length && i < 13; i++) {
+                st.append(se[i].getClassName()).append('.')
+                        .append(se[i].getMethodName()).append(':')
+                        .append(se[i].getLineNumber()).append('<');
+            }
+            MainHook.log("LocationCache: cacheSnapshot stack " + st);
             if (lat == 0.0 && lng == 0.0) return;
             // 回放回声过滤：GPS 关闭时本模块回放缓存定位，回放对象会再次进入监听器。
             // 坐标与缓存完全一致即为回声而非新定位，跳过重复入账——
@@ -1206,6 +1215,14 @@ public final class LocationCacheHook {
         // 缓存始终跟随最新 GPS 真实位置
         MainHook.log("LocationCache: recordFramework called lat=" + lat + " lng=" + lng
                 + " gpsEnabled=" + isGpsActuallyEnabled());
+        StringBuilder st2 = new StringBuilder();
+        StackTraceElement[] se2 = Thread.currentThread().getStackTrace();
+        for (int i = 3; i < se2.length && i < 13; i++) {
+            st2.append(se2[i].getClassName()).append('.')
+                    .append(se2[i].getMethodName()).append(':')
+                    .append(se2[i].getLineNumber()).append('<');
+        }
+        MainHook.log("LocationCache: recordFramework stack " + st2);
         if (lat == 0.0 && lng == 0.0) return;
         // 回放回声过滤（同 cacheSnapshot）：跳过本模块回放缓存造成的重复入账
         if (isEchoOfCache(lat, lng)) {
