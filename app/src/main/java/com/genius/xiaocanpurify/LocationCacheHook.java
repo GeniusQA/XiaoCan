@@ -1171,24 +1171,33 @@ public final class LocationCacheHook {
     private static boolean isGpsActuallyEnabled() {
         try {
             Context ctx = currentApplication();
-            if (ctx == null) return true;
+            if (ctx == null) {
+                MainHook.log("LocationCache: isGpsActuallyEnabled ctx=null -> false");
+                return false;
+            }
             Object lm = ctx.getSystemService(Context.LOCATION_SERVICE);
-            if (!(lm instanceof android.location.LocationManager)) return true;
+            if (!(lm instanceof android.location.LocationManager)) {
+                MainHook.log("LocationCache: isGpsActuallyEnabled service!=LM -> false");
+                return false;
+            }
             android.location.LocationManager manager = (android.location.LocationManager) lm;
             PROVIDER_CHECKING.set(Boolean.TRUE);
             try {
                 boolean gps = manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER);
                 boolean net = manager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER);
-                if (!gps) {
-                    MainHook.log("LocationCache: isGpsActuallyEnabled=false (gps=" + gps + " network=" + net
-                            + " thread=" + Thread.currentThread().getName() + ")");
-                }
+                // 两种状态都打日志：定位缓存被 WiFi 定位覆盖的判定漏洞定位
+                MainHook.log("LocationCache: isGpsActuallyEnabled=" + gps
+                        + " (gps=" + gps + " network=" + net
+                        + " thread=" + Thread.currentThread().getName() + ")");
                 return gps;
             } finally {
                 PROVIDER_CHECKING.remove();
             }
         } catch (Throwable t) {
-            return true;
+            // 查询失败按 GPS 关闭处理：定位语义=「仅 GPS + 缓存回放」，
+            // 异常时绝不能放行 WiFi 融合定位入账（会覆盖缓存）
+            MainHook.log("LocationCache: isGpsActuallyEnabled error -> false: " + t);
+            return false;
         }
     }
 
