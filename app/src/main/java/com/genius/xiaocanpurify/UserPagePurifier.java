@@ -86,20 +86,30 @@ public final class UserPagePurifier {
             for (Class<?> c = state.getClass(); c != null && c != Object.class;
                     c = c.getSuperclass()) {
                 for (Field f : c.getDeclaredFields()) {
-                    if (!List.class.isAssignableFrom(f.getType())) continue;
                     f.setAccessible(true);
-                    Object v = f.get(state);
-                    if (!(v instanceof List)) continue;
-                    List list = (List) v;
-                    if (list.isEmpty()) continue;
-                    int before = list.size();
-                    try {
-                        list.clear();
-                    } catch (Throwable t) {
-                        f.set(state, new java.util.ArrayList<>());
+                    if (List.class.isAssignableFrom(f.getType())) {
+                        Object v = f.get(state);
+                        if (!(v instanceof List)) continue;
+                        List list = (List) v;
+                        if (list.isEmpty()) continue;
+                        int before = list.size();
+                        try {
+                            list.clear();
+                        } catch (Throwable t) {
+                            f.set(state, new java.util.ArrayList<>());
+                        }
+                        MainHook.log("ChallengeWheel cleared: " + f.getName()
+                                + " was=" + before);
+                    } else {
+                        // 非 List 字段 dump：确认数据是否在单对象字段里
+                        try {
+                            Object v = f.get(state);
+                            String s = v == null ? "null" : String.valueOf(v);
+                            MainHook.log("ChallengeWheel field " + f.getName()
+                                    + "(" + f.getType().getSimpleName() + ")="
+                                    + (s.length() > 60 ? s.substring(0, 60) : s));
+                        } catch (Throwable ignored) {}
                     }
-                    MainHook.log("ChallengeWheel cleared: " + f.getName()
-                            + " was=" + before);
                 }
             }
         } catch (Throwable t) {
