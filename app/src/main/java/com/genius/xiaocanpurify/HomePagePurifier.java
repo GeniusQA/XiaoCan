@@ -916,12 +916,21 @@ public final class HomePagePurifier {
             View child = group.getChildAt(i);
             String id = getViewIdName(child);
             if ("fl_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
-                // 只折叠 Banner 自身：上游通过折叠其父容器（Header root）来
-                // 清掉 Banner 周边空隙，但新版宿主(3.21.5)把左上角地址栏入口
-                // 也放进了同一个父容器——折叠会连带隐藏地址栏（用户实测）。
-                // 改为仅 GONE fl_banner，剩余空隙由 enforceHome 的列表上移
-                //（锚点=工具栏顶）覆盖。
-                collapseView(child);
+                // 3.21.5 把左上角地址栏入口放进了 fl_banner 容器——GONE 容器
+                // 会连带隐藏地址栏（用户逐个开关实测确认）。改为：保留容器，
+                // 清空活动背景，折叠容器内的图片类子视图（活动大图）；
+                // Banner 数据由 hookFeedBanners 在数据层过滤，容器内容为空后
+                // 高度自然塌陷，地址栏与净化两全。
+                child.setBackground(null);
+                if (child instanceof ViewGroup) {
+                    ViewGroup g = (ViewGroup) child;
+                    for (int j = 0; j < g.getChildCount(); j++) {
+                        View s = g.getChildAt(j);
+                        if (s instanceof android.widget.ImageView) {
+                            collapseView(s);
+                        }
+                    }
+                }
             }
             boolean hide = ("layout_traffic_exp_c_order_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_ORDER_BANNER))
                     || ("layout_bottom_placement".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_BOTTOM_PLACEMENT))
