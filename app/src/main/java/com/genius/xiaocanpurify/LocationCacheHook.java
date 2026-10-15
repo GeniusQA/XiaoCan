@@ -613,6 +613,15 @@ public final class LocationCacheHook {
      * App 自己的逆地理与本模块捕获的是同一次定位，GPS 关闭回放时
      * 位置对象直接携带该地址，App 展示与模块缓存完全一致。
      */
+    /** 读取缓存地址文本（供首页地址栏回填；无缓存返回 null）。 */
+    public static String cachedAddressText() {
+        try {
+            return readStrSnapshot().get("getAddress");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     public static void injectAddressIntoSnapshot(String address) {
         if (address == null || address.isEmpty()) return;
         lastAddress = address;

@@ -857,6 +857,26 @@ public final class HomePagePurifier {
             }
             if (rv.getPaddingTop() != top) rv.setPadding(rv.getPaddingLeft(), top, rv.getPaddingRight(), rv.getPaddingBottom());
             if (rv instanceof ViewGroup) ((ViewGroup) rv).setClipToPadding(true);
+            // 地址栏恢复：宿主按「列表已滚动」折叠地址栏（layout_address
+            // GONE，ToolbarDiag 实测）——列表上移（padding）触发了该判定。
+            // 强制恢复显示，并把缓存地址回填进 tv_address（宿主地址文本
+            // 来自定位回调，回放缓存的地址在部分路径下未同步到该控件）。
+            try {
+                View addrBar = findViewByName(toolbar, "layout_address");
+                if (addrBar != null && addrBar.getVisibility() != View.VISIBLE) {
+                    addrBar.setVisibility(View.VISIBLE);
+                    MainHook.log("HomeAddress: restored layout_address");
+                }
+                View addrText = findViewByName(toolbar, "tv_address");
+                if (addrText instanceof android.widget.TextView) {
+                    String want = LocationCacheHook.cachedAddressText();
+                    String cur = String.valueOf(((android.widget.TextView) addrText).getText());
+                    if (want != null && !want.isEmpty() && !want.equals(cur)) {
+                        ((android.widget.TextView) addrText).setText(want);
+                        MainHook.log("HomeAddress: tv_address filled");
+                    }
+                }
+            } catch (Throwable ignored) {}
         }
         View root = asView(binding);
         if (root instanceof ViewGroup) {
