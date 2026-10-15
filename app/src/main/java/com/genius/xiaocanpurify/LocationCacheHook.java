@@ -149,7 +149,8 @@ public final class LocationCacheHook {
                     // 定位模块会伪造 isProviderEnabled=false，isGpsActuallyEnabled()
                     // 据此误判「GPS 关闭」，把用户打开 GPS 后的真实定位也替换成
                     // 缓存回放——顶部地址栏拿不到新定位，入口随之消失
-                    if (isRealHardwareFix(args[0]) && hasSatelliteEvidence(args[0])) {
+                    if (isRealHardwareFix(args[0]) && hasSatelliteEvidence(args[0])
+                            && isGpsActuallyEnabled()) {
                         if (error == errorOk()) {
                             cacheSnapshot(args[0]);
                         }
