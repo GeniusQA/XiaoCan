@@ -76,6 +76,37 @@ public final class UserPagePurifier {
     }
 
     /** 入口元素文本命中被隐藏开关的入口名时返回 true。 */
+    /**
+     * 清空 ShowChallengeWheel 状态内的列表数据（「免单活动卡」开关开启时）：
+     * 只读列表（Kotlin immutable）clear 失败时重建空列表回写字段。
+     * 宿主按清空后的数据渲染空轮播（Banner 高度 0），卡片塌陷整卡消失。
+     */
+    private static void clearChallengeWheelState(Object state) {
+        try {
+            for (Class<?> c = state.getClass(); c != null && c != Object.class;
+                    c = c.getSuperclass()) {
+                for (Field f : c.getDeclaredFields()) {
+                    if (!List.class.isAssignableFrom(f.getType())) continue;
+                    f.setAccessible(true);
+                    Object v = f.get(state);
+                    if (!(v instanceof List)) continue;
+                    List list = (List) v;
+                    if (list.isEmpty()) continue;
+                    int before = list.size();
+                    try {
+                        list.clear();
+                    } catch (Throwable t) {
+                        f.set(state, new java.util.ArrayList<>());
+                    }
+                    MainHook.log("ChallengeWheel cleared: " + f.getName()
+                            + " was=" + before);
+                }
+            }
+        } catch (Throwable t) {
+            MainHook.log("ChallengeWheel clear error: " + t);
+        }
+    }
+
     private static boolean menuEntryShouldHide(String s) {
         if (s == null) return false;
         try {
@@ -526,15 +557,16 @@ public final class UserPagePurifier {
                             logStateFlow(sName);
                             boolean hide = false;
                             if (sName.contains("ChallengeWheel")) {
-                                // 活动行下方「免单资格 + 挑战赛进度」轮播卡：上游
-                                // (Jessire/XiaoCanPurify 1.2) 在 renderState 层把含
-                                // "Challenge" 的状态一并吞掉（return null，宿主不
-                                // 渲染）——该卡与活动行同为状态驱动渲染，与网络层
-                                // 无关。这里按「免单资格卡」开关独立控制。
-                                // 注意必须放在 Menu/Challenge 分支之前：
-                                // ShowChallengeWheel 也含 "Challenge"，放后面会被
-                                // 抢先命中导致吞不掉（实测日志只有 enter 无 Filtered）。
-                                hide = PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY);
+                                // 活动行下方「免单资格 + 挑战赛进度」轮播卡。
+                                // 【不能吞状态】——吞掉只是不重新渲染，已渲染的
+                                // 卡会驻留（实测：状态已 Filtered 但卡仍显示）。
+                                // 改为开关开启时清空状态内列表数据后放行渲染：
+                                // 宿主按空数据渲染空轮播（无数据时 Banner 高度 0），
+                                // 卡片塌陷整卡消失。此分支必须保持在 Menu/Challenge
+                                // 之前（ShowChallengeWheel 含 "Challenge" 会被抢先）。
+                                if (PurifyPrefs.hide(PurifyPrefs.USER_MENU_QUALIFY)) {
+                                    clearChallengeWheelState(state);
+                                }
                             } else if (sName.contains("Menu") || sName.contains("Challenge")) {
                                 // 活动行：全部入口开关都开启（隐藏）时才整行拦截；
                                 // 否则放行渲染，由状态层列表过滤剔除被隐藏的入口
