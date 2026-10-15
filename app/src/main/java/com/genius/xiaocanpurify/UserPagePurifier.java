@@ -1202,11 +1202,23 @@ public final class UserPagePurifier {
             for (int i = 0; i < assetCard.getChildCount(); i++) {
                 View c = assetCard.getChildAt(i);
                 String cls = c.getClass().getName();
-                if (cls.contains("RecyclerView") && c.getHeight() > 120) {
+                // 免单横幅宿主有两类（AssetCardDiag 实测）：
+                // 1) 轮播 RecyclerView（挑战赛进度页，高 > 120）；
+                // 2) 资产行下方的 ConstraintLayout（免单横幅页，top > 180、
+                //    高 > 120，实测 top=220 h=167，文本 Kuikly 自绘读不到）
+                boolean isCarousel = cls.contains("RecyclerView")
+                        && c.getHeight() > 120;
+                if (!isCarousel && cls.contains("ConstraintLayout")
+                        && c.getTop() > 180 && c.getHeight() > 120) {
+                    isCarousel = true;
+                }
+                if (isCarousel) {
                     if (c.getVisibility() != View.GONE) {
                         c.setVisibility(View.GONE);
                         MainHook.log("Hidden qualify banner carousel: "
-                                + c.getWidth() + "x" + c.getHeight());
+                                + c.getClass().getSimpleName() + " top="
+                                + c.getTop() + " " + c.getWidth() + "x"
+                                + c.getHeight());
                     }
                     QUALIFY_HIDDEN_BY_STRUCT.put(c, Boolean.TRUE);
                     continue;
