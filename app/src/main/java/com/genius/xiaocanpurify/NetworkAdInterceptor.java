@@ -613,11 +613,17 @@ public final class NetworkAdInterceptor {
                             Math.min(300, body.length())));
                 }
                 // 诊断：dump 携带定位坐标参数的请求（选择地址页/逆地理/POI
-                // 请求的位置来源核验——应与缓存坐标一致）
+                // 请求的位置来源核验——应与缓存坐标一致；坐标可能在 URL
+                // 参数或 POST body 中）
                 if (ul.contains("lat=") || ul.contains("lng=")
                         || ul.contains("latitude=") || ul.contains("longitude=")
-                        || ul.contains("location=")) {
-                    MainHook.log("GeoReq: " + url);
+                        || ul.contains("location=")
+                        || (body.length() > 0 && body.length() < 8000
+                                && (body.contains("\"lat\"") || body.contains("lat=")
+                                        || body.contains("\"longitude\"")
+                                        || body.contains("longitude=")))) {
+                    MainHook.log("GeoReq: " + url + " body="
+                            + body.substring(0, Math.min(400, body.length())));
                 }
                 if (!PopupMarkers.contains(body)) {
                     return response;
