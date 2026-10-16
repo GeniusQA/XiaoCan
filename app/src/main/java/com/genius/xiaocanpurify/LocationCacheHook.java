@@ -924,10 +924,13 @@ public final class LocationCacheHook {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
+                            // 本模块反射调用（覆写流程内部）直接放行，避免重入误判
+                            if (Boolean.TRUE.equals(MMKV_INTERNAL.get())) return result;
                             String key = (String) chain.getArg(0);
                             if (!"LocationJson".equals(key)) return result;
                             if (result == null) {
                                 logMmkvRead("read=null");
+                                tryOverwriteMmkvLocationJson(currentApplication());
                                 return result;
                             }
                             String json = bytesMode
@@ -991,7 +994,64 @@ public final class LocationCacheHook {
         if (adcode > 0) {
             out = out.replaceAll("(\"adCode\"\\s*:\\s*)\\d+", "$1" + adcode);
         }
+        // name 字段同步为缓存地址（选点地址），避免文案残留旧 POI
+        String addr = readStrSnapshot().get("getAddress");
+        if (addr != null && !addr.isEmpty()) {
+            out = out.replaceAll("(\"name\"\\s*:\\s*\")[^\"]*(\")",
+                    "$1" + java.util.regex.Matcher.quoteReplacement(addr) + "$2");
+        }
         return out.equals(json) ? null : out;
+    }
+
+    /** MMKV 文件覆写尝试标记（成功或确认不可用后不再重试）。 */
+    private static volatile boolean mmkvOverwriteDone;
+    /** 覆写流程内部反射调用 MMKV 时的重入守卫。 */
+    private static final ThreadLocal<Boolean> MMKV_INTERNAL = new ThreadLocal<>();
+
+    /**
+     * 用宿主自己的 MMKV 实例把 LocationJson 覆写为缓存值（GPS 关闭且有缓存）。
+     * 直接经 encodeString 走官方 JNI 写入，CRC/一致性由 MMKV 自维护。
+     * 每次进程至多尝试一次；成功后下次启动的「hook 前首读」即为缓存位置。
+     */
+    private static void tryOverwriteMmkvLocationJson(Context ctx) {
+        if (mmkvOverwriteDone || ctx == null) return;
+        synchronized (LocationCacheHook.class) {
+            if (mmkvOverwriteDone) return;
+            try {
+                if (isGpsActuallyEnabled() || !hasCache()) {
+                    mmkvOverwriteDone = true;
+                    return;
+                }
+                Class<?> mmkv = Class.forName("com.tencent.mmkv.MMKV", false,
+                        ctx.getClassLoader());
+                Object def = mmkv.getMethod("defaultMMKV").invoke(null);
+                if (def == null) return;
+                MMKV_INTERNAL.set(Boolean.TRUE);
+                try {
+                    Object cur = mmkv.getMethod("decodeString", String.class)
+                            .invoke(def, "LocationJson");
+                    if (!(cur instanceof String)) {
+                        mmkvOverwriteDone = true;
+                        MainHook.log("LocationCache: MMKV overwrite skip (LocationJson missing)");
+                        return;
+                    }
+                    String rewritten = rewriteLocationJson((String) cur);
+                    if (rewritten == null) {
+                        mmkvOverwriteDone = true;
+                        return;
+                    }
+                    mmkv.getMethod("encodeString", String.class, String.class)
+                            .invoke(def, "LocationJson", rewritten);
+                    mmkvOverwriteDone = true;
+                    MainHook.log("LocationCache: MMKV LocationJson file overwritten with cache coords");
+                } finally {
+                    MMKV_INTERNAL.remove();
+                }
+            } catch (Throwable t) {
+                MainHook.log("LocationCache: MMKV overwrite failed: " + t);
+                mmkvOverwriteDone = true;
+            }
+        }
     }
 
     private static long cachedAdcode() {
@@ -1655,6 +1715,10 @@ public final class LocationCacheHook {
                 memoryLoaded = true;
                 MainHook.log("LocationCache: memory cache loaded from prefs "
                         + ll[0] + "," + ll[1]);
+                // 宿主在加固壳 attachBaseContext 阶段就读走 LocationJson
+                //（早于本 hook 安装），纯读拦截永远追不上首读——直接用宿主
+                // 自己的 MMKV 实例把文件覆写为缓存值，下次启动首读即正确
+                tryOverwriteMmkvLocationJson(currentApplication());
             } catch (Throwable t) {
                 MainHook.log("LocationCache: load memory cache failed: " + t);
                 memoryLoaded = true;

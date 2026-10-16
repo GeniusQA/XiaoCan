@@ -113,7 +113,7 @@ public class LogActivity extends Activity {
         searchBox.setPadding(dp2px(10), dp2px(6), dp2px(10), dp2px(6));
         LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        searchLp.setMargins(dp2px(12), 0, dp2px(6), 0);
+        searchLp.setMargins(dp2px(12), 0, 0, 0);
         topBar.addView(searchBox, searchLp);
         searchBox.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
@@ -125,15 +125,6 @@ public class LogActivity extends Activity {
                 pollHandler.postDelayed(searchDebounce, 300);
             }
         });
-
-        // 暂停/继续采集按钮（⋮ 左侧）
-        pauseBtn = new TextView(this);
-        pauseBtn.setTextSize(14);
-        pauseBtn.setTypeface(Typeface.DEFAULT_BOLD);
-        pauseBtn.setPadding(dp2px(10), dp2px(6), dp2px(6), dp2px(6));
-        pauseBtn.setOnClickListener(v -> togglePause());
-        updatePauseIcon();
-        topBar.addView(pauseBtn);
 
         TextView menuBtn = new TextView(this);
         menuBtn.setText("⋮");
@@ -154,13 +145,17 @@ public class LogActivity extends Activity {
         tabRow.addView(buildTab("应用日志", LogStore.SOURCE_APP));
         tabRow.addView(buildTab("模块日志", LogStore.SOURCE_MODULE));
 
-        TextView refresh = new TextView(this);
-        refresh.setText("↻ 刷新");
-        refresh.setTextSize(13);
-        refresh.setTextColor(ThemeHelper.accentGreen(this));
-        refresh.setPadding(dp2px(16), 0, 0, 0);
-        refresh.setOnClickListener(v -> { requestHookLogs(); reload(); });
-        tabRow.addView(refresh);
+        // 暂停/继续采集开关：tab 行最右侧，与顶栏 ⋮ 右缘对齐
+        View tabSpacer = new View(this);
+        tabRow.addView(tabSpacer, new LinearLayout.LayoutParams(
+                0, 1, 1f));
+        pauseBtn = new TextView(this);
+        pauseBtn.setTextSize(14);
+        pauseBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        pauseBtn.setPadding(dp2px(12), dp2px(6), 0, dp2px(6));
+        pauseBtn.setOnClickListener(v -> togglePause());
+        updatePauseIcon();
+        tabRow.addView(pauseBtn);
         content.addView(tabRow);
 
         // 日志列表
