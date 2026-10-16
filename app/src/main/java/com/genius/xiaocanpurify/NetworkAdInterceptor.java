@@ -659,6 +659,8 @@ public final class NetworkAdInterceptor {
                         if (sa > 0) {
                             MainHook.log("ADDR[ctx] " + body.substring(Math.max(0, sa - 500),
                                     Math.min(body.length(), sa + 120)));
+                            // 采集缓存坐标对应的区划码（响应 location 与缓存同区域才可信）
+                            LocationCacheHook.maybeStoreAdcode(body);
                         }
                         String addr = extractAddressText(body);
                         if (addr != null) {

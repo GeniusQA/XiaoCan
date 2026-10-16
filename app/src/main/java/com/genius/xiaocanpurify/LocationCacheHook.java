@@ -93,6 +93,7 @@ public final class LocationCacheHook {
                 hookTencentLocationManager(xposed, cl);
                 hookFrameworkCapture(xposed);
         hookSearchAddressCapture(xposed, cl);
+        hookMmkvLocationJson(xposed, cl);
     }
 
     // ---------------------------------------------------------------- Tencent SDK layer
@@ -890,6 +891,116 @@ public final class LocationCacheHook {
                     if (rt == String.class) return "";
                     return null;
                 });
+    }
+
+    // ---------------------------------------------------------------- MMKV LocationJson rewrite
+
+    private static final String KEY_ADCODE = "adcode";
+    private static volatile boolean mmkvHooked;
+
+    /**
+     * 宿主把自己持久化的上次定位存进 MMKV 的「LocationJson」键
+     * （{"adCode":510104,...,"latLng":{"lat":..,"lng":..},...}），启动时
+     * 直接读取——完全不经过定位 API，监听器/lastKnown 拦截都碰不到
+     * （用户实测 GPS 关闭时地址栏仍显示锦江区）。hook decodeString：
+     * GPS 关闭且有缓存时把坐标（及已知的 adCode）改写为缓存值，
+     * 应用侧的城市码/上报/逆地理随之全部归位。
+     */
+    private static void hookMmkvLocationJson(XposedInterface xposed, ClassLoader cl) {
+        if (mmkvHooked) return;
+        try {
+            Class<?> mmkv = Class.forName("com.tencent.mmkv.MMKV", false, cl);
+            int hooked = 0;
+            for (Method m : mmkv.getDeclaredMethods()) {
+                if (!"decodeString".equals(m.getName())) continue;
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length < 1 || ps[0] != String.class) continue;
+                try {
+                    xposed.hook(m).intercept(chain -> {
+                        Object result = chain.proceed();
+                        try {
+                            String key = (String) chain.getArg(0);
+                            if (result instanceof String && "LocationJson".equals(key)
+                                    && !isGpsActuallyEnabled() && hasCache()) {
+                                String rewritten = rewriteLocationJson((String) result);
+                                if (rewritten != null) {
+                                    MainHook.log("LocationCache: MMKV LocationJson rewritten");
+                                    return rewritten;
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                        return result;
+                    });
+                    hooked++;
+                } catch (Throwable ignored) {}
+            }
+            mmkvHooked = true;
+            MainHook.log("LocationCache: hooked MMKV.decodeString x" + hooked);
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: MMKV class not found, LocationJson rewrite unavailable: " + t);
+        }
+    }
+
+    /**
+     * 把 LocationJson 里的坐标/adCode 改写为缓存值（无变化返回 null）。
+     * adCode 仅在缓存配套的区划码已知时替换（ADDR[ctx] 从缓存坐标的
+     * 逆地理响应里采集，收敛后自动齐全）。
+     */
+    private static String rewriteLocationJson(String json) {
+        if (json == null || json.isEmpty()) return null;
+        ensureMemoryCacheLoaded();
+        double[] ll = lastLatLng;
+        if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return null;
+        String out = json
+                .replaceAll("(\"lat\"\\s*:\\s*)-?\\d+(?:\\.\\d+)?",
+                        "$1" + ll[0])
+                .replaceAll("(\"lng\"\\s*:\\s*)-?\\d+(?:\\.\\d+)?",
+                        "$1" + ll[1]);
+        long adcode = cachedAdcode();
+        if (adcode > 0) {
+            out = out.replaceAll("(\"adCode\"\\s*:\\s*)\\d+", "$1" + adcode);
+        }
+        return out.equals(json) ? null : out;
+    }
+
+    private static long cachedAdcode() {
+        SharedPreferences p = getPrefs();
+        return p != null ? p.getLong(KEY_ADCODE, 0L) : 0L;
+    }
+
+    /**
+     * 从逆地理响应采集缓存位置的区划码：仅当响应内 location 坐标与缓存
+     * 同区域（说明本次逆地理就是按缓存坐标做的，adcode 可信）才存储，
+     * 供 MMKV LocationJson 改写使用。
+     */
+    public static void maybeStoreAdcode(String body) {
+        if (body == null || body.length() > 200000) return;
+        try {
+            ensureMemoryCacheLoaded();
+            double[] ll = lastLatLng;
+            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return;
+            java.util.regex.Matcher loc = java.util.regex.Pattern
+                    .compile("\\\\?\"lat\\\\?\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)"
+                            + "\\s*,\\s*\\\\?\"lng\\\\?\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)")
+                    .matcher(body);
+            while (loc.find()) {
+                double la = Double.parseDouble(loc.group(1));
+                double ln = Double.parseDouble(loc.group(2));
+                if (Math.abs(la - ll[0]) > 0.02 || Math.abs(ln - ll[1]) > 0.025) continue;
+                java.util.regex.Matcher ad = java.util.regex.Pattern
+                        .compile("\\\\?\"adcode\\\\?\"\\s*:\\s*\\\\?\"?(\\d{6})")
+                        .matcher(body);
+                if (ad.find()) {
+                    long code = Long.parseLong(ad.group(1));
+                    SharedPreferences p = getPrefs();
+                    if (p != null && code > 0 && p.getLong(KEY_ADCODE, 0L) != code) {
+                        p.edit().putLong(KEY_ADCODE, code).apply();
+                        MainHook.log("LocationCache: cached adcode " + code);
+                    }
+                    return;
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     // ---------------------------------------------------------------- Search address capture
