@@ -66,7 +66,7 @@ public final class ThemeHelper {
 
     /** 描述文字。 */
     public static int textDesc(Context ctx) {
-        return color(ctx, 0xFF555555, 0xFFAAAAAA);
+        return color(ctx, 0xFF555555, 0xFFB3B3B3);
     }
 
     /** 次要文字。 */
@@ -76,12 +76,12 @@ public final class ThemeHelper {
 
     /** 时间/弱化文字。 */
     public static int textWeak(Context ctx) {
-        return color(ctx, 0xFF888888, 0xFF777777);
+        return color(ctx, 0xFF888888, 0xFF909090);
     }
 
     /** 占位/提示文字。 */
     public static int textHint(Context ctx) {
-        return color(ctx, 0xFF999999, 0xFF666666);
+        return color(ctx, 0xFF999999, 0xFFA6A6A6);
     }
 
     /** 卡片描边。 */

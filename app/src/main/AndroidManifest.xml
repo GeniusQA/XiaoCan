@@ -31,6 +31,11 @@
             </intent-filter>
         </activity>
 
+        <!-- 查看日志页：仅模块内部跳转，不对外暴露 -->
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
+
         <!-- 缓存位置推送入口：目标 App 通过显式广播写入本模块（绕过包可见性，模块无需 root） -->
         <receiver
             android:name=".CacheReceiver"

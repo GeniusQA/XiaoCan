@@ -159,6 +159,35 @@ public class MainActivity extends Activity {
         updateSyncStatus();
         layout.addView(statusCard);
 
+        // 日志入口卡片：查看日志 / 导出 / 自动清理
+        LinearLayout logEntry = new LinearLayout(this);
+        logEntry.setOrientation(LinearLayout.HORIZONTAL);
+        logEntry.setGravity(Gravity.CENTER_VERTICAL);
+        logEntry.setBackgroundColor(ThemeHelper.cardBg(this));
+        int lp = dp2px(14);
+        logEntry.setPadding(lp, dp2px(12), lp, dp2px(12));
+        LinearLayout.LayoutParams logEntryLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        logEntryLp.setMargins(0, 0, 0, dp2px(12));
+        logEntry.setLayoutParams(logEntryLp);
+        logEntry.setOnClickListener(v -> startActivity(
+                new android.content.Intent(MainActivity.this, LogActivity.class)));
+
+        TextView logTitle = new TextView(this);
+        logTitle.setText("查看日志");
+        logTitle.setTextSize(14);
+        logTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        logTitle.setTextColor(ThemeHelper.textHeading(this));
+        logEntry.addView(logTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView logArrow = new TextView(this);
+        logArrow.setText("›");
+        logArrow.setTextSize(18);
+        logArrow.setTextColor(ThemeHelper.textSecondary(this));
+        logEntry.addView(logArrow);
+        layout.addView(logEntry);
+
         // Theme card
         layout.addView(createThemeCard());
 
@@ -232,6 +261,7 @@ public class MainActivity extends Activity {
                     } catch (Throwable ignored) {
                     }
                     remotePrefs = prefs;
+                    LogStore.append(getApplicationContext(), "I", "Sync", "LSPosed 服务已连接，设置同步恢复");
                     flushPendingRemoteWrites();
                     // 服务绑定后按最终配置对齐桌面图标（覆盖 onCreate 时的临时状态）
                     syncLauncherIconState();
@@ -250,6 +280,7 @@ public class MainActivity extends Activity {
                 @Override
                 public void onServiceDied(XposedService service) {
                     remotePrefs = null;
+                    LogStore.append(getApplicationContext(), "W", "Sync", "LSPosed 服务断开");
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -493,6 +524,8 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshLocationInfo();
+        // 自动清理惰性触发：打开设置页时检查是否到达清理间隔
+        LogStore.maybeAutoCleanup(this);
     }
 
     private View createSwitchRow(final String key, String itemTitle, String itemDesc) {
@@ -590,6 +623,8 @@ public class MainActivity extends Activity {
         }
         android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
                 + " remoteSynced=" + synced);
+        LogStore.append(this, "I", "Sync", "设置 " + key + " -> "
+                + (hide ? "HIDE" : "SHOW") + (synced ? "（已同步宿主）" : "（未同步：LSPosed 服务未连接）"));
         updateSyncStatus();
     }
 
@@ -651,7 +686,7 @@ public class MainActivity extends Activity {
     private LinearLayout createCard() {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundColor(Color.WHITE);
+        card.setBackgroundColor(ThemeHelper.cardBg(this));
         int p = dp2px(14);
         card.setPadding(p, p, p, p);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(

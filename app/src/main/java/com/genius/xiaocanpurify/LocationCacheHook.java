@@ -87,34 +87,9 @@ public final class LocationCacheHook {
                 MainHook.log("LocationCache: resend receiver registered");
                 }
                 } catch (Throwable ignored) {}
-                // 主题切换接收器：模块设置页切换深浅色时通知宿主应用
-                // UiModeManager.setApplicationNightMode（跟随系统/浅色/深色）
-                try {
-                Context tctx = currentApplication();
-                if (tctx != null) {
-                android.content.BroadcastReceiver themeReceiver =
-                        new android.content.BroadcastReceiver() {
-                            @Override
-                            public void onReceive(android.content.Context c,
-                                                  android.content.Intent i) {
-                                try {
-                                    applyHostNightMode(i.getStringExtra("mode"));
-                                } catch (Throwable ignored) {}
-                            }
-                        };
-                android.content.IntentFilter tf = new android.content.IntentFilter(
-                        "com.genius.xiaocanpurify.ACTION_THEME_CHANGE");
-                tctx.registerReceiver(themeReceiver, tf);
-                MainHook.log("LocationCache: theme receiver registered");
-                }
-                } catch (Throwable ignored) {}
-                // 宿主重启后应用持久化的主题模式
-                try {
-                String saved = getPrefs().getString("host_theme_mode", null);
-                if (saved != null) {
-                applyHostNightMode(saved);
-                }
-                } catch (Throwable ignored) {}
+                // 主题深浅色已迁移到 HostThemeHook（独立于定位缓存开关）：
+                // 原先注册在本类 install() 内，用户关闭「定位缓存」时本方法
+                // 直接 return，主题功能会随之失效
                 hookTencentLocationManager(xposed, cl);
                 hookFrameworkCapture(xposed);
         hookSearchAddressCapture(xposed, cl);
@@ -734,36 +709,6 @@ public final class LocationCacheHook {
             return readStrSnapshot().get("getAddress");
         } catch (Throwable t) {
             return null;
-        }
-    }
-
-    /**
-     * 宿主深浅色应用：mode=light/dark/system。
-     * UiModeManager.setApplicationNightMode 对整个应用生效（需宿主支持
-     * 深色资源）；同时持久化到宿主 prefs，重启后 hook install 时再应用。
-     */
-    private static void applyHostNightMode(String mode) {
-        if (mode == null) return;
-        try {
-            Context ctx = currentApplication();
-            if (ctx == null) return;
-            Object um = ctx.getSystemService(android.app.UiModeManager.class);
-            if (um == null) return;
-            int uiMode;
-            if ("light".equals(mode)) {
-                uiMode = android.app.UiModeManager.MODE_NIGHT_NO;
-            } else if ("dark".equals(mode)) {
-                uiMode = android.app.UiModeManager.MODE_NIGHT_YES;
-            } else {
-                uiMode = android.app.UiModeManager.MODE_NIGHT_AUTO;
-            }
-            java.lang.reflect.Method m = um.getClass().getMethod(
-                    "setApplicationNightMode", int.class);
-            m.invoke(um, uiMode);
-            getPrefs().edit().putString("host_theme_mode", mode).apply();
-            MainHook.log("LocationCache: host night mode -> " + mode);
-        } catch (Throwable t) {
-            MainHook.log("LocationCache: applyHostNightMode failed: " + t);
         }
     }
 

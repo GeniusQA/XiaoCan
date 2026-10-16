@@ -194,6 +194,20 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            HostThemeHook.install(xposed, classLoader);
+            log("HostThemeHook installed successfully.");
+        } catch (Throwable t) {
+            log("HostThemeHook install error: " + t);
+        }
+
+        try {
+            HostLogBridge.install();
+            log("HostLogBridge installed successfully.");
+        } catch (Throwable t) {
+            log("HostLogBridge install error: " + t);
+        }
+
+        try {
             LotteryTaskAutomator.install(xposed, classLoader);
             log("LotteryTaskAutomator installed successfully.");
         } catch (Throwable t) {
@@ -211,6 +225,11 @@ public final class MainHook extends XposedModule {
     }
 
     public static void log(String message) {
+        // 同步进宿主内存环形缓冲，供日志页经 ACTION_LOG_PULL 拉取
+        try {
+            HostLogBridge.record(message);
+        } catch (Throwable ignored) {
+        }
         MainHook hook = instance;
         if (hook != null) {
             try {
