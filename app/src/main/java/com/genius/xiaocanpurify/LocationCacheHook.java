@@ -924,10 +924,14 @@ public final class LocationCacheHook {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
-                            // 捕获宿主实际使用的 MMKV 实例（覆写走同一实例）
+                            // 捕获宿主实际使用的 MMKV 实例（覆写走同一实例）；
+                            // 捕获到新实例时重试覆写（预载阶段可能因方法解析失败跳过）
                             if (capturedMmkv == null) {
                                 Object self = chain.getThisObject();
-                                if (self != null) capturedMmkv = self;
+                                if (self != null) {
+                                    capturedMmkv = self;
+                                    tryOverwriteMmkvLocationJson(currentApplication());
+                                }
                             }
                             // 本模块反射调用（覆写流程内部）直接放行，避免重入误判
                             if (Boolean.TRUE.equals(MMKV_INTERNAL.get())) return result;
@@ -1059,28 +1063,30 @@ public final class LocationCacheHook {
                     return;
                 }
                 final Object instance = def;
-                // 方法解析必须用 MMKV 类本身（实例若是子类，getDeclaredMethods
-                // 不含继承的 decodeString/encodeString，会误判 method missing）
-                Class<?> k = mmkvClass != null ? mmkvClass : instance.getClass();
+                // getMethods() 返回 public 方法（含继承）——实例即使是加固壳
+                // 生成的子类/代理，decodeString/encodeString 也必然可见；
+                // getDeclaredMethods() 在子类场景会漏掉继承方法（用户实测
+                // 「decode/encode method missing」根因）
                 Method dec = null, enc = null;
-                for (Class<?> c = k; c != null && c != Object.class; c = c.getSuperclass()) {
-                    for (Method m : c.getDeclaredMethods()) {
-                        if (dec == null && "decodeString".equals(m.getName())
-                                && m.getParameterTypes().length == 1
-                                && m.getParameterTypes()[0] == String.class) {
-                            dec = m;
-                        }
-                        if (enc == null && "encodeString".equals(m.getName())
-                                && m.getParameterTypes().length == 2
-                                && m.getParameterTypes()[0] == String.class
-                                && m.getParameterTypes()[1] == String.class) {
-                            enc = m;
-                        }
-                        if (dec != null && enc != null) break;
+                for (Method m : instance.getClass().getMethods()) {
+                    if (dec == null && "decodeString".equals(m.getName())
+                            && m.getParameterTypes().length == 1
+                            && m.getParameterTypes()[0] == String.class) {
+                        dec = m;
+                    }
+                    if (enc == null && "encodeString".equals(m.getName())
+                            && m.getParameterTypes().length == 2
+                            && m.getParameterTypes()[0] == String.class
+                            && m.getParameterTypes()[1] == String.class) {
+                        enc = m;
                     }
                     if (dec != null && enc != null) break;
                 }
                 if (dec == null || enc == null) {
+                    if (mmkvClass == null) {
+                        // MMKV 类尚未经 hook 解析：不置位，等捕获后重试
+                        return;
+                    }
                     mmkvOverwriteDone = true;
                     MainHook.log("LocationCache: MMKV overwrite skip (decode/encode method missing)");
                     return;
