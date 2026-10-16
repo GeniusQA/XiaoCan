@@ -574,30 +574,36 @@ public final class UserPagePurifier {
 
     private static void hookModuleRender(XposedInterface xposed, ClassLoader cl,
                                          String className, String prefKey) {
-        if (!PurifyPrefs.hide(prefKey)) return;
+        // 不在安装期读开关（此前开关关闭时直接不装 hook，宿主启动时的旧开关
+        // 状态会冻结整个运行期，模块页切换后必须重启宿主才生效）。
+        // 改为常驻 hook + 运行时读开关：开关关闭时透传渲染，
+        // 开启时 GONE 后吞渲染，模块页切换后重进「我」页即生效。
         try {
             Class<?> moduleClass = Class.forName(className, false, cl);
             for (Method m : moduleClass.getDeclaredMethods()) {
                 String mName = m.getName();
                 if ("render".equals(mName) || "load".equals(mName) || "initView".equals(mName)) {
                     xposed.hook(m).intercept(chain -> {
-                        Object module = chain.getThisObject();
-                        if (module != null) {
-                            try {
-                                Field bf = module.getClass().getField("binding");
-                                Object binding = bf.get(module);
-                                if (binding != null) {
-                                    Method getRoot = binding.getClass().getMethod("getRoot");
-                                    View root = (View) getRoot.invoke(binding);
-                                    if (root != null) {
-                                        root.setVisibility(View.GONE);
+                        if (PurifyPrefs.hide(prefKey)) {
+                            Object module = chain.getThisObject();
+                            if (module != null) {
+                                try {
+                                    Field bf = module.getClass().getField("binding");
+                                    Object binding = bf.get(module);
+                                    if (binding != null) {
+                                        Method getRoot = binding.getClass().getMethod("getRoot");
+                                        View root = (View) getRoot.invoke(binding);
+                                        if (root != null) {
+                                            root.setVisibility(View.GONE);
+                                        }
                                     }
-                                }
-                            } catch (Throwable ignored) {}
+                                } catch (Throwable ignored) {}
+                            }
+                            return null;
                         }
-                        return null;
+                        return chain.proceed();
                     });
-                    MainHook.log("Hooked " + className + "." + mName + " -> silenced");
+                    MainHook.log("Hooked " + className + "." + mName + " (live toggle)");
                 }
             }
         } catch (Throwable ignored) {}

@@ -46,6 +46,8 @@ public class LogActivity extends Activity {
     private BroadcastReceiver pushReceiver;
     private FrameLayout overlayHost;
     private PopupWindow currentPopup;
+    /** 暂停/继续采集按钮。 */
+    private TextView pauseBtn;
     /** 页面可见期间的 Hook 日志轮询间隔。 */
     private static final long POLL_INTERVAL_MS = 3000;
     private final android.os.Handler pollHandler =
@@ -93,6 +95,15 @@ public class LogActivity extends Activity {
         title.setTextColor(ThemeHelper.textTitle(this));
         topBar.addView(title, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        // 暂停/继续采集按钮（⋮ 左侧）
+        pauseBtn = new TextView(this);
+        pauseBtn.setTextSize(14);
+        pauseBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        pauseBtn.setPadding(dp2px(10), dp2px(6), dp2px(6), dp2px(6));
+        pauseBtn.setOnClickListener(v -> togglePause());
+        updatePauseIcon();
+        topBar.addView(pauseBtn);
 
         TextView menuBtn = new TextView(this);
         menuBtn.setText("⋮");
@@ -180,15 +191,43 @@ public class LogActivity extends Activity {
         }
     }
 
+    /** 暂停/继续采集：暂停期间停止轮询、Hook 推送与应用日志一律不落盘
+     *（宿主内存缓冲仍在累积，恢复后立即拉取补齐，不丢日志）。 */
+    private void togglePause() {
+        boolean pause = !LogStore.isPaused();
+        LogStore.setPaused(pause);
+        updatePauseIcon();
+        if (pause) {
+            pollHandler.removeCallbacks(pollTask);
+            Toast.makeText(this, "已暂停日志采集", Toast.LENGTH_SHORT).show();
+        } else {
+            requestHookLogs();
+            reload();
+            pollHandler.removeCallbacks(pollTask);
+            pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+            Toast.makeText(this, "已恢复日志采集", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void updatePauseIcon() {
+        boolean pausedNow = LogStore.isPaused();
+        // 采集中显示暂停符 ❚❚；已暂停显示继续符 ▶（绿色提示可点继续）
+        pauseBtn.setText(pausedNow ? "▶" : "❚❚");
+        pauseBtn.setTextColor(pausedNow ? ThemeHelper.accentGreen(this)
+                : ThemeHelper.textTitle(this));
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         // 回到页面立即拉取一次；页面可见期间轮询拉取 Hook 侧日志，
-        // 宿主推送回来后接收器会自动刷新列表（LogStore 按行去重，重复拉取无害）
-        requestHookLogs();
+        // 宿主推送回来后接收器会自动刷新列表（LogStore 按行去重，重复拉取无害）。
+        // 暂停采集期间不轮询不拉取，保持列表静止。
+        boolean pausedNow = LogStore.isPaused();
+        if (!pausedNow) requestHookLogs();
         reload();
         pollHandler.removeCallbacks(pollTask);
-        pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+        if (!pausedNow) pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
     }
 
     @Override
@@ -264,7 +303,8 @@ public class LogActivity extends Activity {
             }
         }
         countView.setText((isModule ? "模块日志" : "应用日志") + " 共 " + logs.size()
-                + " 条 · 等级: " + ("ALL".equals(levelFilter) ? "全部" : levelFilter));
+                + " 条 · 等级: " + ("ALL".equals(levelFilter) ? "全部" : levelFilter)
+                + (LogStore.isPaused() ? " · 已暂停采集" : ""));
     }
 
     /** 单条日志：徽章 + tag + 时间，内容默认 2 行，点击展开/收起。 */

@@ -302,6 +302,12 @@ public class MainActivity extends Activity {
                     remotePrefs = prefs;
                     LogStore.append(getApplicationContext(), "I", "Sync", "LSPosed 服务已连接，设置同步恢复");
                     flushPendingRemoteWrites();
+                    // 自动对账：服务未连接期间的开关改动只写了本地镜像，
+                    // 若页面关闭前服务一直没绑上，内存队列会随进程丢失，
+                    // 远程偏好停留在旧值——宿主读到的还是旧行为（用户实测
+                    // 「明明关闭了客服布局但宿主仍隐藏」）。按本地镜像全量
+                    // 比对推送一次，把历史漂移的键全部纠正。
+                    syncRemoteFromLocal();
                     // 服务绑定后按最终配置对齐桌面图标（覆盖 onCreate 时的临时状态）
                     syncLauncherIconState();
                     runOnUiThread(new Runnable() {
@@ -807,6 +813,47 @@ public class MainActivity extends Activity {
             if (editor.commit()) {
                 pendingRemoteWrites.clear();
                 android.util.Log.i("XiaoCanPurify", "Flushed pending settings to remote prefs");
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 开关默认值（与 getHide 一致：桌面图标默认显示，其余默认隐藏）。 */
+    private boolean defaultHide(String key) {
+        return !PurifyPrefs.HIDE_DESKTOP_ICON.equals(key);
+    }
+
+    /**
+     * 远程偏好对账：以本地镜像为准，比对全部已知键，把不一致的键推送到宿主。
+     * 修复「服务未连接时改开关 → 页面关闭进程被杀 → 队列丢失 → 远程停留旧值」
+     * 导致的宿主行为与模块设置不一致（用户实测客服布局关不掉）。
+     */
+    private void syncRemoteFromLocal() {
+        SharedPreferences rp = remotePrefs;
+        if (rp == null) return;
+        try {
+            SharedPreferences.Editor editor = rp.edit();
+            boolean changed = false;
+            for (Object[] group : GROUPS) {
+                for (String[] item : (String[][]) group[1]) {
+                    String key = item[0];
+                    boolean local = localPrefs.getBoolean(key, defaultHide(key));
+                    if (rp.getBoolean(key, !local) != local) {
+                        editor.putBoolean(key, local);
+                        changed = true;
+                        LogStore.append(this, "I", "Sync", "对账修正 " + key + " -> "
+                                + (local ? "HIDE" : "SHOW"));
+                    }
+                }
+            }
+            String cm = localPrefs.getString(PurifyPrefs.CACHE_CLEANUP_MODE, "off");
+            if (!cm.equals(rp.getString(PurifyPrefs.CACHE_CLEANUP_MODE, "off"))) {
+                editor.putString(PurifyPrefs.CACHE_CLEANUP_MODE, cm);
+                changed = true;
+            }
+            if (changed && editor.commit()) {
+                LogStore.append(this, "I", "Sync", "远程偏好对账完成，已推送本地最新设置");
+                updateSyncStatus();
             }
         } catch (Throwable ignored) {
         }

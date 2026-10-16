@@ -55,14 +55,24 @@ public final class LogStore {
 
     private static final java.util.LinkedHashSet<String> DEDUP = new java.util.LinkedHashSet<>();
     private static volatile long lastRecordTime;
+    /** 采集暂停开关：暂停期间应用日志与 Hook 推送一律不落盘（查看页可切回）。 */
+    private static volatile boolean paused;
 
     private LogStore() {}
+
+    public static boolean isPaused() {
+        return paused;
+    }
+
+    public static void setPaused(boolean p) {
+        paused = p;
+    }
 
     // ---------------------------------------------------------------- 写入
 
     /** 追加一条应用日志（多行内容会被压平以保持行格式可解析）。 */
     public static void append(Context ctx, String level, String tag, String msg) {
-        if (ctx == null || msg == null) return;
+        if (ctx == null || msg == null || paused) return;
         try {
             String line = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
                     .format(new Date())
@@ -78,7 +88,7 @@ public final class LogStore {
 
     /** 合并 Hook 侧推送的日志行到「模块日志」文件（已格式化；按行去重）。 */
     public static void appendHookLogs(Context ctx, String[] lines) {
-        if (ctx == null || lines == null || lines.length == 0) return;
+        if (ctx == null || lines == null || lines.length == 0 || paused) return;
         boolean changed = false;
         synchronized (LOCK) {
             for (String l : lines) {
