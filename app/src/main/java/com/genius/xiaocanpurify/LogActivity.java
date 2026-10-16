@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -48,6 +49,10 @@ public class LogActivity extends Activity {
     private PopupWindow currentPopup;
     /** 暂停/继续采集按钮。 */
     private TextView pauseBtn;
+    /** 模糊搜索框与当前关键字。 */
+    private EditText searchBox;
+    private String searchQuery = "";
+    private final Runnable searchDebounce = this::reload;
     /** 页面可见期间的 Hook 日志轮询间隔。 */
     private static final long POLL_INTERVAL_MS = 3000;
     private final android.os.Handler pollHandler =
@@ -93,8 +98,32 @@ public class LogActivity extends Activity {
         title.setTextSize(20);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(ThemeHelper.textTitle(this));
-        topBar.addView(title, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        topBar.addView(title);
+
+        // 模糊搜索框：匹配时间/等级/tag/消息原文，输入防抖 300ms 刷新
+        searchBox = new EditText(this);
+        searchBox.setHint("搜索日志");
+        searchBox.setTextSize(13);
+        searchBox.setSingleLine(true);
+        searchBox.setMaxLines(1);
+        searchBox.setTextColor(ThemeHelper.textBody(this));
+        searchBox.setHintTextColor(ThemeHelper.textHint(this));
+        searchBox.setBackground(roundRect(ThemeHelper.cardStroke(this)));
+        searchBox.setPadding(dp2px(10), dp2px(6), dp2px(10), dp2px(6));
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        searchLp.setMargins(dp2px(12), 0, dp2px(6), 0);
+        topBar.addView(searchBox, searchLp);
+        searchBox.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                searchQuery = s == null ? "" : s.toString();
+                pollHandler.removeCallbacks(searchDebounce);
+                pollHandler.postDelayed(searchDebounce, 300);
+            }
+        });
 
         // 暂停/继续采集按钮（⋮ 左侧）
         pauseBtn = new TextView(this);
@@ -285,12 +314,14 @@ public class LogActivity extends Activity {
     private void reload() {
         listContainer.removeAllViews();
         boolean isModule = LogStore.SOURCE_MODULE.equals(currentTab);
-        List<String[]> logs = LogStore.readLogs(this, levelFilter, currentTab);
+        List<String[]> logs = LogStore.readLogs(this, levelFilter, currentTab, searchQuery);
         if (logs.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText(isModule
-                    ? "暂无模块日志\n打开小蚕后 Hook 日志会自动收集到这里"
-                    : "暂无日志");
+            boolean searching = searchQuery != null && !searchQuery.trim().isEmpty();
+            empty.setText(searching ? "无匹配日志"
+                    : (isModule
+                        ? "暂无模块日志\n打开小蚕后 Hook 日志会自动收集到这里"
+                        : "暂无日志"));
             empty.setTextSize(14);
             empty.setTextColor(ThemeHelper.textHint(this));
             empty.setGravity(Gravity.CENTER);
@@ -304,6 +335,8 @@ public class LogActivity extends Activity {
         }
         countView.setText((isModule ? "模块日志" : "应用日志") + " 共 " + logs.size()
                 + " 条 · 等级: " + ("ALL".equals(levelFilter) ? "全部" : levelFilter)
+                + (searchQuery != null && !searchQuery.trim().isEmpty()
+                    ? " · 搜索: " + searchQuery.trim() : "")
                 + (LogStore.isPaused() ? " · 已暂停采集" : ""));
     }
 

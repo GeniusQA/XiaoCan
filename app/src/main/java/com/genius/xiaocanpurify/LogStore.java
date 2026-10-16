@@ -149,14 +149,17 @@ public final class LogStore {
 
     /**
      * 读取日志（最新在前）。返回条目 {time, level, tag, message}。
-     * levelFilter 为 null/"ALL" 时返回全部；最多 MAX_LINES_DISPLAY 条。
+     * levelFilter 为 null/"ALL" 时返回全部；query 非空时按包含匹配
+     * （不区分大小写，匹配时间/等级/tag/消息原文）全量过滤后再截取；
+     * 最多 MAX_LINES_DISPLAY 条。
      * source：SOURCE_APP=应用日志 / SOURCE_MODULE=模块日志。
      */
-    public static List<String[]> readLogs(Context ctx, String levelFilter, String source) {
+    public static List<String[]> readLogs(Context ctx, String levelFilter, String source,
+                                          String query) {
         List<String[]> out = new ArrayList<>();
         String[] lines;
         synchronized (LOCK) {
-            lines = readRawLinesLocked(ctx, levelFilter, source, MAX_LINES_DISPLAY);
+            lines = readRawLinesLocked(ctx, levelFilter, source, query, MAX_LINES_DISPLAY);
         }
         for (int i = lines.length - 1; i >= 0; i--) {
             String[] e = parseLine(lines[i]);
@@ -169,7 +172,7 @@ public final class LogStore {
     public static String exportText(Context ctx, String levelFilter, String source) {
         String[] lines;
         synchronized (LOCK) {
-            lines = readRawLinesLocked(ctx, levelFilter, source, Integer.MAX_VALUE);
+            lines = readRawLinesLocked(ctx, levelFilter, source, null, Integer.MAX_VALUE);
         }
         StringBuilder sb = new StringBuilder();
         sb.append("XiaoCanPurify ")
@@ -185,20 +188,24 @@ public final class LogStore {
         return sb.toString();
     }
 
-    /** 返回按时间正序、经过滤、从最新往前截取 maxLines 条的原始行。 */
+    /** 返回按时间正序、经过等级与关键字过滤、从最新往前截取 maxLines 条的原始行。 */
     private static String[] readRawLinesLocked(Context ctx, String levelFilter, String source,
-                                               int maxLines) {
+                                               String query, int maxLines) {
         File f = logFile(ctx, source);
         if (!f.exists() || maxLines <= 0) return new String[0];
         try {
             String[] all = readAll(f).split("\n");
             boolean allLevel = levelFilter == null || levelFilter.isEmpty()
                     || "ALL".equals(levelFilter);
+            String q = query == null ? "" : query.trim().toLowerCase(Locale.US);
             java.util.ArrayList<String> picked = new java.util.ArrayList<>();
             for (int i = all.length - 1; i >= 0 && picked.size() < maxLines; i--) {
                 String l = all[i];
                 if (l.isEmpty()) continue;
                 if (!allLevel && !lineHasLevel(l, levelFilter.charAt(0))) {
+                    continue;
+                }
+                if (!q.isEmpty() && !l.toLowerCase(Locale.US).contains(q)) {
                     continue;
                 }
                 picked.add(l);

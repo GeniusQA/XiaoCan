@@ -401,6 +401,7 @@ public final class LocationCacheHook {
 
     /** 新定位点与上次捕获地址的定位点是否足够接近（约 <500m，经纬度差阈值）。 */
     private static boolean isNearLastFix(double lat, double lng) {
+        ensureMemoryCacheLoaded();
         double[] ll = lastLatLng;
         if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
         return Math.abs(lat - ll[0]) < 0.005 && Math.abs(lng - ll[1]) < 0.005;
@@ -433,6 +434,7 @@ public final class LocationCacheHook {
      * 全部来自本模块的回放，必须跳过以免形成「回放→重复入账→重写快照」循环。
      */
     private static boolean isEchoOfCache(double lat, double lng) {
+        ensureMemoryCacheLoaded();
         double[] cur = lastLatLng;
         if (cur == null || (cur[0] == 0.0 && cur[1] == 0.0)) return false;
         return Math.abs(lat - cur[0]) < 1e-7 && Math.abs(lng - cur[1]) < 1e-7;
@@ -440,6 +442,7 @@ public final class LocationCacheHook {
 
     /** 请求坐标是否在缓存位置附近（<2km）——同区域请求可改写为缓存坐标。 */
     private static boolean isVicinityOfCache(double lat, double lng) {
+        ensureMemoryCacheLoaded();
         double[] ll = lastLatLng;
         if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return false;
         return Math.abs(lat - ll[0]) < 0.02 && Math.abs(lng - ll[1]) < 0.025;
@@ -456,6 +459,7 @@ public final class LocationCacheHook {
      */
     public static boolean hasVicinityCoordsInText(String body) {
         try {
+            ensureMemoryCacheLoaded();
             java.util.regex.Matcher ml = LAT_VALUE.matcher(body);
             java.util.regex.Matcher mn = LNG_VALUE.matcher(body);
             while (ml.find()) {
@@ -478,6 +482,7 @@ public final class LocationCacheHook {
      */
     public static String rewriteCoordsInString(String body) {
         try {
+            ensureMemoryCacheLoaded();
             double[] ll = lastLatLng;
             if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) return null;
             String norm = body.replaceAll("\\\\+\"", "\"");
@@ -1464,6 +1469,40 @@ public final class LocationCacheHook {
             return (Context) m.invoke(null);
         } catch (Throwable t) {
             return null;
+        }
+    }
+
+    /** 内存缓存是否已从磁盘预载（宿主重启后 lastLatLng 不再从 0 开始）。 */
+    private static volatile boolean memoryLoaded;
+
+    /**
+     * 把磁盘缓存预载进内存。lastLatLng 此前只在写缓存时更新——宿主重启后
+     * 一直是 0,0，导致请求坐标改写（rewriteCoordsInString 的 vicinity 判定）、
+     * 回声过滤、就近沿用地址等全部失效：GPS 关闭时宿主用自己持久化的
+     * 旧坐标发逆地理，地址栏显示锦江区等非缓存位置（用户实测）。
+     * Application 未就绪（getPrefs 为空）时不置位，留待下次调用重试。
+     */
+    private static void ensureMemoryCacheLoaded() {
+        if (memoryLoaded) return;
+        synchronized (LocationCacheHook.class) {
+            if (memoryLoaded) return;
+            try {
+                SharedPreferences p = getPrefs();
+                if (p == null) return; // Application 未就绪，下次重试
+                if (hasCache()) {
+                    double[] ll = cachedLatLng();
+                    if (!(ll[0] == 0.0 && ll[1] == 0.0)) {
+                        lastLatLng = ll;
+                        lastLocationTime = p.getLong(KEY_TIME, 0L);
+                        MainHook.log("LocationCache: memory cache loaded from prefs "
+                                + ll[0] + "," + ll[1]);
+                    }
+                }
+                memoryLoaded = true;
+            } catch (Throwable t) {
+                MainHook.log("LocationCache: load memory cache failed: " + t);
+                memoryLoaded = true;
+            }
         }
     }
 
