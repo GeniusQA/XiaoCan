@@ -918,7 +918,8 @@ public final class HomePagePurifier {
                 // 诊断（每次进程一次）：dump 四个视图的完整边界（x/y/w/h），
                 // 用于终版适配的精确坐标
                 try {
-                    if (!BOUNDS_DUMPED) {
+                    View pvCheck = addrParent;
+                    if (!BOUNDS_DUMPED && pvCheck != null && pvCheck.getWidth() > 0) {
                         BOUNDS_DUMPED = true;
                         View pv = addrParent;
                         View logo = findViewByName(toolbar, "ivXiaocan");
