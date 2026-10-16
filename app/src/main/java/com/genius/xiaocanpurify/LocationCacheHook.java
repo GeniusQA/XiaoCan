@@ -912,22 +912,43 @@ public final class LocationCacheHook {
             Class<?> mmkv = Class.forName("com.tencent.mmkv.MMKV", false, cl);
             int hooked = 0;
             for (Method m : mmkv.getDeclaredMethods()) {
-                if (!"decodeString".equals(m.getName())) continue;
+                String mn = m.getName();
                 Class<?>[] ps = m.getParameterTypes();
-                if (ps.length < 1 || ps[0] != String.class) continue;
+                boolean decodeString = "decodeString".equals(mn)
+                        && ps.length >= 1 && ps[0] == String.class;
+                boolean decodeBytes = "decodeBytes".equals(mn)
+                        && ps.length >= 1 && ps[0] == String.class;
+                if (!decodeString && !decodeBytes) continue;
+                final boolean bytesMode = decodeBytes;
                 try {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
                             String key = (String) chain.getArg(0);
-                            if (result instanceof String && "LocationJson".equals(key)
-                                    && !isGpsActuallyEnabled() && hasCache()) {
-                                String rewritten = rewriteLocationJson((String) result);
-                                if (rewritten != null) {
-                                    MainHook.log("LocationCache: MMKV LocationJson rewritten");
-                                    return rewritten;
-                                }
+                            if (!"LocationJson".equals(key)) return result;
+                            if (result == null) {
+                                logMmkvRead("read=null");
+                                return result;
                             }
+                            String json = bytesMode
+                                    ? new String((byte[]) result, java.nio.charset.StandardCharsets.UTF_8)
+                                    : (String) result;
+                            boolean gpsOn = isGpsActuallyEnabled();
+                            boolean has = hasCache();
+                            if (gpsOn || !has) {
+                                logMmkvRead("skip(gpsOn=" + gpsOn + " cache=" + has + ")");
+                                return result;
+                            }
+                            String rewritten = rewriteLocationJson(json);
+                            if (rewritten == null) {
+                                logMmkvRead("no-change (already cache coords)");
+                                return result;
+                            }
+                            logMmkvRead("rewritten");
+                            MainHook.log("LocationCache: MMKV LocationJson rewritten");
+                            return bytesMode
+                                    ? rewritten.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                                    : rewritten;
                         } catch (Throwable ignored) {}
                         return result;
                     });
@@ -935,10 +956,20 @@ public final class LocationCacheHook {
                 } catch (Throwable ignored) {}
             }
             mmkvHooked = true;
-            MainHook.log("LocationCache: hooked MMKV.decodeString x" + hooked);
+            MainHook.log("LocationCache: hooked MMKV.decodeString/decodeBytes x" + hooked);
         } catch (Throwable t) {
             MainHook.log("LocationCache: MMKV class not found, LocationJson rewrite unavailable: " + t);
         }
+    }
+
+    /** LocationJson 读取诊断（3 秒节流）：确认宿主是否经此路径读取。 */
+    private static volatile long lastMmkvReadLogMs;
+
+    private static void logMmkvRead(String what) {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastMmkvReadLogMs < 3000L) return;
+        lastMmkvReadLogMs = now;
+        MainHook.log("LocationCache: MMKV LocationJson " + what);
     }
 
     /**
