@@ -924,6 +924,11 @@ public final class LocationCacheHook {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
                         try {
+                            // 捕获宿主实际使用的 MMKV 实例（覆写走同一实例）
+                            if (capturedMmkv == null) {
+                                Object self = chain.getThisObject();
+                                if (self != null) capturedMmkv = self;
+                            }
                             // 本模块反射调用（覆写流程内部）直接放行，避免重入误判
                             if (Boolean.TRUE.equals(MMKV_INTERNAL.get())) return result;
                             String key = (String) chain.getArg(0);
@@ -940,6 +945,7 @@ public final class LocationCacheHook {
                             boolean has = hasCache();
                             if (gpsOn || !has) {
                                 logMmkvRead("skip(gpsOn=" + gpsOn + " cache=" + has + ")");
+                                tryOverwriteMmkvLocationJson(currentApplication());
                                 return result;
                             }
                             String rewritten = rewriteLocationJson(json);
@@ -1007,6 +1013,8 @@ public final class LocationCacheHook {
     private static volatile boolean mmkvOverwriteDone;
     /** 覆写流程内部反射调用 MMKV 时的重入守卫。 */
     private static final ThreadLocal<Boolean> MMKV_INTERNAL = new ThreadLocal<>();
+    /** hook decodeString 时捕获的 MMKV 实例（LocationJson 所在存储）。 */
+    private static volatile Object capturedMmkv;
 
     /**
      * 用宿主自己的 MMKV 实例把 LocationJson 覆写为缓存值（GPS 关闭且有缓存）。
@@ -1022,14 +1030,57 @@ public final class LocationCacheHook {
                     mmkvOverwriteDone = true;
                     return;
                 }
-                Class<?> mmkv = Class.forName("com.tencent.mmkv.MMKV", false,
-                        ctx.getClassLoader());
-                Object def = mmkv.getMethod("defaultMMKV").invoke(null);
-                if (def == null) return;
+                // 实例优先用 hook 时捕获的（LocationJson 必在其中），
+                // 兜底枚举 static defaultMMKV（0 参优先，带参传 0/null）
+                Object def = capturedMmkv;
+                if (def == null && ctx != null) {
+                    try {
+                        Class<?> mmkvCls = Class.forName("com.tencent.mmkv.MMKV", false,
+                                ctx.getClassLoader());
+                        for (Method m : mmkvCls.getDeclaredMethods()) {
+                            if (!"defaultMMKV".equals(m.getName())
+                                    || !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                                continue;
+                            }
+                            Object[] argv = new Object[m.getParameterTypes().length];
+                            m.setAccessible(true);
+                            def = m.invoke(null, argv);
+                            if (def != null) break;
+                        }
+                    } catch (Throwable t) {
+                        MainHook.log("LocationCache: MMKV default instance lookup failed: " + t);
+                    }
+                }
+                if (def == null) {
+                    // 宿主还没用过 MMKV：不置位，等下次调用重试
+                    return;
+                }
+                final Object instance = def;
+                Method dec = null, enc = null;
+                for (Method m : instance.getClass().getDeclaredMethods()) {
+                    if (dec == null && "decodeString".equals(m.getName())
+                            && m.getParameterTypes().length == 1
+                            && m.getParameterTypes()[0] == String.class) {
+                        dec = m;
+                    }
+                    if (enc == null && "encodeString".equals(m.getName())
+                            && m.getParameterTypes().length == 2
+                            && m.getParameterTypes()[0] == String.class
+                            && m.getParameterTypes()[1] == String.class) {
+                        enc = m;
+                    }
+                    if (dec != null && enc != null) break;
+                }
+                if (dec == null || enc == null) {
+                    mmkvOverwriteDone = true;
+                    MainHook.log("LocationCache: MMKV overwrite skip (decode/encode method missing)");
+                    return;
+                }
+                dec.setAccessible(true);
+                enc.setAccessible(true);
                 MMKV_INTERNAL.set(Boolean.TRUE);
                 try {
-                    Object cur = mmkv.getMethod("decodeString", String.class)
-                            .invoke(def, "LocationJson");
+                    Object cur = dec.invoke(instance, "LocationJson");
                     if (!(cur instanceof String)) {
                         mmkvOverwriteDone = true;
                         MainHook.log("LocationCache: MMKV overwrite skip (LocationJson missing)");
@@ -1040,8 +1091,7 @@ public final class LocationCacheHook {
                         mmkvOverwriteDone = true;
                         return;
                     }
-                    mmkv.getMethod("encodeString", String.class, String.class)
-                            .invoke(def, "LocationJson", rewritten);
+                    enc.invoke(instance, "LocationJson", rewritten);
                     mmkvOverwriteDone = true;
                     MainHook.log("LocationCache: MMKV LocationJson file overwritten with cache coords");
                 } finally {
