@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
         statusBadge.setText("● 模块已就绪");
         statusBadge.setTextSize(15);
         statusBadge.setTypeface(Typeface.DEFAULT_BOLD);
-        statusBadge.setTextColor(ThemeHelper.accentGreen(this));
+        statusBadge.setTextColor(ThemeHelper.accentGreen(MainActivity.this));
         statusCard.addView(statusBadge);
 
         TextView statusDesc = new TextView(this);
@@ -636,13 +636,13 @@ public class MainActivity extends Activity {
                 if (isFinishing()) return;
                 if (remotePrefs == null) {
                     badge.setText("⚠ 设置未同步：LSPosed 服务未连接。此状态下的改动只存本地，小蚕仍按默认「隐藏」执行，请重启小蚕后重新打开本页再改。");
-                    badge.setTextColor(ThemeHelper.accentRed(this));
+                    badge.setTextColor(ThemeHelper.accentRed(MainActivity.this));
                 } else if (!pendingRemoteWrites.isEmpty()) {
                     badge.setText("⚠ 仍有 " + pendingRemoteWrites.size() + " 项设置待同步到宿主。");
-                    badge.setTextColor(ThemeHelper.accentOrange(this));
+                    badge.setTextColor(ThemeHelper.accentOrange(MainActivity.this));
                 } else {
                     badge.setText("● 设置已同步到宿主（改动后强制停止并重启小蚕生效）");
-                    badge.setTextColor(ThemeHelper.accentGreen(this));
+                    badge.setTextColor(ThemeHelper.accentGreen(MainActivity.this));
                 }
             }
         });

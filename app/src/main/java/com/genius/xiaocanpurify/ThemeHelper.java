@@ -16,13 +16,18 @@ public final class ThemeHelper {
     public static final String MODE_DARK = "dark";
 
     /** 当前主题模式（跟随系统/浅色/深色）。 */
-    public static String themeMode() {
-        return PurifyPrefs.getThemeMode();
+    public static String themeMode(Context ctx) {
+        try {
+            return ctx.getSharedPreferences(PurifyPrefs.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getString("theme_mode", MODE_SYSTEM);
+        } catch (Throwable t) {
+            return MODE_SYSTEM;
+        }
     }
 
     /** 是否深色：dark=true；light=false；system=跟随系统日夜模式。 */
     public static boolean isDark(Context ctx) {
-        String mode = themeMode();
+        String mode = themeMode(ctx);
         if (MODE_LIGHT.equals(mode)) return false;
         if (MODE_DARK.equals(mode)) return true;
         try {

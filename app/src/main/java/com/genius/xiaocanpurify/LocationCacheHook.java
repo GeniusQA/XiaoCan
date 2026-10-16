@@ -751,11 +751,11 @@ public final class LocationCacheHook {
             if (um == null) return;
             int uiMode;
             if ("light".equals(mode)) {
-                uiMode = android.content.res.Configuration.UI_MODE_NIGHT_NO;
+                uiMode = android.app.UiModeManager.MODE_NIGHT_NO;
             } else if ("dark".equals(mode)) {
-                uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                uiMode = android.app.UiModeManager.MODE_NIGHT_YES;
             } else {
-                uiMode = android.content.res.Configuration.UI_MODE_NIGHT_AUTO;
+                uiMode = android.app.UiModeManager.MODE_NIGHT_AUTO;
             }
             java.lang.reflect.Method m = um.getClass().getMethod(
                     "setApplicationNightMode", int.class);
