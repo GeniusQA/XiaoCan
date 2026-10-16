@@ -118,11 +118,11 @@ public final class CacheCleanerHook {
             // 分目录统计释放量，模块日志页可直接核对每次清理明细
             StringBuilder detail = new StringBuilder();
             long freed = 0;
-            freed += clearDirDetail(app.getCacheDir(), "cache", detail);
-            freed += clearDirDetail(app.getCodeCacheDir(), "code_cache", detail);
+            freed += clearDirDetail(app, app.getCacheDir(), "cache", detail);
+            freed += clearDirDetail(app, app.getCodeCacheDir(), "code_cache", detail);
             try {
                 File ext = app.getExternalCacheDir();
-                if (ext != null) freed += clearDirDetail(ext, "external_cache", detail);
+                if (ext != null) freed += clearDirDetail(app, ext, "external_cache", detail);
             } catch (Throwable ignored) {}
             try {
                 app.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
@@ -135,10 +135,12 @@ public final class CacheCleanerHook {
     }
 
     /** 递归删除目录内容（不删目录本身），返回释放的字节数并追加明细。 */
-    private static long clearDirDetail(File dir, String label, StringBuilder detail) {
+    private static long clearDirDetail(Context app, File dir, String label,
+                                       StringBuilder detail) {
         long freed = clearDir(dir);
+        if (detail.length() > 0) detail.append(", ");
         detail.append(label).append("=")
-                .append(android.text.format.Formatter.formatFileSize(dir, freed));
+                .append(android.text.format.Formatter.formatFileSize(app, freed));
         return freed;
     }
 
