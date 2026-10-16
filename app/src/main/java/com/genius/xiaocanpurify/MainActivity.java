@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
         }
 
         ScrollView scrollView = new ScrollView(this);
-        scrollView.setBackgroundColor(Color.parseColor("#F6F7F9"));
+        scrollView.setBackgroundColor(ThemeHelper.pageBg(this));
         scrollView.setFitsSystemWindows(true);
 
         LinearLayout layout = new LinearLayout(this);
@@ -126,13 +126,13 @@ public class MainActivity extends Activity {
         title.setText("小蚕净化");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.parseColor("#1A1A1A"));
+        title.setTextColor(ThemeHelper.textTitle(this));
         layout.addView(title);
 
         TextView subTitle = new TextView(this);
         subTitle.setText("小蚕霸王餐 Xposed / LSPosed 净化模块");
         subTitle.setTextSize(13);
-        subTitle.setTextColor(Color.parseColor("#888888"));
+        subTitle.setTextColor(ThemeHelper.textWeak(this));
         subTitle.setPadding(0, dp2px(4), 0, dp2px(16));
         layout.addView(subTitle);
 
@@ -142,13 +142,13 @@ public class MainActivity extends Activity {
         statusBadge.setText("● 模块已就绪");
         statusBadge.setTextSize(15);
         statusBadge.setTypeface(Typeface.DEFAULT_BOLD);
-        statusBadge.setTextColor(Color.parseColor("#07C160"));
+        statusBadge.setTextColor(ThemeHelper.accentGreen(this));
         statusCard.addView(statusBadge);
 
         TextView statusDesc = new TextView(this);
         statusDesc.setText("目标应用: com.realtech.xiaocan (小蚕霸王餐)\n在 LSPosed 勾选小蚕霸王餐后重启小蚕即可生效。");
         statusDesc.setTextSize(13);
-        statusDesc.setTextColor(Color.parseColor("#555555"));
+        statusDesc.setTextColor(ThemeHelper.textDesc(this));
         statusDesc.setPadding(0, dp2px(6), 0, 0);
         statusCard.addView(statusDesc);
 
@@ -159,19 +159,22 @@ public class MainActivity extends Activity {
         updateSyncStatus();
         layout.addView(statusCard);
 
+        // Theme card
+        layout.addView(createThemeCard());
+
         // Settings toggles
         TextView settingsTitle = new TextView(this);
         settingsTitle.setText("功能开关");
         settingsTitle.setTextSize(16);
         settingsTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        settingsTitle.setTextColor(Color.parseColor("#333333"));
+        settingsTitle.setTextColor(ThemeHelper.textBody(this));
         settingsTitle.setPadding(0, dp2px(16), 0, dp2px(8));
         layout.addView(settingsTitle);
 
         TextView settingsHint = new TextView(this);
         settingsHint.setText("开关默认开启 = 隐藏对应入口（保持净化）。关闭开关即恢复展示该功能入口；修改后需强制停止并重启小蚕霸王餐生效。广告与弹窗拦截始终开启，不受开关影响。若状态卡提示「设置未同步」，说明改动没有写进宿主，请先启动一次小蚕再回到本页重新设置。");
         settingsHint.setTextSize(12);
-        settingsHint.setTextColor(Color.parseColor("#999999"));
+        settingsHint.setTextColor(ThemeHelper.textHint(this));
         settingsHint.setPadding(dp2px(14), 0, dp2px(14), dp2px(8));
         layout.addView(settingsHint);
 
@@ -182,7 +185,7 @@ public class MainActivity extends Activity {
         sectionTitle.setText("内置净化（默认开启）");
         sectionTitle.setTextSize(16);
         sectionTitle.setTypeface(Typeface.DEFAULT_BOLD);
-        sectionTitle.setTextColor(Color.parseColor("#333333"));
+        sectionTitle.setTextColor(ThemeHelper.textBody(this));
         sectionTitle.setPadding(0, dp2px(16), 0, dp2px(8));
         layout.addView(sectionTitle);
 
@@ -269,7 +272,7 @@ public class MainActivity extends Activity {
             groupTitle.setText(groupName);
             groupTitle.setTextSize(13);
             groupTitle.setTypeface(Typeface.DEFAULT_BOLD);
-            groupTitle.setTextColor(Color.parseColor("#FF6600"));
+            groupTitle.setTextColor(ThemeHelper.accentOrangeRed(this));
             groupTitle.setPadding(dp2px(4), dp2px(8), 0, dp2px(6));
             parent.addView(groupTitle);
 
@@ -281,7 +284,7 @@ public class MainActivity extends Activity {
                 card.addView(createSwitchRow(key, itemTitle, itemDesc));
                 if (i < items.length - 1) {
                     View divider = new View(this);
-                    divider.setBackgroundColor(Color.parseColor("#F0F0F0"));
+                    divider.setBackgroundColor(ThemeHelper.cardStroke(this));
                     card.addView(divider, new LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
                 }
@@ -296,18 +299,95 @@ public class MainActivity extends Activity {
 
     private TextView locationInfoText;
 
+    /** 主题卡片：跟随系统 / 浅色 / 深色 三选一（参考 HyperIsland themeMode）。 */
+    private LinearLayout createThemeCard() {
+        LinearLayout card = createCard();
+        TextView title = new TextView(this);
+        title.setText("主题");
+        title.setTextSize(14);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(ThemeHelper.textHeading(this));
+        card.addView(title);
+
+        TextView desc = new TextView(this);
+        desc.setText("应用后立即切换模块界面深浅色，并同时切换小蚕的深浅色显示");
+        desc.setTextSize(11);
+        desc.setTextColor(ThemeHelper.textHint(this));
+        desc.setPadding(0, dp2px(4), 0, dp2px(8));
+        card.addView(desc);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        String[][] modes = {
+                {ThemeHelper.MODE_SYSTEM, "跟随系统"},
+                {ThemeHelper.MODE_LIGHT, "浅色"},
+                {ThemeHelper.MODE_DARK, "深色"},
+        };
+        String current = getThemeMode();
+        for (String[] m : modes) {
+            TextView b = new TextView(this);
+            b.setText(m[1]);
+            b.setTextSize(13);
+            b.setGravity(android.view.Gravity.CENTER);
+            b.setPadding(dp2px(14), dp2px(8), dp2px(14), dp2px(8));
+            boolean selected = m[0].equals(current);
+            b.setTextColor(selected ? 0xFFFFFFFF : ThemeHelper.textBody(this));
+            b.setBackground(roundRect(selected
+                    ? ThemeHelper.accentGreen(this)
+                    : ThemeHelper.cardStroke(this)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            lp.setMarginEnd(dp2px(8));
+            row.addView(b, lp);
+            b.setOnClickListener(v -> setThemeMode(m[0]));
+        }
+        card.addView(row);
+        return card;
+    }
+
+    private android.graphics.drawable.Drawable roundRect(int color) {
+        android.graphics.drawable.GradientDrawable d =
+                new android.graphics.drawable.GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp2px(18));
+        return d;
+    }
+
+    private String getThemeMode() {
+        try {
+            return localPrefs.getString("theme_mode", ThemeHelper.MODE_SYSTEM);
+        } catch (Throwable t) {
+            return ThemeHelper.MODE_SYSTEM;
+        }
+    }
+
+    private void setThemeMode(String mode) {
+        try {
+            localPrefs.edit().putString("theme_mode", mode).apply();
+        } catch (Throwable ignored) {}
+        // 通知宿主切换深浅色显示（UiModeManager.setApplicationNightMode）
+        try {
+            android.content.Intent i = new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_THEME_CHANGE");
+            i.setPackage("com.realtech.xiaocan");
+            i.putExtra("mode", mode);
+            sendBroadcast(i);
+        } catch (Throwable ignored) {}
+        recreate();
+    }
+
     private LinearLayout createLocationInfoCard() {
         LinearLayout card = createCard();
         TextView title = new TextView(this);
         title.setText("缓存位置信息");
         title.setTextSize(14);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.parseColor("#222222"));
+        title.setTextColor(ThemeHelper.textHeading(this));
         card.addView(title);
 
         locationInfoText = new TextView(this);
         locationInfoText.setTextSize(11);
-        locationInfoText.setTextColor(Color.parseColor("#666666"));
+        locationInfoText.setTextColor(ThemeHelper.textSecondary(this));
         locationInfoText.setPadding(0, dp2px(4), 0, 0);
         card.addView(locationInfoText);
         refreshLocationInfo();
@@ -429,13 +509,13 @@ public class MainActivity extends Activity {
         TextView t = new TextView(this);
         t.setText(itemTitle);
         t.setTextSize(14);
-        t.setTextColor(Color.parseColor("#222222"));
+        t.setTextColor(ThemeHelper.textHeading(this));
         textColumn.addView(t);
 
         TextView d = new TextView(this);
         d.setText(itemDesc);
         d.setTextSize(11);
-        d.setTextColor(Color.parseColor("#999999"));
+        d.setTextColor(ThemeHelper.textHint(this));
         d.setPadding(0, dp2px(2), dp2px(8), 0);
         textColumn.addView(d);
 
@@ -556,13 +636,13 @@ public class MainActivity extends Activity {
                 if (isFinishing()) return;
                 if (remotePrefs == null) {
                     badge.setText("⚠ 设置未同步：LSPosed 服务未连接。此状态下的改动只存本地，小蚕仍按默认「隐藏」执行，请重启小蚕后重新打开本页再改。");
-                    badge.setTextColor(Color.parseColor("#E64545"));
+                    badge.setTextColor(ThemeHelper.accentRed(this));
                 } else if (!pendingRemoteWrites.isEmpty()) {
                     badge.setText("⚠ 仍有 " + pendingRemoteWrites.size() + " 项设置待同步到宿主。");
-                    badge.setTextColor(Color.parseColor("#E6A23C"));
+                    badge.setTextColor(ThemeHelper.accentOrange(this));
                 } else {
                     badge.setText("● 设置已同步到宿主（改动后强制停止并重启小蚕生效）");
-                    badge.setTextColor(Color.parseColor("#07C160"));
+                    badge.setTextColor(ThemeHelper.accentGreen(this));
                 }
             }
         });
@@ -587,13 +667,13 @@ public class MainActivity extends Activity {
         t.setText(title);
         t.setTextSize(14);
         t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextColor(Color.parseColor("#222222"));
+        t.setTextColor(ThemeHelper.textHeading(this));
         card.addView(t);
 
         TextView d = new TextView(this);
         d.setText(desc);
         d.setTextSize(12);
-        d.setTextColor(Color.parseColor("#666666"));
+        d.setTextColor(ThemeHelper.textSecondary(this));
         d.setLineSpacing(dp2px(2), 1.15f);
         d.setPadding(0, dp2px(6), 0, 0);
         card.addView(d);
