@@ -9,6 +9,8 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.CompoundButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -95,6 +97,8 @@ public class MainActivity extends Activity {
     /** 服务未连接时写入失败的设置，等服务绑定后补写，避免用户改动静默丢失。 */
     private final Map<String, Boolean> pendingRemoteWrites = new LinkedHashMap<>();
     private TextView syncBadge;
+    /** 清理缓存卡片的模式摘要（关闭 / 退出时清缓存）。 */
+    private TextView cacheSummary;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -187,6 +191,41 @@ public class MainActivity extends Activity {
         logArrow.setTextColor(ThemeHelper.textSecondary(this));
         logEntry.addView(logArrow);
         layout.addView(logEntry);
+
+        // 清理缓存卡片：定时清理（退出时清缓存），参考宿主「清理缓存 → 定时清理」
+        LinearLayout cacheEntry = new LinearLayout(this);
+        cacheEntry.setOrientation(LinearLayout.HORIZONTAL);
+        cacheEntry.setGravity(Gravity.CENTER_VERTICAL);
+        cacheEntry.setBackgroundColor(ThemeHelper.cardBg(this));
+        cacheEntry.setPadding(lp, dp2px(12), lp, dp2px(12));
+        cacheEntry.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams cacheEntryLp =
+                (LinearLayout.LayoutParams) cacheEntry.getLayoutParams();
+        cacheEntryLp.setMargins(0, 0, 0, dp2px(12));
+        cacheEntry.setOnClickListener(v -> showCacheCleanupDialog());
+
+        TextView cacheTitle = new TextView(this);
+        cacheTitle.setText("清理缓存");
+        cacheTitle.setTextSize(14);
+        cacheTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        cacheTitle.setTextColor(ThemeHelper.textHeading(this));
+        cacheEntry.addView(cacheTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        cacheSummary = new TextView(this);
+        cacheSummary.setText(cacheModeLabel(getCacheCleanupMode()));
+        cacheSummary.setTextSize(13);
+        cacheSummary.setTextColor(ThemeHelper.textSecondary(this));
+        cacheSummary.setPadding(0, 0, dp2px(8), 0);
+        cacheEntry.addView(cacheSummary);
+
+        TextView cacheArrow = new TextView(this);
+        cacheArrow.setText("›");
+        cacheArrow.setTextSize(18);
+        cacheArrow.setTextColor(ThemeHelper.textSecondary(this));
+        cacheEntry.addView(cacheArrow);
+        layout.addView(cacheEntry);
 
         // Theme card
         layout.addView(createThemeCard());
@@ -405,6 +444,117 @@ public class MainActivity extends Activity {
             sendBroadcast(i);
         } catch (Throwable ignored) {}
         recreate();
+    }
+
+    // ---------------------------------------------------- 定时清理缓存
+
+    private static final String CACHE_MODE_OFF = "off";
+    private static final String CACHE_MODE_EXIT = "exit";
+
+    private String getCacheCleanupMode() {
+        try {
+            return localPrefs.getString(PurifyPrefs.CACHE_CLEANUP_MODE, CACHE_MODE_OFF);
+        } catch (Throwable t) {
+            return CACHE_MODE_OFF;
+        }
+    }
+
+    private static String cacheModeLabel(String mode) {
+        return CACHE_MODE_EXIT.equals(mode) ? "退出时清缓存" : "关闭";
+    }
+
+    private void setCacheCleanupMode(String mode) {
+        try {
+            localPrefs.edit().putString(PurifyPrefs.CACHE_CLEANUP_MODE, mode).apply();
+        } catch (Throwable ignored) {}
+        boolean synced = false;
+        SharedPreferences rp = remotePrefs;
+        if (rp != null) {
+            try {
+                synced = rp.edit().putString(PurifyPrefs.CACHE_CLEANUP_MODE, mode).commit();
+            } catch (Throwable ignored) {}
+        }
+        LogStore.append(this, "I", "Sync", "定时清理缓存 -> " + cacheModeLabel(mode)
+                + (synced ? "（已同步宿主）" : "（未同步：LSPosed 服务未连接）"));
+        if (cacheSummary != null) {
+            cacheSummary.setText(cacheModeLabel(mode));
+        }
+        updateSyncStatus();
+    }
+
+    /** 「定时清理」选择弹窗（自绘，跟随深浅色；选中项右侧红色 ✓）。 */
+    private void showCacheCleanupDialog() {
+        String current = getCacheCleanupMode();
+        String[][] options = {
+                {CACHE_MODE_OFF, "关闭"},
+                {CACHE_MODE_EXIT, "退出时清缓存"},
+        };
+
+        final FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(0x99000000);
+        overlay.setOnClickListener(v -> ((ViewGroup) overlay.getParent()).removeView(overlay));
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg =
+                new android.graphics.drawable.GradientDrawable();
+        bg.setColor(ThemeHelper.cardBg(this));
+        bg.setCornerRadius(dp2px(14));
+        card.setBackground(bg);
+        int p = dp2px(18);
+        card.setPadding(p, p, p, p);
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                dp2px(260), ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.gravity = Gravity.CENTER;
+        overlay.addView(card, cardLp);
+
+        TextView title = new TextView(this);
+        title.setText("定时清理");
+        title.setTextSize(16);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(ThemeHelper.textHeading(this));
+        card.addView(title);
+
+        TextView desc = new TextView(this);
+        desc.setText("退出时清缓存：小蚕退出（进程结束）后自动清理其缓存目录，减少垃圾堆积。");
+        desc.setTextSize(12);
+        desc.setTextColor(ThemeHelper.textSecondary(this));
+        desc.setPadding(0, dp2px(6), 0, dp2px(4));
+        card.addView(desc);
+
+        for (String[] opt : options) {
+            final String mode = opt[0];
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp2px(12), 0, dp2px(12));
+            row.setOnClickListener(v -> {
+                setCacheCleanupMode(mode);
+                ((ViewGroup) overlay.getParent()).removeView(overlay);
+            });
+
+            TextView label = new TextView(this);
+            label.setText(opt[1]);
+            label.setTextSize(15);
+            label.setTextColor(ThemeHelper.textBody(this));
+            row.addView(label, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            if (opt[0].equals(current)) {
+                TextView check = new TextView(this);
+                check.setText("✓");
+                check.setTextSize(15);
+                check.setTypeface(Typeface.DEFAULT_BOLD);
+                check.setTextColor(ThemeHelper.accentRed(this));
+                row.addView(check);
+            }
+            card.addView(row);
+        }
+
+        ((ViewGroup) getWindow().getDecorView()).addView(overlay,
+                new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     private LinearLayout createLocationInfoCard() {

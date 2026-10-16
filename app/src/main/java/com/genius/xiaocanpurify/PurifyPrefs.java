@@ -88,6 +88,9 @@ public final class PurifyPrefs {
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 
+    // 定时清理缓存：off=关闭 / exit=退出时清缓存（退出杀掉宿主进程即清）
+    public static final String CACHE_CLEANUP_MODE = "cache_cleanup_mode";
+
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";
     public static final String ORDER_FREE = "hide_order_free";
@@ -138,6 +141,17 @@ public final class PurifyPrefs {
             } catch (Throwable ignored) {}
         }
         return true;
+    }
+
+    /** 字符串配置（如定时清理缓存模式），Hook 侧按事件时刻读取最新值。 */
+    public static String getString(String key, String def) {
+        SharedPreferences prefs = remote;
+        if (prefs != null) {
+            try {
+                return prefs.getString(key, def);
+            } catch (Throwable ignored) {}
+        }
+        return def;
     }
 
     /**

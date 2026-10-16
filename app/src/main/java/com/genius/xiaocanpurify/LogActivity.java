@@ -41,6 +41,8 @@ public class LogActivity extends Activity {
     private LinearLayout listContainer;
     private TextView countView;
     private String levelFilter = "ALL";
+    private String currentTab = LogStore.SOURCE_APP;
+    private final java.util.Map<String, TextView> tabViews = new java.util.LinkedHashMap<>();
     private BroadcastReceiver pushReceiver;
     private FrameLayout overlayHost;
     private PopupWindow currentPopup;
@@ -96,14 +98,9 @@ public class LogActivity extends Activity {
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         tabRow.setGravity(Gravity.CENTER_VERTICAL);
         tabRow.setPadding(0, dp2px(8), 0, dp2px(8));
-        TextView tab = new TextView(this);
-        tab.setText("应用日志");
-        tab.setTextSize(14);
-        tab.setTypeface(Typeface.DEFAULT_BOLD);
-        tab.setTextColor(ThemeHelper.textHeading(this));
-        tab.setBackground(roundRect(ThemeHelper.cardBg(this)));
-        tab.setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
-        tabRow.addView(tab);
+        tabViews.clear();
+        tabRow.addView(buildTab("应用日志", LogStore.SOURCE_APP));
+        tabRow.addView(buildTab("模块日志", LogStore.SOURCE_MODULE));
 
         TextView refresh = new TextView(this);
         refresh.setText("↻ 刷新");
@@ -133,6 +130,7 @@ public class LogActivity extends Activity {
         setContentView(root);
 
         registerPushReceiver();
+        refreshTabStyles();
         requestHookLogs();
         reload();
     }
@@ -141,6 +139,34 @@ public class LogActivity extends Activity {
         listContainer = new LinearLayout(this);
         listContainer.setOrientation(LinearLayout.VERTICAL);
         return listContainer;
+    }
+
+    /** Tab 药丸按钮：选中态高亮，点击切换日志来源并刷新。 */
+    private View buildTab(String label, String source) {
+        TextView tab = new TextView(this);
+        tab.setText(label);
+        tab.setTextSize(14);
+        tab.setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
+        tab.setOnClickListener(v -> {
+            if (currentTab.equals(source)) return;
+            currentTab = source;
+            if (LogStore.SOURCE_MODULE.equals(source)) requestHookLogs();
+            refreshTabStyles();
+            reload();
+        });
+        tabViews.put(source, tab);
+        return tab;
+    }
+
+    private void refreshTabStyles() {
+        for (java.util.Map.Entry<String, TextView> e : tabViews.entrySet()) {
+            TextView t = e.getValue();
+            boolean selected = e.getKey().equals(currentTab);
+            t.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            t.setTextColor(selected ? ThemeHelper.textHeading(this)
+                    : ThemeHelper.textSecondary(this));
+            t.setBackground(selected ? roundRect(ThemeHelper.cardStroke(this)) : null);
+        }
     }
 
     @Override
@@ -190,10 +216,13 @@ public class LogActivity extends Activity {
 
     private void reload() {
         listContainer.removeAllViews();
-        List<String[]> logs = LogStore.readLogs(this, levelFilter);
+        boolean isModule = LogStore.SOURCE_MODULE.equals(currentTab);
+        List<String[]> logs = LogStore.readLogs(this, levelFilter, currentTab);
         if (logs.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("暂无日志");
+            empty.setText(isModule
+                    ? "暂无模块日志\n打开小蚕后 Hook 日志会自动收集到这里"
+                    : "暂无日志");
             empty.setTextSize(14);
             empty.setTextColor(ThemeHelper.textHint(this));
             empty.setGravity(Gravity.CENTER);
@@ -205,8 +234,8 @@ public class LogActivity extends Activity {
                 listContainer.addView(buildLogItem(e));
             }
         }
-        countView.setText("共 " + logs.size() + " 条 · 等级: "
-                + ("ALL".equals(levelFilter) ? "全部" : levelFilter));
+        countView.setText((isModule ? "模块日志" : "应用日志") + " 共 " + logs.size()
+                + " 条 · 等级: " + ("ALL".equals(levelFilter) ? "全部" : levelFilter));
     }
 
     /** 单条日志：徽章 + tag + 时间，内容默认 2 行，点击展开/收起。 */
@@ -274,17 +303,17 @@ public class LogActivity extends Activity {
     private void showMenu(View anchor) {
         LinearLayout menuView = popupContainer();
 
-        popupItem(menuView, "日志等级", levelSummaryText(), v -> showLevelMenu(anchor));
-        popupItem(menuView, "导出日志", null, v -> {
+        popupItem(menuView, "日志等级", levelSummaryText(), false, v -> showLevelMenu(anchor));
+        popupItem(menuView, "导出日志", null, false, v -> {
             dismissPopup();
             exportLogs();
         });
-        popupItem(menuView, "清空日志", null, v -> {
+        popupItem(menuView, "清空日志", null, false, v -> {
             dismissPopup();
             confirmClear();
         });
-        popupItem(menuView, "自动清理", cleanupSummaryText(), v -> showCleanupMenu(anchor));
-        popupItem(menuView, "清理记录", null, v -> {
+        popupItem(menuView, "自动清理", cleanupSummaryText(), false, v -> showCleanupMenu(anchor));
+        popupItem(menuView, "清理记录", null, false, v -> {
             dismissPopup();
             showCleanupHistory();
         });
@@ -297,7 +326,7 @@ public class LogActivity extends Activity {
             String opt = LEVEL_OPTIONS[i];
             String label = LEVEL_LABELS[i];
             boolean selected = opt.equals(levelFilter);
-            popupItem(menuView, label, selected ? "✓" : null, v -> {
+            popupItem(menuView, label, null, selected, v -> {
                 levelFilter = opt;
                 reload();
             });
@@ -312,7 +341,7 @@ public class LogActivity extends Activity {
             final int hours = LogStore.INTERVAL_CHOICES[i];
             final String label = labels[i];
             boolean selected = hours == LogStore.getCleanupIntervalHours(this);
-            popupItem(menuView, label, selected ? "✓" : null, v -> {
+            popupItem(menuView, label, null, selected, v -> {
                 LogStore.setCleanupIntervalHours(this, hours);
                 LogStore.maybeAutoCleanup(this);
                 Toast.makeText(this, "自动清理：" + label, Toast.LENGTH_SHORT).show();
@@ -361,8 +390,8 @@ public class LogActivity extends Activity {
         return menu;
     }
 
-    /** 菜单项：标题 + 可选摘要/勾选行（参考截图的样式）。 */
-    private void popupItem(LinearLayout parent, String title, String summary,
+    /** 菜单项：标题 + 可选摘要行；selected=true 时标题右侧显示红色 ✓。 */
+    private void popupItem(LinearLayout parent, String title, String summary, boolean selected,
                            View.OnClickListener onClick) {
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.VERTICAL);
@@ -371,11 +400,26 @@ public class LogActivity extends Activity {
             if (onClick != null) onClick.onClick(v);
         });
 
+        LinearLayout head = new LinearLayout(this);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
         TextView t = new TextView(this);
         t.setText(title);
         t.setTextSize(15);
         t.setTextColor(ThemeHelper.textHeading(this));
-        item.addView(t);
+        head.addView(t, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (selected) {
+            TextView check = new TextView(this);
+            check.setText("✓");
+            check.setTextSize(15);
+            check.setTypeface(Typeface.DEFAULT_BOLD);
+            check.setTextColor(ThemeHelper.accentRed(this));
+            head.addView(check);
+        }
+        item.addView(head);
 
         if (summary != null && !summary.isEmpty()) {
             TextView s = new TextView(this);
@@ -391,10 +435,11 @@ public class LogActivity extends Activity {
 
     private void exportLogs() {
         try {
+            String kind = LogStore.SOURCE_MODULE.equals(currentTab) ? "module" : "app";
             Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);
             i.setType("text/plain");
-            i.putExtra(Intent.EXTRA_TITLE, "xiaocanpurify_logs_"
+            i.putExtra(Intent.EXTRA_TITLE, "xiaocanpurify_" + kind + "_logs_"
                     + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(new Date())
                     + ".txt");
             startActivityForResult(i, REQ_EXPORT);
@@ -415,7 +460,7 @@ public class LogActivity extends Activity {
                 Toast.makeText(this, "导出失败：无法写入所选位置", Toast.LENGTH_SHORT).show();
                 return;
             }
-            String text = LogStore.exportText(this, levelFilter);
+            String text = LogStore.exportText(this, levelFilter, currentTab);
             out.write(text.getBytes(StandardCharsets.UTF_8));
             out.close();
             int lines = text.split("\n").length;

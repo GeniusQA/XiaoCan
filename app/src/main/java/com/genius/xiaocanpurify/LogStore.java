@@ -49,6 +49,10 @@ public final class LogStore {
     /** 自动清理间隔可选项（小时），0 = 关闭。 */
     public static final int[] INTERVAL_CHOICES = {0, 1, 24, 168};
 
+    /** 日志来源：应用日志（模块设置页自身）/ 模块日志（Hook 侧推送）。 */
+    public static final String SOURCE_APP = "app";
+    public static final String SOURCE_MODULE = "module";
+
     private static final java.util.LinkedHashSet<String> DEDUP = new java.util.LinkedHashSet<>();
     private static volatile long lastRecordTime;
 
@@ -65,14 +69,14 @@ public final class LogStore {
                     + " " + safeLevel(level) + "/" + (tag == null ? "App" : tag) + ": "
                     + flatten(msg) + "\n";
             synchronized (LOCK) {
-                appendLineLocked(ctx, line);
-                File f = logFile(ctx);
+                appendLineLocked(logFile(ctx, SOURCE_APP), line);
+                File f = logFile(ctx, SOURCE_APP);
                 if (f.length() > MAX_LOG_SIZE) trimLocked(f);
             }
         } catch (Throwable ignored) {}
     }
 
-    /** 合并 Hook 侧推送的日志行（已格式化；按行去重）。 */
+    /** 合并 Hook 侧推送的日志行到「模块日志」文件（已格式化；按行去重）。 */
     public static void appendHookLogs(Context ctx, String[] lines) {
         if (ctx == null || lines == null || lines.length == 0) return;
         boolean changed = false;
@@ -88,11 +92,11 @@ public final class LogStore {
                         it.remove();
                     }
                 }
-                appendLineLocked(ctx, l.endsWith("\n") ? l : l + "\n");
+                appendLineLocked(logFile(ctx, SOURCE_MODULE), l.endsWith("\n") ? l : l + "\n");
                 changed = true;
             }
             if (changed) {
-                File f = logFile(ctx);
+                File f = logFile(ctx, SOURCE_MODULE);
                 try {
                     if (f.length() > MAX_LOG_SIZE) trimLocked(f);
                 } catch (Throwable ignored) {}
@@ -100,9 +104,8 @@ public final class LogStore {
         }
     }
 
-    private static void appendLineLocked(Context ctx, String line) {
+    private static void appendLineLocked(File f, String line) {
         try {
-            File f = logFile(ctx);
             File dir = f.getParentFile();
             if (dir != null && !dir.exists()) dir.mkdirs();
             FileOutputStream out = new FileOutputStream(f, true);
@@ -137,12 +140,13 @@ public final class LogStore {
     /**
      * 读取日志（最新在前）。返回条目 {time, level, tag, message}。
      * levelFilter 为 null/"ALL" 时返回全部；最多 MAX_LINES_DISPLAY 条。
+     * source：SOURCE_APP=应用日志 / SOURCE_MODULE=模块日志。
      */
-    public static List<String[]> readLogs(Context ctx, String levelFilter) {
+    public static List<String[]> readLogs(Context ctx, String levelFilter, String source) {
         List<String[]> out = new ArrayList<>();
         String[] lines;
         synchronized (LOCK) {
-            lines = readRawLinesLocked(ctx, levelFilter, MAX_LINES_DISPLAY);
+            lines = readRawLinesLocked(ctx, levelFilter, source, MAX_LINES_DISPLAY);
         }
         for (int i = lines.length - 1; i >= 0; i--) {
             String[] e = parseLine(lines[i]);
@@ -152,13 +156,14 @@ public final class LogStore {
     }
 
     /** 导出文本：头部 + 全量过滤后的原始行（文件上限 2MB，直接构建字符串）。 */
-    public static String exportText(Context ctx, String levelFilter) {
+    public static String exportText(Context ctx, String levelFilter, String source) {
         String[] lines;
         synchronized (LOCK) {
-            lines = readRawLinesLocked(ctx, levelFilter, Integer.MAX_VALUE);
+            lines = readRawLinesLocked(ctx, levelFilter, source, Integer.MAX_VALUE);
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("XiaoCanPurify 应用日志\n");
+        sb.append("XiaoCanPurify ")
+                .append(SOURCE_MODULE.equals(source) ? "模块日志" : "应用日志").append('\n');
         sb.append("导出时间: ").append(
                 new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append('\n');
         sb.append("等级过滤: ").append(levelFilter == null ? "ALL" : levelFilter).append('\n');
@@ -171,8 +176,9 @@ public final class LogStore {
     }
 
     /** 返回按时间正序、经过滤、从最新往前截取 maxLines 条的原始行。 */
-    private static String[] readRawLinesLocked(Context ctx, String levelFilter, int maxLines) {
-        File f = logFile(ctx);
+    private static String[] readRawLinesLocked(Context ctx, String levelFilter, String source,
+                                               int maxLines) {
+        File f = logFile(ctx, source);
         if (!f.exists() || maxLines <= 0) return new String[0];
         try {
             String[] all = readAll(f).split("\n");
@@ -238,24 +244,31 @@ public final class LogStore {
 
     // ---------------------------------------------------------------- 清理
 
-    /** 清空全部应用日志并写入清理记录；同时更新上次清理时间。 */
+    /** 清空应用日志与模块日志并写入清理记录；同时更新上次清理时间。 */
     public static boolean clearAll(Context ctx, String trigger) {
         boolean ok;
         String path;
         synchronized (LOCK) {
-            File f = logFile(ctx);
-            path = f.getAbsolutePath();
-            try {
-                ok = !f.exists() || f.delete();
-            } catch (Throwable t) {
-                ok = false;
-            }
+            File app = logFile(ctx, SOURCE_APP);
+            File mod = logFile(ctx, SOURCE_MODULE);
+            path = app.getName() + " + " + mod.getName();
+            boolean okApp = deleteQuietly(app);
+            boolean okMod = deleteQuietly(mod);
+            ok = okApp && okMod;
         }
         try {
             prefs(ctx).edit().putLong(KEY_LAST_CLEANUP, System.currentTimeMillis()).apply();
         } catch (Throwable ignored) {}
         saveCleanupRecord(ctx, trigger, ok, path);
         return ok;
+    }
+
+    private static boolean deleteQuietly(File f) {
+        try {
+            return !f.exists() || f.delete();
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     private static void saveCleanupRecord(Context ctx, String trigger, boolean ok, String path) {
@@ -352,8 +365,9 @@ public final class LogStore {
         return ctx.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    private static File logFile(Context ctx) {
-        return new File(ctx.getApplicationContext().getFilesDir(), "logs/app_logs.log");
+    private static File logFile(Context ctx, String source) {
+        String name = SOURCE_MODULE.equals(source) ? "logs/module_logs.log" : "logs/app_logs.log";
+        return new File(ctx.getApplicationContext().getFilesDir(), name);
     }
 
     private static File historyFile(Context ctx) {

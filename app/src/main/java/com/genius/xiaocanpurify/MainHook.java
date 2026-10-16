@@ -208,6 +208,13 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            CacheCleanerHook.install(xposed, classLoader);
+            log("CacheCleanerHook installed successfully.");
+        } catch (Throwable t) {
+            log("CacheCleanerHook install error: " + t);
+        }
+
+        try {
             LotteryTaskAutomator.install(xposed, classLoader);
             log("LotteryTaskAutomator installed successfully.");
         } catch (Throwable t) {
