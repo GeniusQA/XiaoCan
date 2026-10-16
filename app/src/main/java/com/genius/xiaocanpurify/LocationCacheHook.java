@@ -965,6 +965,7 @@ public final class LocationCacheHook {
                 } catch (Throwable ignored) {}
             }
             mmkvHooked = true;
+            mmkvClass = mmkv;
             MainHook.log("LocationCache: hooked MMKV.decodeString/decodeBytes x" + hooked);
         } catch (Throwable t) {
             MainHook.log("LocationCache: MMKV class not found, LocationJson rewrite unavailable: " + t);
@@ -1015,6 +1016,8 @@ public final class LocationCacheHook {
     private static final ThreadLocal<Boolean> MMKV_INTERNAL = new ThreadLocal<>();
     /** hook decodeString 时捕获的 MMKV 实例（LocationJson 所在存储）。 */
     private static volatile Object capturedMmkv;
+    /** hook 时解析到的 MMKV 类（方法解析用，避免子类实例丢继承方法）。 */
+    private static volatile Class<?> mmkvClass;
 
     /**
      * 用宿主自己的 MMKV 实例把 LocationJson 覆写为缓存值（GPS 关闭且有缓存）。
@@ -1056,18 +1059,24 @@ public final class LocationCacheHook {
                     return;
                 }
                 final Object instance = def;
+                // 方法解析必须用 MMKV 类本身（实例若是子类，getDeclaredMethods
+                // 不含继承的 decodeString/encodeString，会误判 method missing）
+                Class<?> k = mmkvClass != null ? mmkvClass : instance.getClass();
                 Method dec = null, enc = null;
-                for (Method m : instance.getClass().getDeclaredMethods()) {
-                    if (dec == null && "decodeString".equals(m.getName())
-                            && m.getParameterTypes().length == 1
-                            && m.getParameterTypes()[0] == String.class) {
-                        dec = m;
-                    }
-                    if (enc == null && "encodeString".equals(m.getName())
-                            && m.getParameterTypes().length == 2
-                            && m.getParameterTypes()[0] == String.class
-                            && m.getParameterTypes()[1] == String.class) {
-                        enc = m;
+                for (Class<?> c = k; c != null && c != Object.class; c = c.getSuperclass()) {
+                    for (Method m : c.getDeclaredMethods()) {
+                        if (dec == null && "decodeString".equals(m.getName())
+                                && m.getParameterTypes().length == 1
+                                && m.getParameterTypes()[0] == String.class) {
+                            dec = m;
+                        }
+                        if (enc == null && "encodeString".equals(m.getName())
+                                && m.getParameterTypes().length == 2
+                                && m.getParameterTypes()[0] == String.class
+                                && m.getParameterTypes()[1] == String.class) {
+                            enc = m;
+                        }
+                        if (dec != null && enc != null) break;
                     }
                     if (dec != null && enc != null) break;
                 }
