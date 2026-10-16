@@ -329,6 +329,9 @@ public final class NetworkAdInterceptor {
         /** 入口配置响应上次 dump 时间（30 秒节流）。 */
         private static volatile long lastMenuCfgDumpMs;
 
+    /** 位置参数请求抓包上次时间（5 秒节流，同 methodname 全局节流）。 */
+    private static volatile long lastLocReqDumpMs;
+
         AdInterceptorInvocationHandler(ClassLoader classLoader) {
             this.classLoader = classLoader;
         }
@@ -537,6 +540,40 @@ public final class NetworkAdInterceptor {
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
                 if (body.length() <= 100000) {
+                    // 抓包：dump 携带位置参数的请求（清数据后排查哪些接口需要位置
+                    // 信息、参数从哪来）——URL/query、methodname、请求体（RPC 参数）
+                    // 统一检查 lat/lng/city/merchant 等关键词，5 秒全局节流
+                    try {
+                        String mn2 = "";
+                        try {
+                            Object m2 = request.getClass().getMethod("header", String.class)
+                                    .invoke(request, "methodname");
+                            mn2 = m2 != null ? m2.toString() : "";
+                        } catch (Throwable ignored) {}
+                        String reqBody = "";
+                        try {
+                            Object b2 = request.getClass().getMethod("body").invoke(request);
+                            if (b2 != null) {
+                                Class<?> bufCls = Class.forName("okio.Buffer");
+                                Object buf = bufCls.getDeclaredConstructor().newInstance();
+                                b2.getClass().getMethod("writeTo",
+                                        Class.forName("okio.BufferedSink")).invoke(b2, buf);
+                                reqBody = (String) bufCls.getMethod("readUtf8").invoke(buf);
+                            }
+                        } catch (Throwable ignored) {}
+                        String hay = (url + " " + mn2 + " " + reqBody).toLowerCase(Locale.ROOT);
+                        boolean hasLoc = hay.contains("lat") || hay.contains("lng")
+                                || hay.contains("location") || hay.contains("city")
+                                || hay.contains("province") || hay.contains("address")
+                                || hay.contains("merchant") || hay.contains("nearby")
+                                || hay.contains("shop");
+                        if (hasLoc && System.currentTimeMillis() - lastLocReqDumpMs > 5000L) {
+                            lastLocReqDumpMs = System.currentTimeMillis();
+                            MainHook.log("LocReqDump: method=" + mn2 + " url=" + url
+                                    + " reqBody=" + reqBody.substring(0,
+                                            Math.min(320, reqBody.length())));
+                        }
+                    } catch (Throwable ignored) {}
                     java.util.regex.Matcher am = java.util.regex.Pattern
                             .compile("[\\u4e00-\\u9fa5]{2,6}[市州][\\u4e00-\\u9fa5]{2,8}[区县]")
                             .matcher(body);
@@ -574,6 +611,13 @@ public final class NetworkAdInterceptor {
                     MainHook.log("MerchantReq: " + url);
                     MainHook.log("MerchantResp: " + body.substring(0,
                             Math.min(300, body.length())));
+                }
+                // 诊断：dump 携带定位坐标参数的请求（选择地址页/逆地理/POI
+                // 请求的位置来源核验——应与缓存坐标一致）
+                if (ul.contains("lat=") || ul.contains("lng=")
+                        || ul.contains("latitude=") || ul.contains("longitude=")
+                        || ul.contains("location=")) {
+                    MainHook.log("GeoReq: " + url);
                 }
                 if (!PopupMarkers.contains(body)) {
                     return response;
