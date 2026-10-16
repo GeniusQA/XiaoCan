@@ -782,6 +782,24 @@ public final class HomePagePurifier {
     private static final java.util.WeakHashMap<View, Boolean> ADDR_HOOKED =
             new java.util.WeakHashMap<>();
 
+    /** 边界 dump 已执行标记（每进程一次）。 */
+    private static volatile boolean BOUNDS_DUMPED;
+
+    /** 追加单个视图的完整边界（x/y/w/h）。 */
+    private static void appendBounds(String name, View v, StringBuilder sb) {
+        if (v == null) {
+            sb.append(' ').append(name).append("=null");
+            return;
+        }
+        int[] loc = new int[2];
+        v.getLocationInWindow(loc);
+        sb.append(' ').append(name).append("=x").append(loc[0])
+                .append(",y").append(loc[1])
+                .append(",w").append(v.getWidth())
+                .append(",h").append(v.getHeight())
+                .append(v.getVisibility() == View.VISIBLE ? "" : ":GONE");
+    }
+
     /** 诊断：递归 dump 视图树（资源 id 名/类名/窗口Y坐标/可见性，限深）。 */
     private static void dumpViewTree(View v, StringBuilder sb, int depth, int maxDepth) {
         if (v == null) return;
@@ -897,6 +915,21 @@ public final class HomePagePurifier {
                         } catch (Throwable ignored) {}
                     }
                 }
+                // 诊断（每次进程一次）：dump 四个视图的完整边界（x/y/w/h），
+                // 用于终版适配的精确坐标
+                try {
+                    if (!BOUNDS_DUMPED) {
+                        BOUNDS_DUMPED = true;
+                        View pv = addrParent;
+                        View logo = findViewByName(toolbar, "ivXiaocan");
+                        StringBuilder bb = new StringBuilder("bounds");
+                        appendBounds("parent", pv, bb);
+                        appendBounds("logo", logo, bb);
+                        appendBounds("addr", addrBar, bb);
+                        appendBounds("search", sv, bb);
+                        MainHook.log("HomeAddress: " + bb);
+                    }
+                } catch (Throwable ignored) {}
                 View addrText = findViewByName(toolbar, "tv_address");
                 if (addrText instanceof android.widget.TextView) {
                     String want = LocationCacheHook.cachedAddressText();
