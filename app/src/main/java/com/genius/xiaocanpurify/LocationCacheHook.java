@@ -854,13 +854,13 @@ public final class LocationCacheHook {
                                     if (isStatic && arg instanceof android.content.Context) continue;
                                     scan.scan(arg, 0);
                                 }
-                                // POI 跟随问题止血：暂禁用选点捕获写入。用户实测
-                                // 进入「选择地址」页点「当前地址/重新定位」也会走
-                                // pickLocation，把宿主 WiFi 定位的坐标（锦江区）
-                                // 写入缓存。改为仅 dump 聚合结果，按真实数据
-                                // 恢复「仅搜索选点」的精准判据。
+                                // 选点写缓存（已验证安全）：「重新定位」时宿主
+                                // 传入的就是回放缓存自己的坐标（写回同值无害）；
+                                // 「搜索选点」传入用户选的位置（写入选点，符合
+                                // 「缓存=最后一次主动选点」语义）。WiFi 定位无法
+                                // 经此路径进入（GPS 关时回调已被拦截回放）。
                                 MainHook.log("PickLocation scan: " + scan.describe());
-                                // scan.commitIfPlausible();
+                                scan.commitIfPlausible();
                             } catch (Throwable ignored) {
                             }
                             return chain.proceed();
