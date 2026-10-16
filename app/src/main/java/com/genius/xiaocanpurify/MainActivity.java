@@ -311,6 +311,18 @@ public class MainActivity extends Activity {
         locationInfoText.setPadding(0, dp2px(4), 0, 0);
         card.addView(locationInfoText);
         refreshLocationInfo();
+        // 请求宿主重发一次缓存广播：模块进程 stopped/被杀期间宿主发出的
+        // 缓存广播会被 MIUI 拦截（wake path 受限）导致 inbox 陈旧；设置页
+        // 打开（进程活着）时发请求，宿主收到后重发，2 秒后刷新显示
+        try {
+            android.content.Intent i = new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_LOC_CACHE_RESEND");
+            i.setPackage("com.realtech.xiaocan");
+            sendBroadcast(i);
+        } catch (Throwable ignored) {}
+        if (locationInfoText != null) {
+            locationInfoText.postDelayed(this::refreshLocationInfo, 2000);
+        }
         return card;
     }
 

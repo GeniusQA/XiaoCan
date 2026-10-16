@@ -58,6 +58,35 @@ public final class LocationCacheHook {
             MainHook.log("LocationCache disabled by user, skip.");
             return;
         }
+        // 重发接收器：模块设置页打开时发 ACTION_LOC_CACHE_RESEND，宿主收到
+        // 后重发一次 LOC_CACHE 广播——模块进程 stopped/被杀期间发出的缓存
+        // 广播会被 MIUI 拦截（wake path 受限），导致设置页卡片数据陈旧
+        try {
+            Context ctx = currentApplication();
+            if (ctx != null) {
+                android.content.BroadcastReceiver resend = new android.content.BroadcastReceiver() {
+                    @Override
+                    public void onReceive(android.content.Context c,
+                                          android.content.Intent i) {
+                        try {
+                            double[] ll = lastLatLng;
+                            if (ll == null || (ll[0] == 0.0 && ll[1] == 0.0)) {
+                                ll = cachedLatLng();
+                            }
+                            String addr = readStrSnapshot().get("getAddress");
+                            if (ll != null && (ll[0] != 0.0 || ll[1] != 0.0)) {
+                                mirrorToRemote(ll[0], ll[1], addr);
+                                MainHook.log("LocationCache: resend on request");
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                };
+                android.content.IntentFilter f = new android.content.IntentFilter(
+                        "com.genius.xiaocanpurify.ACTION_LOC_CACHE_RESEND");
+                ctx.registerReceiver(resend, f);
+                MainHook.log("LocationCache: resend receiver registered");
+            }
+        } catch (Throwable ignored) {}
         hookTencentLocationManager(xposed, cl);
         hookFrameworkCapture(xposed);
         hookSearchAddressCapture(xposed, cl);
