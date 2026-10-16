@@ -856,9 +856,12 @@ public final class HomePagePurifier {
                     }
                     if (addrParent != null && !ADDR_HOOKED.containsKey(addrParent)) {
                         ADDR_HOOKED.put(addrParent, Boolean.TRUE);
+                        // GlobalLayoutListener：每次全局布局 pass 都触发
+                        //（OnLayoutChangeListener 只在自身 l/t/r/b 变化时触发，
+                        // 父容器尺寸不变、仅子视图 GONE 时不会触发——已实测失效）
                         final View parentView = addrParent;
-                        parentView.addOnLayoutChangeListener(
-                                (v, l, t, r, b, ol, ot, or2, ob) -> {
+                        parentView.getViewTreeObserver().addOnGlobalLayoutListener(
+                                () -> {
                                     try {
                                         View ab = findViewByName(parentView,
                                                 "layout_address");
@@ -866,7 +869,7 @@ public final class HomePagePurifier {
                                                 && ab.getVisibility() != View.VISIBLE) {
                                             ab.setVisibility(View.VISIBLE);
                                             MainHook.log("HomeAddress: re-restored"
-                                                    + " on parent layout");
+                                                    + " on global layout");
                                         }
                                     } catch (Throwable ignored) {}
                                 });
