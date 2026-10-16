@@ -358,6 +358,8 @@ public final class NetworkAdInterceptor {
 
     /** 位置参数请求抓包上次时间（5 秒节流，同 methodname 全局节流）。 */
     private static volatile long lastLocReqDumpMs;
+    /** 逆地理请求原文转储上次时间（5 秒节流）。 */
+    private static volatile long lastAddrReqDumpMs;
 
         AdInterceptorInvocationHandler(ClassLoader classLoader) {
             this.classLoader = classLoader;
@@ -596,9 +598,18 @@ public final class NetworkAdInterceptor {
                                 || hay.contains("shop");
                         if (hasLoc && System.currentTimeMillis() - lastLocReqDumpMs > 5000L) {
                             lastLocReqDumpMs = System.currentTimeMillis();
+                            // 上报类请求（UploadClientUserLocation 等）body 常为空，
+                            // 坐标可能藏在 header——一并列出定位坐标改写才有抓手
+                            String hdrDump = "";
+                            try {
+                                Object hs2 = request.getClass().getMethod("headers").invoke(request);
+                                hdrDump = hs2 == null ? "" : hs2.toString();
+                            } catch (Throwable ignored) {}
                             MainHook.log("LocReqDump: method=" + mn2 + " url=" + url
                                     + " reqBody=" + reqBody.substring(0,
-                                            Math.min(320, reqBody.length())));
+                                            Math.min(320, reqBody.length()))
+                                    + " headers=" + hdrDump.substring(0,
+                                            Math.min(800, hdrDump.length())));
                         }
                     } catch (Throwable ignored) {}
                     java.util.regex.Matcher am = java.util.regex.Pattern
@@ -608,6 +619,41 @@ public final class NetworkAdInterceptor {
                         MainHook.log("ADDR[probe] " + url + " => "
                                 + body.substring(Math.max(0, am.start() - 40),
                                         Math.min(body.length(), am.start() + 140)));
+                        // 请求原文转储（5 秒节流）：确认逆地理请求的坐标载体
+                        // （body/url/header），坐标改写未生效时定位请求格式
+                        try {
+                            if (System.currentTimeMillis() - lastAddrReqDumpMs > 5000L) {
+                                lastAddrReqDumpMs = System.currentTimeMillis();
+                                String mn3 = "";
+                                try {
+                                    Object m3 = request.getClass()
+                                            .getMethod("header", String.class)
+                                            .invoke(request, "methodname");
+                                    mn3 = m3 != null ? m3.toString() : "";
+                                } catch (Throwable ignored) {}
+                                StringBuilder hdr = new StringBuilder();
+                                try {
+                                    Object hs = request.getClass().getMethod("headers")
+                                            .invoke(request);
+                                    hdr.append(hs == null ? "" : hs.toString());
+                                } catch (Throwable ignored) {}
+                                String rb = "";
+                                try {
+                                    Object b3 = request.getClass().getMethod("body").invoke(request);
+                                    if (b3 != null) {
+                                        Class<?> bufCls = Class.forName("okio.Buffer");
+                                        Object buf = bufCls.getDeclaredConstructor().newInstance();
+                                        b3.getClass().getMethod("writeTo",
+                                                Class.forName("okio.BufferedSink")).invoke(b3, buf);
+                                        rb = (String) bufCls.getMethod("readUtf8").invoke(buf);
+                                    }
+                                } catch (Throwable ignored) {}
+                                MainHook.log("ADDR[req] method=" + mn3
+                                        + " body=" + rb.substring(0, Math.min(500, rb.length()))
+                                        + " headers=" + hdr.substring(0,
+                                                Math.min(600, hdr.length())));
+                            }
+                        } catch (Throwable ignored) {}
                         // 结构诊断：逆地理响应里 standard_address 前的完整字段结构
                         int sa = body.indexOf("standard_address");
                         if (sa > 0) {

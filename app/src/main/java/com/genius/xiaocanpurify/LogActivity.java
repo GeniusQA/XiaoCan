@@ -106,10 +106,12 @@ public class LogActivity extends Activity {
         searchBox.setTextSize(13);
         searchBox.setSingleLine(true);
         searchBox.setMaxLines(1);
+        searchBox.setGravity(Gravity.CENTER_VERTICAL);
+        searchBox.setIncludeFontPadding(false);
         searchBox.setTextColor(ThemeHelper.textBody(this));
         searchBox.setHintTextColor(ThemeHelper.textHint(this));
         searchBox.setBackground(roundRect(ThemeHelper.cardStroke(this)));
-        searchBox.setPadding(dp2px(10), dp2px(6), dp2px(10), dp2px(6));
+        searchBox.setPadding(dp2px(10), 0, dp2px(10), 0);
         LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         searchLp.setMargins(dp2px(12), 0, dp2px(6), 0);

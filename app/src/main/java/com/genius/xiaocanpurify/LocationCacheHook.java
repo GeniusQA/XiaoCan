@@ -1488,23 +1488,39 @@ public final class LocationCacheHook {
             if (memoryLoaded) return;
             try {
                 SharedPreferences p = getPrefs();
-                if (p == null) return; // Application 未就绪，下次重试
-                if (hasCache()) {
-                    double[] ll = cachedLatLng();
-                    if (!(ll[0] == 0.0 && ll[1] == 0.0)) {
-                        lastLatLng = ll;
-                        lastLocationTime = p.getLong(KEY_TIME, 0L);
-                        MainHook.log("LocationCache: memory cache loaded from prefs "
-                                + ll[0] + "," + ll[1]);
+                if (p == null) {
+                    // Application 未就绪：不置位，下次重试（一次性日志防刷屏）
+                    if (!memoryLoadLogged) {
+                        memoryLoadLogged = true;
+                        MainHook.log("LocationCache: memory preload deferred (no app ctx yet)");
                     }
+                    return;
                 }
+                if (!hasCache()) {
+                    // 磁盘无缓存：置位并说明（宿主侧 purify_loc_cache 为空）
+                    memoryLoaded = true;
+                    MainHook.log("LocationCache: memory preload skip (no disk cache in host prefs)");
+                    return;
+                }
+                double[] ll = cachedLatLng();
+                if (ll[0] == 0.0 && ll[1] == 0.0) {
+                    memoryLoaded = true;
+                    MainHook.log("LocationCache: memory preload skip (disk cache is 0,0)");
+                    return;
+                }
+                lastLatLng = ll;
+                lastLocationTime = p.getLong(KEY_TIME, 0L);
                 memoryLoaded = true;
+                MainHook.log("LocationCache: memory cache loaded from prefs "
+                        + ll[0] + "," + ll[1]);
             } catch (Throwable t) {
                 MainHook.log("LocationCache: load memory cache failed: " + t);
                 memoryLoaded = true;
             }
         }
     }
+
+    private static volatile boolean memoryLoadLogged;
 
     private static boolean hasCache() {
         if (cacheValid) return true;
