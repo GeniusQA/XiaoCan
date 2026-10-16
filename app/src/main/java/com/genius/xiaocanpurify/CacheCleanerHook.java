@@ -10,6 +10,8 @@ import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.github.libxposed.api.XposedInterface;
+
 /**
  * 定时清理缓存：参考宿主设置页「清理缓存 → 定时清理 → 退出时清缓存」。
  *
@@ -49,7 +51,11 @@ public final class CacheCleanerHook {
         } catch (Throwable t) {
             MainHook.log("CacheCleaner: hook Activity.onCreate failed: " + t);
         }
-        register(currentApplication());
+        try {
+            register((Application) currentApplication());
+        } catch (Throwable ignored) {
+            // currentApplication 返回的不是 Application 实例时静默跳过，等首个 Activity 兜底
+        }
     }
 
     private static void register(Application app) {
