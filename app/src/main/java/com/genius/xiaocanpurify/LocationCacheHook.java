@@ -878,6 +878,74 @@ public final class LocationCacheHook {
                 MainHook.log("LocationCache: search capture unavailable: " + cn);
             }
         }
+        hookActivityResultCapture(xposed, cl);
+    }
+
+    /**
+     * 「选择地址」页选点返回捕获：搜索结果点击走 Activity.setResult 返回
+     *（不经过 pickLocation），Intent extras 携带选点的经纬度与地址文案。
+     * 用户主动选点=明确的位置意图，写入定位缓存（缓存=最后一次选点）。
+     */
+    private static void hookActivityResultCapture(XposedInterface xposed, ClassLoader cl) {
+        try {
+            Class<?> act = Class.forName(
+                    "com.realtech.location.search.LocationSearchActivity", false, cl);
+            int hooked = 0;
+            for (Method m : android.app.Activity.class.getDeclaredMethods()) {
+                if (!"setResult".equals(m.getName())) continue;
+                try {
+                    xposed.hook(m).intercept(chain -> {
+                        try {
+                            Object self = chain.getThisObject();
+                            if (!act.isInstance(self)) return chain.proceed();
+                            Object[] args = chain.getArgs().toArray();
+                            if (args.length < 2
+                                    || !(args[1] instanceof android.content.Intent)) {
+                                return chain.proceed();
+                            }
+                            android.content.Intent it = (android.content.Intent) args[1];
+                            android.os.Bundle ex = it.getExtras();
+                            if (ex == null) return chain.proceed();
+                            double lat = Double.NaN, lng = Double.NaN;
+                            String addr = null;
+                            for (String key : ex.keySet()) {
+                                Object v = ex.get(key);
+                                String k = key == null ? "" : key
+                                        .toLowerCase(java.util.Locale.US);
+                                if (v instanceof Number) {
+                                    double d = ((Number) v).doubleValue();
+                                    if ((k.contains("lat")) && Double.isNaN(lat)) lat = d;
+                                    else if ((k.contains("lng") || k.contains("lon"))
+                                            && Double.isNaN(lng)) lng = d;
+                                } else if (v instanceof String) {
+                                    String s = (String) v;
+                                    if (k.contains("address") || k.contains("title")
+                                            || k.contains("name")) {
+                                        if (addr == null || s.length() > addr.length()) {
+                                            addr = s;
+                                        }
+                                    }
+                                }
+                            }
+                            MainHook.log("LocationCache: PickResult lat=" + lat
+                                    + " lng=" + lng + " addr=" + addr);
+                            if (!Double.isNaN(lat) && !Double.isNaN(lng)
+                                    && Math.abs(lat) > 1 && Math.abs(lng) > 1) {
+                                cacheExternalLocation(lat, lng, addr);
+                            }
+                        } catch (Throwable ignored) {}
+                        return chain.proceed();
+                    });
+                    hooked++;
+                } catch (Throwable ignored) {}
+            }
+            if (hooked > 0) {
+                MainHook.log("LocationCache: hooked LocationSearchActivity.setResult x"
+                        + hooked);
+            }
+        } catch (Throwable t) {
+            MainHook.log("LocationCache: activity result capture unavailable: " + t);
+        }
     }
 
     /** pickLocation 参数扫描器：聚合一次调用里的数值/字符串，命中合理经纬度后写入缓存。 */
