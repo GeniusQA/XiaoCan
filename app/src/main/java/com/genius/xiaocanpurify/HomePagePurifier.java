@@ -836,32 +836,39 @@ public final class HomePagePurifier {
                 }
             } catch (Throwable ignored) {}
         }
-        if (headerCollapsed && toolbar != null) {
-            // 不再上移列表：实测列表 padding 触发宿主「折叠标题栏」逻辑
-            //（ll_collapse_title_bar），把左上角地址栏（layout_address）
-            // GONE，搜索框顶到 logo 行（用户截图：开模块后地址栏被搜索框
-            // 遮挡）。保留 fl_banner 容器清理（清背景+折叠图片子视图）与
-            // Banner 数据层过滤——容器内容为空后高度自然塌陷，列表由宿主
-            // 自行上移，布局结构恢复宿主原样（地址栏显示），净化效果不变。
-            // 地址栏持续对抗：宿主在定位回调地址为空时会 GONE layout_address
-            //（3.21.5 布局：地址栏在搜索框上方、与 logo 同行），恢复后又被
-            // 宿主覆盖。挂布局变化监听——宿主每次 GONE，布局/绘制阶段立即
-            // 恢复 VISIBLE（拉锯但视觉最终显示），并持续回填缓存地址文本。
+        // 地址栏持续对抗（无条件执行，不依赖 TOP_BANNER/toolbar 高度）：
+        // 宿主定位回调判空会 GONE layout_address（3.21.5 布局：地址栏在
+        // 搜索框上方、与 logo 同容器），搜索框顶到 logo 行。此前把
+        // OnLayoutChangeListener 挂在地址栏自身——被 GONE 后不再参与布局、
+        // 监听永不触发；改挂父容器（ll_collapse_title_bar），父布局变化
+        //（含子视图 GONE）时恢复 VISIBLE 并回填缓存地址。恢复后
+        // ConstraintLayout 自动恢复两行布局（地址栏在上、搜索框在下）。
+        if (toolbar != null) {
             try {
                 View addrBar = findViewByName(toolbar, "layout_address");
+                View addrParent = addrBar != null
+                        && addrBar.getParent() instanceof View
+                        ? (View) addrBar.getParent() : null;
                 if (addrBar != null) {
                     if (addrBar.getVisibility() != View.VISIBLE) {
                         addrBar.setVisibility(View.VISIBLE);
                         MainHook.log("HomeAddress: restored layout_address");
                     }
-                    if (!ADDR_HOOKED.containsKey(addrBar)) {
-                        ADDR_HOOKED.put(addrBar, Boolean.TRUE);
-                        addrBar.addOnLayoutChangeListener(
+                    if (addrParent != null && !ADDR_HOOKED.containsKey(addrParent)) {
+                        ADDR_HOOKED.put(addrParent, Boolean.TRUE);
+                        final View parentView = addrParent;
+                        parentView.addOnLayoutChangeListener(
                                 (v, l, t, r, b, ol, ot, or2, ob) -> {
-                                    if (v.getVisibility() != View.VISIBLE) {
-                                        v.setVisibility(View.VISIBLE);
-                                        MainHook.log("HomeAddress: re-restored on layout");
-                                    }
+                                    try {
+                                        View ab = findViewByName(parentView,
+                                                "layout_address");
+                                        if (ab != null
+                                                && ab.getVisibility() != View.VISIBLE) {
+                                            ab.setVisibility(View.VISIBLE);
+                                            MainHook.log("HomeAddress: re-restored"
+                                                    + " on parent layout");
+                                        }
+                                    } catch (Throwable ignored) {}
                                 });
                     }
                 }
