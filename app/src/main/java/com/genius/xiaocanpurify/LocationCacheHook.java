@@ -137,9 +137,35 @@ public final class LocationCacheHook {
                 try {
                     xposed.hook(m).intercept(chain -> {
                         Object result = chain.proceed();
-                        if (result == null && hasCache()) {
-                            MainHook.log("LocationCache: " + name + " returned null, replay cache");
-                            return buildCachedResult(m.getReturnType());
+                        try {
+                            // GPS 关闭时 SDK 内部的 network last-known（WiFi/基站 fix）
+                            // 也会从这里泄漏给宿主——此前只在 result==null 时回放，
+                            // WiFi 定位坐标系非空直穿，宿主拿它逆地理后地址栏显示
+                            // WiFi 位置的地址（锦江区/牛市口），而非用户选点地址
+                            if (hasCache() && !isGpsActuallyEnabled()) {
+                                Object cached = buildCachedResult(m.getReturnType());
+                                if (cached != null) {
+                                    MainHook.log("LocationCache: " + name
+                                            + " gps off, replay cache (leaked fix blocked, was "
+                                            + (result == null ? "null" : "non-null network fix")
+                                            + ")");
+                                    return cached;
+                                }
+                                return result;
+                            }
+                            if (!hasCache() && !isGpsActuallyEnabled() && result != null) {
+                                // GPS 关闭且无缓存：与监听器回调语义一致，吞掉
+                                // 降级网络定位，宿主按「无最后位置」处理
+                                MainHook.log("LocationCache: " + name
+                                        + " gps off, no cache, drop network last-known");
+                                return null;
+                            }
+                            if (result == null && hasCache()) {
+                                MainHook.log("LocationCache: " + name + " returned null, replay cache");
+                                return buildCachedResult(m.getReturnType());
+                            }
+                        } catch (Throwable t) {
+                            MainHook.log("LocationCache: " + name + " hook error: " + t);
                         }
                         return result;
                     });

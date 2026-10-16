@@ -115,19 +115,31 @@ public final class CacheCleanerHook {
     private static void asyncClear(Context ctx) {
         final Context app = ctx.getApplicationContext();
         new Thread(() -> {
-            long freed = clearDir(app.getCacheDir());
-            freed += clearDir(app.getCodeCacheDir());
+            // 分目录统计释放量，模块日志页可直接核对每次清理明细
+            StringBuilder detail = new StringBuilder();
+            long freed = 0;
+            freed += clearDirDetail(app.getCacheDir(), "cache", detail);
+            freed += clearDirDetail(app.getCodeCacheDir(), "code_cache", detail);
             try {
                 File ext = app.getExternalCacheDir();
-                if (ext != null) freed += clearDir(ext);
+                if (ext != null) freed += clearDirDetail(ext, "external_cache", detail);
             } catch (Throwable ignored) {}
             try {
                 app.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
                         .edit().putBoolean(KEY_DIRTY, false).apply();
             } catch (Throwable ignored) {}
             MainHook.log("CacheCleaner: cache cleared, freed "
-                    + android.text.format.Formatter.formatFileSize(app, freed));
+                    + android.text.format.Formatter.formatFileSize(app, freed)
+                    + " (" + detail + ")");
         }, "XiaoCanPurify-CacheCleaner").start();
+    }
+
+    /** 递归删除目录内容（不删目录本身），返回释放的字节数并追加明细。 */
+    private static long clearDirDetail(File dir, String label, StringBuilder detail) {
+        long freed = clearDir(dir);
+        detail.append(label).append("=")
+                .append(android.text.format.Formatter.formatFileSize(dir, freed));
+        return freed;
     }
 
     /** 递归删除目录内容（不删目录本身），返回释放的字节数。 */

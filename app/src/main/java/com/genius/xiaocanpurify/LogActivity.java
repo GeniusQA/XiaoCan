@@ -46,6 +46,17 @@ public class LogActivity extends Activity {
     private BroadcastReceiver pushReceiver;
     private FrameLayout overlayHost;
     private PopupWindow currentPopup;
+    /** 页面可见期间的 Hook 日志轮询间隔。 */
+    private static final long POLL_INTERVAL_MS = 3000;
+    private final android.os.Handler pollHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable pollTask = new Runnable() {
+        @Override
+        public void run() {
+            requestHookLogs();
+            pollHandler.postDelayed(this, POLL_INTERVAL_MS);
+        }
+    };
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -170,6 +181,23 @@ public class LogActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // 回到页面立即拉取一次；页面可见期间轮询拉取 Hook 侧日志，
+        // 宿主推送回来后接收器会自动刷新列表（LogStore 按行去重，重复拉取无害）
+        requestHookLogs();
+        reload();
+        pollHandler.removeCallbacks(pollTask);
+        pollHandler.postDelayed(pollTask, POLL_INTERVAL_MS);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        pollHandler.removeCallbacks(pollTask);
+    }
+
+    @Override
     protected void onDestroy() {
         if (pushReceiver != null) {
             try {
@@ -177,6 +205,7 @@ public class LogActivity extends Activity {
             } catch (Throwable ignored) {}
             pushReceiver = null;
         }
+        pollHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
 
@@ -329,6 +358,8 @@ public class LogActivity extends Activity {
             popupItem(menuView, label, null, selected, v -> {
                 levelFilter = opt;
                 reload();
+                // 重建弹窗，让右侧红色勾选立即反映最新选择
+                showLevelMenu(anchor);
             });
         }
         showPopup(anchor, menuView);
@@ -345,6 +376,7 @@ public class LogActivity extends Activity {
                 LogStore.setCleanupIntervalHours(this, hours);
                 LogStore.maybeAutoCleanup(this);
                 Toast.makeText(this, "自动清理：" + label, Toast.LENGTH_SHORT).show();
+                showCleanupMenu(anchor);
             });
         }
         showPopup(anchor, menuView);

@@ -238,13 +238,18 @@ public final class NetworkAdInterceptor {
     private static Object rewriteRequestCoords(ClassLoader classLoader, Object request) {
         try {
             Object reqBody = request.getClass().getMethod("body").invoke(request);
-            if (reqBody == null) return null;
+            if (reqBody == null) {
+                // body 为空（GET 等）：坐标可能放在 URL 查询参数里
+                return rewriteRequestUrl(classLoader, request);
+            }
             Class<?> bufferClass = classLoader.loadClass("okio.Buffer");
             Object buf = bufferClass.getDeclaredConstructor().newInstance();
             reqBody.getClass().getMethod("writeTo", classLoader.loadClass("okio.BufferedSink"))
                     .invoke(reqBody, buf);
             String body = (String) buf.getClass().getMethod("readUtf8").invoke(buf);
-            if (body == null || body.isEmpty() || body.length() > 200000) return null;
+            if (body == null || body.isEmpty() || body.length() > 200000) {
+                return rewriteRequestUrl(classLoader, request);
+            }
 
             String rewritten = LocationCacheHook.rewriteCoordsInString(body);
             if (rewritten == null) {
@@ -254,7 +259,8 @@ public final class NetworkAdInterceptor {
                     lastReqLogMs = System.currentTimeMillis();
                     MainHook.log("REQ[geoloc body] " + body.substring(0, Math.min(body.length(), 300)));
                 }
-                return null;
+                // 请求体没有可改写坐标时兜底改写 URL 查询参数
+                return rewriteRequestUrl(classLoader, request);
             }
             MainHook.log("REQ coords rewritten in body");
             // 用 Builder 重建 Request：url/method/headers 保持，替换 body
@@ -275,6 +281,27 @@ public final class NetworkAdInterceptor {
             builder.getClass().getMethod("headers", classLoader.loadClass("okhttp3.Headers"))
                     .invoke(builder, headers);
             return builderClass.getMethod("build").invoke(builder);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** URL 查询参数坐标改写兜底：GET 请求的 lat/lng 在 query string 里时 body 改写会漏掉。 */
+    private static Object rewriteRequestUrl(ClassLoader classLoader, Object request) {
+        try {
+            Object url = request.getClass().getMethod("url").invoke(request);
+            String u = url == null ? null : url.toString();
+            if (u == null || u.isEmpty() || u.length() > 2000) return null;
+            String rewritten = LocationCacheHook.rewriteCoordsInString(u);
+            if (rewritten == null || rewritten.equals(u)) return null;
+            Class<?> httpUrlClass = classLoader.loadClass("okhttp3.HttpUrl");
+            Object newUrl = httpUrlClass.getMethod("parse", String.class).invoke(null, rewritten);
+            if (newUrl == null) return null;
+            Object builder = request.getClass().getMethod("newBuilder").invoke(request);
+            builder.getClass().getMethod("url", httpUrlClass).invoke(builder, newUrl);
+            MainHook.log("REQ coords rewritten in url");
+            return classLoader.loadClass("okhttp3.Request$Builder")
+                    .getMethod("build").invoke(builder);
         } catch (Throwable t) {
             return null;
         }

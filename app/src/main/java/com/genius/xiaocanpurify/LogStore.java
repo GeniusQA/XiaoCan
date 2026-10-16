@@ -188,11 +188,8 @@ public final class LogStore {
             for (int i = all.length - 1; i >= 0 && picked.size() < maxLines; i--) {
                 String l = all[i];
                 if (l.isEmpty()) continue;
-                if (!allLevel) {
-                    int sp = l.indexOf(' ');
-                    if (sp < 0 || sp + 2 > l.length() || l.charAt(sp + 1) != levelFilter.charAt(0)) {
-                        continue;
-                    }
+                if (!allLevel && !lineHasLevel(l, levelFilter.charAt(0))) {
+                    continue;
                 }
                 picked.add(l);
             }
@@ -206,18 +203,32 @@ public final class LogStore {
         }
     }
 
-    /** 解析单行 "MM-dd HH:mm:ss.SSS L/tag: message"。 */
+    /**
+     * 解析单行 "MM-dd HH:mm:ss.SSS L/tag: message"。
+     * 注意第一个空格在日期与时间之间，不能用它定位等级——
+     * 用正则整体匹配：日期 + 时间 + 等级/tag + 消息。
+     */
+    private static final java.util.regex.Pattern LINE_PATTERN =
+            java.util.regex.Pattern.compile("^(\\S+) (\\S+) ([A-Z])/([^:]*): (.*)$");
+
     private static String[] parseLine(String l) {
-        int sp = l.indexOf(' ');
-        int slash = l.indexOf('/', sp + 1);
-        int colon = l.indexOf(": ", slash + 1);
-        if (sp <= 0 || slash < 0 || colon < 0) return null;
+        java.util.regex.Matcher m = LINE_PATTERN.matcher(l);
+        if (!m.matches()) return null;
         return new String[]{
-                l.substring(0, sp),
-                l.substring(sp + 1, slash),
-                l.substring(slash + 1, colon),
-                unflatten(l.substring(colon + 2))
+                m.group(1) + " " + m.group(2),  // 完整时间：MM-dd HH:mm:ss.SSS
+                m.group(3),                     // 等级 I/W/E
+                m.group(4),                     // tag
+                unflatten(m.group(5))           // 消息
         };
+    }
+
+    /** 行格式 "MM-dd HH:mm:ss.SSS L/tag: ..."：等级是唯一 "/tag" 前的单字母。 */
+    private static boolean lineHasLevel(String l, char level) {
+        int slash = l.indexOf('/');
+        if (slash < 2) return false;
+        char lv = l.charAt(slash - 1);
+        if ("IEWD".indexOf(lv) < 0) return false;
+        return lv == level && l.charAt(slash - 2) == ' ';
     }
 
     private static String flatten(String s) {
