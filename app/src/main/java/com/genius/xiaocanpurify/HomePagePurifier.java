@@ -875,6 +875,28 @@ public final class HomePagePurifier {
                                 });
                     }
                 }
+                // 搜索框让位：3.21.5 的约束把 searchView 与 layout_address
+                // 堆叠在同一位置（宿主按定位状态切换显示），地址栏恢复后
+                // 被上层搜索框盖住（用户截图）。改写约束：searchView.start
+                // → layout_address.end，两视图并排、搜索框自动缩短。
+                View sv = findViewByName(toolbar, "searchView");
+                if (sv != null && addrBar != null
+                        && addrBar.getId() != View.NO_ID) {
+                    android.view.ViewGroup.LayoutParams lp = sv.getLayoutParams();
+                    if (lp != null && lp.getClass().getName()
+                            .contains("ConstraintLayout")) {
+                        try {
+                            java.lang.reflect.Field f =
+                                    lp.getClass().getField("startToEnd");
+                            if (f.getInt(lp) != addrBar.getId()) {
+                                f.setInt(lp, addrBar.getId());
+                                sv.setLayoutParams(lp);
+                                MainHook.log("HomeAddress: searchView moved"
+                                        + " after address bar");
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                }
                 View addrText = findViewByName(toolbar, "tv_address");
                 if (addrText instanceof android.widget.TextView) {
                     String want = LocationCacheHook.cachedAddressText();
