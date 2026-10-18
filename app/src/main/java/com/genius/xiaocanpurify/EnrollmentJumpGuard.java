@@ -33,6 +33,11 @@ final class EnrollmentJumpGuard {
         return WINDOW.lastTouchAgeMs(SystemClock.uptimeMillis());
     }
 
+    /** 当前栈顶 Activity（弹窗清扫按它在页面上定位中奖弹窗容器）。 */
+    static Activity topActivity() {
+        return current.get();
+    }
+
     static void install(XposedInterface xposed, ClassLoader cl) {
         hookSubmissionStart(xposed, cl);
         hookLaunchDialogs(xposed, cl);

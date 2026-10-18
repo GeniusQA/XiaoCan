@@ -112,6 +112,23 @@ public final class CacheCleanerHook {
         return "exit".equals(mode());
     }
 
+    /**
+     * 广告 SDK 素材缓存目录（相对应用数据根）：持续膨胀的大头。
+     * 实测分布：files/videoCache 201MB（视频广告）、files/pangle_p 83MB
+     * （穿山甲素材）、files/ksadsdk 17MB、files/cybermedia 12MB 等。
+     * 只清素材缓存，不清插件/so 目录（app_sodler、app_tt_pangle_bykv_file、
+     * app_baidu_sdk_remote、ksad_dynamic 等）——清了会被重新下载约 150MB。
+     */
+    private static final String[] AD_CACHE_DIRS = {
+            "files/videoCache",
+            "files/pangle_p",
+            "files/ksadsdk",
+            "files/cybermedia",
+            "files/com.yt.ad.file.cache",
+            "files/syad",
+            "files/imgCache",
+    };
+
     private static void asyncClear(Context ctx) {
         final Context app = ctx.getApplicationContext();
         new Thread(() -> {
@@ -124,6 +141,16 @@ public final class CacheCleanerHook {
                 File ext = app.getExternalCacheDir();
                 if (ext != null) freed += clearDirDetail(app, ext, "external_cache", detail);
             } catch (Throwable ignored) {}
+            // 广告 SDK 素材缓存（files/ 下各广告组件的下载缓存）
+            File base = app.getFilesDir().getParentFile();
+            if (base != null) {
+                for (String rel : AD_CACHE_DIRS) {
+                    File dir = new File(base, rel);
+                    if (dir.exists()) {
+                        freed += clearDirDetail(app, dir, rel.replace("files/", ""), detail);
+                    }
+                }
+            }
             try {
                 app.getSharedPreferences(HOST_PREFS, Context.MODE_PRIVATE)
                         .edit().putBoolean(KEY_DIRTY, false).apply();

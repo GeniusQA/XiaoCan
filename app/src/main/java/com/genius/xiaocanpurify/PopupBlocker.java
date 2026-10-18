@@ -31,7 +31,24 @@ public final class PopupBlocker {
         hookKuiklyDialogQueue(xposed, classLoader);
         hookTaobaoInstallPrompt(xposed, classLoader);
         hookDialogShowByContent(xposed);
+        hookResumeSweep(xposed);
         EnrollmentJumpGuard.install(xposed, classLoader);
+    }
+
+    /** 页面加载装配的弹窗（首页免单弹窗等）在 resume 后延迟清扫兜底。 */
+    private static void hookResumeSweep(XposedInterface xposed) {
+        try {
+            xposed.hook(Activity.class.getDeclaredMethod("onResume")).intercept(chain -> {
+                Object result = chain.proceed();
+                try {
+                    sweepMarketingPopups();
+                } catch (Throwable ignored) {}
+                return result;
+            });
+            MainHook.log("Hooked Activity.onResume for popup sweep");
+        } catch (Throwable t) {
+            MainHook.log("Failed to hook Activity.onResume for sweep: " + t);
+        }
     }
 
     /**
@@ -90,11 +107,24 @@ public final class PopupBlocker {
             if (PopupMarkers.contains(text)) {
                 return true;
             }
+            // 页面内弹层营销弹窗（ Dialog 变体）：隐藏并触发页面级清扫兜底
+            if (text.contains("今日免单难度降低")
+                    || text.contains("当前店铺不在营业时间")
+                    || text.contains("开心收下")
+                    || text.contains("再签")
+                    || text.contains("订单审核通过")
+                    || text.contains("入群新人礼包")) {
+                sweepMarketingPopups();
+                return true;
+            }
             // 抽奖页（免费开红包）中奖弹窗：命中后同时布防外跳窗口，
-            // 拦下弹窗「即将自动跳转领取」触发的微信小程序自动拉起
+            // 拦下弹窗「即将自动跳转领取」触发的微信小程序自动拉起；
+            // 并触发页面级清扫（中奖弹窗可能是页面内弹层而非 Dialog）
             if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
-                    && (text.contains("即将自动跳转") || text.contains("大额出行福利券"))) {
+                    && (text.contains("即将自动跳转") || text.contains("大额出行福利券")
+                        || text.contains("跳转领取大额福利"))) {
                 EnrollmentJumpGuard.armNow();
+                sweepPrizePopups();
                 return true;
             }
             return false;
@@ -114,6 +144,111 @@ public final class PopupBlocker {
                 collectText(group.getChildAt(i), sb);
             }
         }
+    }
+
+    // ==================== 营销弹窗清扫（按文案锚点，页面内弹层通杀） ====================
+
+    /**
+     * 弹窗组：group[0] 为必要锚点（容器子树必须包含），其余为辅助锚点；
+     * 容器需同时包含必要锚点 + ≥1 个辅助锚点才隐藏——防止与页面背景
+     * 同文案的内容（如首页免单横幅与免单弹窗并存）被误伤整页。
+     */
+    private static final String[][] SWEEP_GROUPS = {
+            // 免费开红包：中奖弹窗
+            {"大额出行福利券", "即将自动跳转领取"},
+            // 免费开红包：跳转确认框
+            {"跳转领取大额福利", "仅限本次", "始终允许"},
+            // 首页：免单活动弹窗
+            {"立即免单", "0元吃"},
+            // 活动详情：营业时间提示
+            {"当前店铺不在营业时间", "报名前建议进店查看", "我知道了"},
+            // 免费开红包：签到成功弹窗
+            {"签到成功", "再签", "开心收下", "必得奖励"},
+            // 卡券/红包页：外卖红包广告横幅（去播放为广告特征，真实红包只有去使用）
+            {"外卖红包", "今日有效", "去播放"},
+            // 我的订单：上传凭证后「订单审核通过」关注引导弹窗
+            {"订单审核通过", "立即关注", "关注即可获得", "秒杀预告"},
+            // 我的订单：上传凭证后「入群新人礼包」弹窗
+            {"入群新人礼包", "社群专属福利", "一小时延时券", "超前抢单券"},
+    };
+    private static final android.os.Handler SWEEP_HANDLER =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private static boolean sweepScheduled;
+
+    /**
+     * 营销弹窗清扫：部分营销弹窗是页面内弹层（Kuikly/普通 View）而非
+     * Dialog，Dialog.show 拦截覆盖不到。按文案锚点在当前页面上定位
+     * 弹窗最小容器并 GONE，多次延迟重扫（弹窗可能带动画延迟装配）。
+     * 触发点：Dialog 内容命中、网络层中奖载荷检测、Kuikly 队列放行、
+     * Activity.onResume（覆盖页面加载装配场景）。
+     */
+    public static void sweepMarketingPopups() {
+        SWEEP_HANDLER.post(() -> doSweep());
+        if (!sweepScheduled) {
+            sweepScheduled = true;
+            SWEEP_HANDLER.postDelayed(() -> doSweep(), 400);
+            SWEEP_HANDLER.postDelayed(() -> doSweep(), 1000);
+            SWEEP_HANDLER.postDelayed(() -> { doSweep(); sweepScheduled = false; }, 2200);
+        }
+    }
+
+    private static void doSweep() {
+        try {
+            Activity a = EnrollmentJumpGuard.topActivity();
+            if (a == null || a.isFinishing() || a.getWindow() == null) return;
+            View root = a.getWindow().getDecorView();
+            if (!(root instanceof ViewGroup)) return;
+            for (String[] group : SWEEP_GROUPS) {
+                java.util.List<View> hits = new java.util.ArrayList<>();
+                collectAnchorHits((ViewGroup) root, group, hits);
+                if (hits.size() < 2) continue;
+                View container = smallestContainerContainingAll(hits);
+                if (container != null && container.getVisibility() == View.VISIBLE) {
+                    container.setVisibility(View.GONE);
+                    MainHook.log("Marketing popup container hidden ("
+                            + container.getClass().getSimpleName()
+                            + " anchor=" + group[0] + ")");
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void collectAnchorHits(ViewGroup group, String[] anchors,
+            java.util.List<View> hits) {
+        if (group.getVisibility() != View.VISIBLE) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView) {
+                CharSequence t = ((TextView) child).getText();
+                if (t != null) {
+                    for (String anchor : anchors) {
+                        if (t.toString().contains(anchor)) { hits.add(child); break; }
+                    }
+                }
+            }
+            if (child instanceof ViewGroup) collectAnchorHits((ViewGroup) child, anchors, hits);
+        }
+    }
+
+    /** 包含全部命中 TextView 的最小公共容器（找不到返回 null）。 */
+    private static View smallestContainerContainingAll(java.util.List<View> hits) {
+        if (hits.isEmpty()) return null;
+        View first = hits.get(0);
+        for (View cur = first; cur != null; cur = (View) cur.getParent()) {
+            boolean all = true;
+            for (View h : hits) {
+                if (!isDescendantOrSelf(h, cur)) { all = false; break; }
+            }
+            if (all) return cur;
+        }
+        return null;
+    }
+
+    private static boolean isDescendantOrSelf(View node, View ancestor) {
+        for (View cur = node; cur != null; cur = (View) cur.getParent()) {
+            if (cur == ancestor) return true;
+        }
+        return false;
     }
 
     private static void hookTaobaoInstallPrompt(XposedInterface xposed, ClassLoader cl) {
@@ -352,6 +487,8 @@ public final class PopupBlocker {
             String s = String.valueOf(dialogInfo);
             MainHook.log("DialogQueueInfo(" + from + "): "
                     + (s.length() > 160 ? s.substring(0, 160) : s));
+            // 队列放行的弹窗可能是页面内弹层：触发文案锚点清扫兜底
+            sweepMarketingPopups();
         } catch (Throwable ignored) {}
     }
 

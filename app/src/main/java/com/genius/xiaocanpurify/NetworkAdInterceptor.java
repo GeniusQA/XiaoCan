@@ -671,11 +671,18 @@ public final class NetworkAdInterceptor {
                     }
                 }
                 // 红包抽奖中奖数据包（「大额出行福利券 / 即将自动跳转」）到达即布防，
-                // 拦下随后自动拉起的小程序跳转，但不吞掉响应（抽奖仍正常结算）
+                // 拦下随后自动拉起的小程序跳转，并触发页面级弹窗清扫
+                //（中奖弹窗与跳转确认框可能为页面内弹层，Dialog 拦截覆盖不到）
                 if (PurifyPrefs.hide(PurifyPrefs.LOTTERY_POPUP)
                         && (body.contains("大额出行福利券") || body.contains("即将自动跳转"))) {
                     MainHook.log("Lottery prize payload detected, arming jump guard: " + url);
                     EnrollmentJumpGuard.armNow();
+                    PopupBlocker.sweepMarketingPopups();
+                }
+                // 卡券/红包页：外卖红包广告横幅数据到达 → 触发页面清扫
+                //（横幅随红包列表异步渲染，resume 时机的清扫会错过）
+                if (body.contains("外卖红包") && body.contains("去播放")) {
+                    PopupBlocker.sweepMarketingPopups();
                 }
                 // 诊断：dump 商家/附近列表类请求与响应片段——判断请求用的
                 // 是注入的缓存坐标还是宿主自取的其它坐标（锦江区来源定位）
