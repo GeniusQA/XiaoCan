@@ -124,7 +124,7 @@ public final class PopupBlocker {
                     && (text.contains("即将自动跳转") || text.contains("大额出行福利券")
                         || text.contains("跳转领取大额福利"))) {
                 EnrollmentJumpGuard.armNow();
-                sweepPrizePopups();
+                sweepMarketingPopups();
                 return true;
             }
             return false;
