@@ -172,6 +172,7 @@ public final class XiaoCanRpc {
         String token = p.getString(K_TOKEN, null);
         if (token == null) throw new IllegalStateException("缺少凭证：请先打开小蚕产生一次请求");
         String uid = p.getString(K_UID, "0");
+        String silk = p.getString(K_SILK, "0");
         String city = p.getString(K_CITY, "510100");
         String ua = p.getString(K_UA, "XC;Android;3.21.5;");
         String ver = p.getString(K_VER, "3.21.5.4");
@@ -185,25 +186,37 @@ public final class XiaoCanRpc {
         JSONObject payload = body == null ? new JSONObject() : new JSONObject(body.toString());
         if (!payload.has("app_id")) payload.put("app_id", 10);
 
+        String cleanToken = token.startsWith("Bearer ") ? token.substring(7).trim() : token.trim();
+
+        // 头集合严格对齐 xiaocan-assistant 的 app 原生协议规范（写操作方法
+        // 需要 Authorization/token/x-Vayne/x-Teemo(silk_id) 完整认证集，
+        // 只有 x-Sivir 会被网关对写方法返回 401——用户实测）
         java.util.LinkedHashMap<String, String> headers = new java.util.LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Accept", "application/json, text/plain, */*");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+        headers.put("x-City", city);
+        headers.put("X-CityCode", city);
+        headers.put("X-Garen", String.valueOf(ts));
+        headers.put("X-Nami", nami);
+        headers.put("x-Annie", "XC");
         headers.put("servername", serverName);
         headers.put("methodname", methodName);
         headers.put("X-Ashe", ashe);
-        headers.put("X-Nami", nami);
-        headers.put("X-Garen", String.valueOf(ts));
-        headers.put("x-City", city);
-        headers.put("x-Annie", "XC");
+        headers.put("Content-Type", "application/json");
+        headers.put("Accept", "application/json, text/plain, */*");
+        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
         headers.put("X-Platform", "Android");
-        headers.put("X-Session-Id", sid);
-        headers.put("User-Agent", ua);
-        headers.put("x-channel", "xiaocan");
-        headers.put("X-App-Sr", "16");
+        headers.put("appid", "10");
+        headers.put("X-App-Sr", "10");
+        headers.put("version", ver);
         headers.put("X-Version", ver);
-        headers.put("X-Teemo", uid);
-        headers.put("X-Sivir", token);
+        headers.put("x-channel", "xiaocan");
+        headers.put("X-Model", "Android Phone");
+        headers.put("User-Agent", "XiaoCan/" + ver
+                + " (Linux; U; Android 14; zh-cn; Mobile) okhttp/4.12.0");
+        headers.put("x-Vayne", uid);
+        headers.put("x-Teemo", silk != null ? silk : "0");
+        headers.put("Authorization", "Bearer " + cleanToken);
+        headers.put("token", cleanToken);
+        headers.put("x-Sivir", cleanToken);
         // 内部请求标记：宿主拦截器对它直通（不改写/不拦截）
         headers.put("X-Purify-Internal", "1");
 
