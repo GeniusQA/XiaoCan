@@ -7,10 +7,10 @@ local.properties
 work/
 xiaocan.apk
 
-# 本地签名密钥（私钥，切勿提交/推送）
+# 本地签名密钥
 signing/
 *.jks
 *.keystore
 
-# 本地构建安装脚本，不入库
+# 本地构建安装脚本
 install-beta.ps1
