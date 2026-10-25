@@ -1582,6 +1582,7 @@ public class MainActivity extends Activity {
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
         srlp.topMargin = dp2px(10);
+        box.addView(searchRow, srlp);
         // ── 候选地点列表 ──
         final android.widget.ListView resultList = new android.widget.ListView(this);
         resultList.setDividerHeight(1);
@@ -1868,12 +1869,3 @@ public class MainActivity extends Activity {
                 .create();
         dlg.show();
     }
-                }
-            } catch (Throwable t) {
-                android.widget.Toast.makeText(this, "读取失败",
-                        android.widget.Toast.LENGTH_SHORT).show();
-            }
-        });
-
-        box.addView(searchRow, srlp);
-    private void setCacheCleanupMode(String mode) {
