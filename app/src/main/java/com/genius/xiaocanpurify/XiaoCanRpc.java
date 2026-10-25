@@ -491,6 +491,58 @@ public final class XiaoCanRpc {
         return invoke(ctx, "ActivityTask", "ActivityTaskMobileService.CollectPoints", b);
     }
 
+    // ---------------------------------------------------------------- SVIP 抢券/卡券
+
+    /** 查询会员返利券库存与进度（SilkwormVipMobile.GetVipRebateInfo）。 */
+    public static JSONObject vipRebateInfo(Context ctx, String silkId) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        return invoke(ctx, "SilkwormVip", "SilkwormVipMobile.GetVipRebateInfo", b);
+    }
+
+    /** 抢占 09:00 SVIP 专属返利券（VipRightsService.GrabRebateCardQuota）。 */
+    public static JSONObject grabRebateCardQuota(Context ctx, String silkId) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        return invoke(ctx, "SilkwormVip", "VipRightsService.GrabRebateCardQuota", b);
+    }
+
+    /** 抢占 09:30 SVIP 额外大牌放量券（VipRightsService.GrabExtraBrandCard，type=99）。
+     *  ⚠️ 不可调用 GrabBrandCard：直接扣减当月保底张数。 */
+    public static JSONObject grabExtraBrandCard(Context ctx, String silkId, int cardType)
+            throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        b.put("type", cardType);
+        return invoke(ctx, "SilkwormVip", "VipRightsService.GrabExtraBrandCard", b);
+    }
+
+    /** 查询影音会员周卡状态与余量（VipRightsService.UserTencentVipInfo）。 */
+    public static JSONObject userTencentVipInfo(Context ctx, String silkId) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        return invoke(ctx, "SilkwormVip", "VipRightsService.UserTencentVipInfo", b);
+    }
+
+    /** 秒杀抢占影音会员周卡配额（VipRightsService.GrabTencentVipQuota）。 */
+    public static JSONObject grabTencentVipQuota(Context ctx, String silkId) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        return invoke(ctx, "SilkwormVip", "VipRightsService.GrabTencentVipQuota", b);
+    }
+
+    /** 用户专属卡券列表（SilkwormCardService.GetUserCardList，status 0未使用/1已用/2过期）。 */
+    public static JSONObject userCardList(Context ctx, String silkId, int status, int offset,
+            int number) throws Exception {
+        JSONObject b = new JSONObject();
+        b.put("silk_id", parseLong(silkId));
+        b.put("status", status);
+        b.put("offset", offset);
+        b.put("number", number);
+        b.put("app_id", 10);
+        return invoke(ctx, "SilkwormCard", "SilkwormCardService.GetUserCardList", b);
+    }
+
     // ---------------------------------------------------------------- 元宝中心任务
 
     /** 完成天天赚元宝中心任务（5=官方社群 / 57=抖音电商浏览 / 59=打卡）。 */
