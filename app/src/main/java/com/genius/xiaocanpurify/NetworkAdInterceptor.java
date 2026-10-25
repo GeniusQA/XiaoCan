@@ -374,6 +374,8 @@ public final class NetworkAdInterceptor {
     /** RPC 401 诊断节流。 */
     private static volatile long lastRpcDiagMs;
     private static volatile String lastRpcDiagTag = "";
+    /** App /rpc 请求完整头已转储（一次性）。 */
+    private static volatile boolean rpcHeaderDumped;
     /** 逆地理请求原文转储上次时间（5 秒节流）。 */
     private static volatile long lastAddrReqDumpMs;
 
@@ -436,9 +438,18 @@ public final class NetworkAdInterceptor {
                 // 捕获宿主 OkHttpClient（模块 RPC 复用其 HTTPDNS/连接池）
                 try {
                     if (XiaoCanRpc.capturedClient() == null) {
-                        Object call = chain.getClass().getMethod("call").invoke(chain);
-                        Object client = call.getClass().getMethod("client").invoke(call);
-                        XiaoCanRpc.captureOkHttpClient(client);
+                        Object clientObj = null;
+                        try {
+                            Object callObj = chain.getClass().getMethod("call").invoke(chain);
+                            clientObj = callObj.getClass().getMethod("client").invoke(callObj);
+                        } catch (Throwable t1) {
+                            MainHook.log("RPC: client capture failed " + t1);
+                        }
+                        if (clientObj != null) {
+                            XiaoCanRpc.captureOkHttpClient(clientObj);
+                        } else {
+                            MainHook.log("RPC: client capture returned null");
+                        }
                     }
                 } catch (Throwable ignored) {}
 
@@ -450,6 +461,27 @@ public final class NetworkAdInterceptor {
                     try {
                         XiaoCanRpc.captureFromRequest(request);
                     } catch (Throwable ignored) {}
+                    // 一次性完整头转储：与模块构造请求逐项对比，定位 401 差异
+                    if (!rpcHeaderDumped) {
+                        rpcHeaderDumped = true;
+                        try {
+                            Object hdrs = request.getClass().getMethod("headers").invoke(request);
+                            int count = (Integer) hdrs.getClass().getMethod("size").invoke(hdrs);
+                            Method nameM = hdrs.getClass().getMethod("name", int.class);
+                            Method valM = hdrs.getClass().getMethod("value", int.class);
+                            StringBuilder sb = new StringBuilder("RPCDIAG[app-hdrs]");
+                            for (int i = 0; i < count; i++) {
+                                String n = (String) nameM.invoke(hdrs, i);
+                                String v = (String) valM.invoke(hdrs, i);
+                                if (n.toLowerCase(Locale.ROOT).contains("sivir")
+                                        || n.toLowerCase(Locale.ROOT).contains("ashe")) {
+                                    v = v.length() > 14 ? v.substring(0, 14) + "..(" + v.length() + ")" : v;
+                                }
+                                sb.append(' ').append(n).append('=').append(v);
+                            }
+                            MainHook.log(sb.toString());
+                        } catch (Throwable ignored) {}
+                    }
                     // 401 排查诊断：记录 App 自身请求的关键头（节流）
                     try {
                         long nowMs = System.currentTimeMillis();

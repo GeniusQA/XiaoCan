@@ -306,6 +306,10 @@ public final class XiaoCanRpc {
             int code = conn.getResponseCode();
             InputStream is = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
             String text = readAll(is);
+            log("RPCDIAG[mod] " + headers.get("servername") + "."
+                    + headers.get("methodname") + " HTTP " + code
+                    + " respLen=" + (text == null ? 0 : text.length())
+                    + " hdrs=" + String.join(",", headers.keySet()));
             if (code == 403) {
                 throw new IllegalStateException("WAF 拦截(403)，暂停调用");
             }
