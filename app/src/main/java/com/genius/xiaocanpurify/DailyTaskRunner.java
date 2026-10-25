@@ -209,17 +209,50 @@ public final class DailyTaskRunner {
         JSONObject call() throws Exception;
     }
 
+    /** 错误码人话解释（来源：实测 + xiaocan-assistant 的判定逻辑）。 */
+    private static String codeMeaning(int code) {
+        switch (code) {
+            case 0:
+                return "成功";
+            case 2:
+                return "参数错误（可能今日无可用礼包）";
+            case 3:
+                return "今日已签到";
+            case 25:
+                return "重复提交";
+            case 10001:
+                return "重复完成任务（今日已完成）";
+            case 20006:
+                return "任务不可重复提交（今日已完成）";
+            case 30001:
+                return "未登录或登录已过期";
+            case 50010:
+                return "该功能需小程序协议，暂不支持自动执行";
+            default:
+                if (code >= 40002 && code <= 40040) return "活动信息通知";
+                if (code == 500) return "服务器内部错误";
+                return "";
+        }
+    }
+
+    private static boolean isNoticeCode(int code) {
+        return code == 3 || code == 25 || code == 10001 || code == 20006
+                || (code >= 40002 && code <= 40040);
+    }
+
     private static int step(String name, RpcStep s, StringBuilder detail) {
         try {
             JSONObject res = s.call();
             String msg = res.optString("msg", "");
             int code = res.optInt("code", -1);
             // 信息性通知码（今日已完成/重复提交等）视为成功
-            boolean notice = code == 3 || code == 25 || (code >= 40002 && code <= 40040);
-            boolean ok = code == 0 || notice;
+            boolean ok = code == 0 || isNoticeCode(code);
+            String mean = codeMeaning(code);
             MainHook.log("DailyTask: " + name + " -> code=" + code
                     + (msg.isEmpty() ? "" : " msg=" + msg));
-            detail.append(name).append(": ").append(ok ? "成功" : "code=" + code)
+            detail.append(name).append(": ")
+                    .append(ok ? "成功" : "code=" + code)
+                    .append(mean.isEmpty() ? "" : "（" + mean + "）")
                     .append(msg.isEmpty() ? "" : " " + msg).append('\n');
             return ok ? 1 : 0;
         } catch (Throwable t) {
