@@ -57,6 +57,7 @@ public final class DailyTaskRunner {
                         // 凭据到期巡检 + 免单券抢购排程（14:00 窗口内）
                         credentialExpireCheck(a.getApplicationContext());
                         FreeOrderGrabber.armIfDue(a.getApplicationContext());
+                        VipGrabRunner.armAll(a.getApplicationContext());
                         // 启动后异步校准服务器时间（抢单/倒计时对齐用）
                         final Context appCtx = a.getApplicationContext();
                         new Thread(() -> XiaoCanRpc.syncServerTime(appCtx),
@@ -420,6 +421,12 @@ public final class DailyTaskRunner {
     // ------------------------------------------------------------ 凭据到期巡检
 
     /** 登录凭据（X-Sivir）到期巡检：临期 3 天内推送一次提醒（每天最多一次）。 */
+    /** 通知码判定（VipGrabRunner 共用）。 */
+    static boolean isNoticeCode(int code) {
+        return code == 3 || code == 25 || code == 10001 || code == 20006
+                || (code >= 40002 && code <= 40040);
+    }
+
     static void credentialExpireCheck(Context ctx) {
         try {
             long exp = XiaoCanRpc.tokenExpireAt(ctx);

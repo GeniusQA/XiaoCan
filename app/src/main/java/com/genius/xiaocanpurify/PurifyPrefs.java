@@ -107,6 +107,12 @@ public final class PurifyPrefs {
     // 每月免单券 14:00 抢购："1"=开启（默认关闭，需 App 在放量前打开）
     public static final String FREE_ORDER_GRAB = "free_order_grab";
 
+    // SVIP 抢券与提醒（VipGrabRunner 调度，均默认关闭）
+    public static final String GRAB_SVIP_REBATE = "grab_svip_rebate";
+    public static final String GRAB_BRAND_EXTRA = "grab_brand_extra";
+    public static final String GRAB_MEDIA_VIP = "grab_media_vip";
+    public static final String GRAB_CARD_EXPIRE = "grab_card_expire";
+
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";
     public static final String ORDER_FREE = "hide_order_free";

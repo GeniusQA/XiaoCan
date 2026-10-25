@@ -472,6 +472,16 @@ public class MainActivity extends Activity {
         freeRow.addView(freeSwitch);
         autoCard.addView(freeRow);
 
+        // SVIP 抢券与提醒（VipGrabRunner 调度，均默认关闭）
+        autoCard.addView(grabSwitchRow("SVIP 专属返利券（09:00）",
+                "每日 09:00 放量，自动抢占大额返利券", PurifyPrefs.GRAB_SVIP_REBATE));
+        autoCard.addView(grabSwitchRow("SVIP 大牌放量券（09:30）",
+                "每日 09:30 额外放量券（type=99），不扣保底张数", PurifyPrefs.GRAB_BRAND_EXTRA));
+        autoCard.addView(grabSwitchRow("影音会员周卡（10/17/20 点）",
+                "三个场次自动抢网易云/腾讯视频周卡配额", PurifyPrefs.GRAB_MEDIA_VIP));
+        autoCard.addView(grabSwitchRow("卡券到期提醒（08:30）",
+                "每日巡检未使用卡券，临期 3 天内推送提醒", PurifyPrefs.GRAB_CARD_EXPIRE));
+
         View notifyDivider2 = new View(this);
         notifyDivider2.setBackgroundColor(ThemeHelper.cardStroke(this));
         autoCard.addView(notifyDivider2, new LinearLayout.LayoutParams(
@@ -915,6 +925,35 @@ public class MainActivity extends Activity {
         LogStore.append(this, "I", "Daily", key + " = " + value
                 + (synced ? "（已同步宿主）" : "（未同步：LSPosed 服务未连接）"));
         updateSyncStatus();
+    }
+
+    /** 抢券任务开关行（独立 pref，默认关闭）。 */
+    private LinearLayout grabSwitchRow(String title, String desc, String prefKey) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp2px(10), 0, dp2px(6));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView label = new TextView(this);
+        label.setText(title);
+        label.setTextSize(14);
+        label.setTextColor(ThemeHelper.textHeading(this));
+        col.addView(label);
+        TextView d = new TextView(this);
+        d.setText(desc);
+        d.setTextSize(11);
+        d.setTextColor(ThemeHelper.textHint(this));
+        d.setPadding(0, dp2px(2), dp2px(8), 0);
+        col.addView(d);
+        row.addView(col);
+        Switch sw = new Switch(this);
+        sw.setChecked("1".equals(localPrefs.getString(prefKey, "0")));
+        sw.setOnCheckedChangeListener((v, checked) -> setStringPref(prefKey, checked ? "1" : "0"));
+        row.addView(sw);
+        return row;
     }
 
     /** 单行文本输入弹窗。 */
