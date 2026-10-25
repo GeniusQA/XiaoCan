@@ -833,32 +833,45 @@ public class MainActivity extends Activity {
         tabContent.removeAllViews();
         if (autoTab == 0) {
             tabContent.addView(taskSwitchRow("领天天赚元宝",
-                    "元宝任务打卡与聚拢元宝", PurifyPrefs.TASK_YB_CENTER, true));
-            tabContent.addView(taskSwitchRow("元宝签到",
-                    "每日元宝独立签到", PurifyPrefs.TASK_YB_SIGN, true));
-            tabContent.addView(taskSwitchRow("会员每日签到抽奖",
-                    "SVIP 成长礼包 + 签到抽奖", PurifyPrefs.TASK_VIP_SIGN, true));
+                    "自动完成社群打卡、电商浏览、领券加赠及天天打卡，一键聚拢元宝",
+                    PurifyPrefs.TASK_YB_CENTER, true));
+            tabContent.addView(taskSwitchRow("天天赚元宝签到",
+                    "官方App解锁界面「天天赚元宝」每日签到打卡，累积连续签到天数获取额外元宝奖励",
+                    PurifyPrefs.TASK_YB_SIGN, true));
+            tabContent.addView(taskSwitchRow("会员每日签到",
+                    "会员每日打卡 + VIP专属签到抽奖 + 里程碑抽奖 + 专属成长礼包",
+                    PurifyPrefs.TASK_VIP_SIGN, true));
             tabContent.addView(taskSwitchRow("收取未收元宝",
-                    "自动收取待领元宝", PurifyPrefs.TASK_COLLECT_POINTS, true));
+                    "按间隔自动收取视频端气泡元宝与已完成任务奖励，防过期",
+                    PurifyPrefs.TASK_COLLECT_POINTS, true));
             tabContent.addView(taskSwitchRow("免费开红包与抽奖",
-                    "领取机会 + 阶梯奖励 + 转盘 + 红包雨", PurifyPrefs.TASK_GROUP_LOTTERY, true));
+                    "自动领取全部7类免费开红包机会并开红包，支持阶梯进度与防风控间隔",
+                    PurifyPrefs.TASK_GROUP_LOTTERY, true));
         } else if (autoTab == 1) {
+            tabContent.addView(taskSwitchRow("整点红包雨",
+                    "每日六场整点红包雨自动接入，提高高额额度获取",
+                    PurifyPrefs.TASK_RED_RAIN, true));
+            tabContent.addView(taskSwitchRow("抢SVIP专属返利券（09:00）",
+                    "每日 09:00 准点抢SVIP专属大额返利券", PurifyPrefs.GRAB_SVIP_REBATE, false));
+            tabContent.addView(taskSwitchRow("抢SVIP大牌券（09:30）",
+                    "每日 09:30 准点抢SVIP额外大牌放量券（type=99，不扣当月保底张数）",
+                    PurifyPrefs.GRAB_BRAND_EXTRA, false));
+            tabContent.addView(taskSwitchRow("抢每月影音VIP（10/17/20 点）",
+                    "影音会员周卡每日三场，智能检测本月余量与历史记录",
+                    PurifyPrefs.GRAB_MEDIA_VIP, false));
+            tabContent.addView(taskSwitchRow("抢每月免单券（14:00）",
+                    "外卖霸王餐全餐免单券每日 14:00 准点秒杀", PurifyPrefs.FREE_ORDER_GRAB, false));
             tabContent.addView(flashGoodsEntryRow());
-            tabContent.addView(taskSwitchRow("秒杀自动兑换",
-                    "有货即自动下单（消耗元宝不可逆）", PurifyPrefs.FLASH_SALE_AUTO, false));
-            tabContent.addView(taskSwitchRow("每月免单券抢购（14:00）",
-                    "预热 + 连发 3 次 + 复查持券", PurifyPrefs.FREE_ORDER_GRAB, false));
-            tabContent.addView(taskSwitchRow("SVIP 专属返利券（09:00）",
-                    "自动抢占大额返利券", PurifyPrefs.GRAB_SVIP_REBATE, false));
-            tabContent.addView(taskSwitchRow("SVIP 大牌放量券（09:30）",
-                    "额外放量券，不扣保底张数", PurifyPrefs.GRAB_BRAND_EXTRA, false));
-            tabContent.addView(taskSwitchRow("影音会员周卡（10/17/20 点）",
-                    "三场次抢周卡配额", PurifyPrefs.GRAB_MEDIA_VIP, false));
+            tabContent.addView(taskSwitchRow("元宝秒杀自动兑换",
+                    "元宝商城限量秒杀抢券，有货即自动下单（消耗元宝不可逆）",
+                    PurifyPrefs.FLASH_SALE_AUTO, false));
         } else {
-            tabContent.addView(taskSwitchRow("凭据到期巡检",
-                    "JWT 临期 3 天推送提醒", PurifyPrefs.TASK_CREDENTIAL_EXPIRE, true));
-            tabContent.addView(taskSwitchRow("卡券到期提醒（08:30）",
-                    "未使用卡券临期推送", PurifyPrefs.GRAB_CARD_EXPIRE, false));
+            tabContent.addView(taskSwitchRow("凭据/JWT到期预警",
+                    "监控小蚕凭据与JWT有效期，提前推送防掉线",
+                    PurifyPrefs.TASK_CREDENTIAL_EXPIRE, true));
+            tabContent.addView(taskSwitchRow("卡券/红包到期提醒",
+                    "每日早间检查账户中即将失效的特权券并主动推送",
+                    PurifyPrefs.GRAB_CARD_EXPIRE, false));
         }
     }
 
