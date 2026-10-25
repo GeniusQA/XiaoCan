@@ -261,7 +261,8 @@ public final class XiaoCanRpc {
             String text = respBody == null ? ""
                     : (String) respBody.getClass().getMethod("string").invoke(respBody);
             String token = headers.get("X-Sivir");
-            log("RPCDIAG[mod] " + serverName + "." + methodName + " HTTP " + code
+            log("RPCDIAG[mod] " + headers.get("servername") + "."
+                    + headers.get("methodname") + " HTTP " + code
                     + " sivir=" + (token == null ? "null"
                     : (token.length() > 14
                     ? token.substring(0, 14) + "..(" + token.length() + ")" : token))
