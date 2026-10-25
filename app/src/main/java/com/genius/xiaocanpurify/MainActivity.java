@@ -1037,7 +1037,7 @@ public class MainActivity extends Activity {
         final android.widget.ListView resultList = new android.widget.ListView(this);
         resultList.setDividerHeight(1);
         final android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_1, new ArrayList<String>());
+                android.R.layout.simple_list_item_1, new java.util.ArrayList<String>());
         resultList.setAdapter(adapter);
         android.widget.LinearLayout.LayoutParams listLp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT, dp2px(150));
