@@ -119,6 +119,7 @@ public final class PurifyPrefs {
     public static final String TASK_VIP_SIGN = "task_vip_sign";
     public static final String TASK_COLLECT_POINTS = "task_collect_points";
     public static final String TASK_GROUP_LOTTERY = "task_group_lottery";
+    public static final String TASK_RED_RAIN = "task_red_rain";
     public static final String TASK_FLASH_SALE = "task_flash_sale";
     public static final String TASK_CREDENTIAL_EXPIRE = "task_credential_expire";
 
