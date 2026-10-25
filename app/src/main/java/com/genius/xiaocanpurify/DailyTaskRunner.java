@@ -252,7 +252,8 @@ public final class DailyTaskRunner {
         }
     }
 
-    private static boolean isNoticeCode(int code) {
+    /** 通知码判定（VipGrabRunner 共用）。 */
+    static boolean isNoticeCode(int code) {
         return code == 3 || code == 25 || code == 10001 || code == 20006
                 || (code >= 40002 && code <= 40040);
     }
@@ -437,12 +438,6 @@ public final class DailyTaskRunner {
     // ------------------------------------------------------------ 凭据到期巡检
 
     /** 登录凭据（X-Sivir）到期巡检：临期 3 天内推送一次提醒（每天最多一次）。 */
-    /** 通知码判定（VipGrabRunner 共用）。 */
-    static boolean isNoticeCode(int code) {
-        return code == 3 || code == 25 || code == 10001 || code == 20006
-                || (code >= 40002 && code <= 40040);
-    }
-
     static void credentialExpireCheck(Context ctx) {
         try {
             long exp = XiaoCanRpc.tokenExpireAt(ctx);
