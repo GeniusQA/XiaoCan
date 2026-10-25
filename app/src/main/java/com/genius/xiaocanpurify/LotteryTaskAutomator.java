@@ -129,20 +129,29 @@ public final class LotteryTaskAutomator {
 
     private static void scheduleAutoBack(long delayMs, boolean verifyTargetPage) {
         MAIN.postDelayed(() -> {
-            Activity activity = lastTaskActivity.get();
-            if (activity == null || activity.isFinishing()) return;
+            Activity clicked = lastTaskActivity.get();
+            // 返回目标必须是「当前栈顶」Activity：抖音补贴页可能是独立
+            // Activity（Flutter/WebView 容器），对点击时的旧 Activity
+            // 校验文案会失败、派发返回键也打不到前台页面（用户实测
+            // 11 秒后无自动返回）。旧版为同 Activity 内嵌页所以曾经可用。
+            Activity top = EnrollmentJumpGuard.topActivity();
+            Activity target = (top != null && !top.isFinishing()) ? top : clicked;
+            if (target == null || target.isFinishing()) return;
             if (verifyTargetPage) {
-                String text = subtreeText(activity.getWindow() != null
-                        ? activity.getWindow().getDecorView() : null);
+                String text = subtreeText(target.getWindow() != null
+                        ? target.getWindow().getDecorView() : null);
                 // 仅当当前页面确实是目标页时才自动返回，避免误触
-                if (!text.contains("超值补贴") && !text.contains("抖音电商") && !text.contains("抖音补贴")) {
-                    MainHook.log("LotteryTaskAutomator: target page not detected, skip auto-back");
+                if (!text.contains("超值补贴") && !text.contains("抖音电商")
+                        && !text.contains("抖音补贴") && !text.contains("直播间")) {
+                    MainHook.log("LotteryTaskAutomator: target page not detected, skip auto-back"
+                            + " target=" + target.getClass().getSimpleName());
                     return;
                 }
             }
-            MainHook.log("LotteryTaskAutomator: dwell done, dispatching back");
-            activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
-            activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
+            MainHook.log("LotteryTaskAutomator: dwell done, dispatching back on "
+                    + target.getClass().getSimpleName());
+            target.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+            target.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
         }, delayMs);
     }
 
