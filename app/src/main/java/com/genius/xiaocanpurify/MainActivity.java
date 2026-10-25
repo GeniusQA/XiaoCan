@@ -1136,6 +1136,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 for (int i = 0; i < items.length(); i++) {
+                    final int hIdx = i;
                     final org.json.JSONObject old = items.optJSONObject(i);
                     if (old == null) continue;
                     android.widget.LinearLayout chip = new android.widget.LinearLayout(this);
@@ -1171,7 +1172,7 @@ public class MainActivity extends Activity {
                                     historyPrefs().getString("items", "[]"));
                             org.json.JSONArray next = new org.json.JSONArray();
                             for (int j = 0; j < arr.length(); j++) {
-                                if (j != i) next.put(arr.get(j));
+                                if (j != hIdx) next.put(arr.get(j));
                             }
                             historyPrefs().edit().putString("items", next.toString()).apply();
                         } catch (Throwable ignored) {}
@@ -1224,13 +1225,13 @@ public class MainActivity extends Activity {
                     android.widget.Toast.LENGTH_SHORT).show();
             new Thread(() -> {
                 String err = null;
-                final java.util.List<TiandituApi.Place> found;
+                java.util.List<TiandituApi.Place> result = null;
                 try {
-                    found = TiandituApi.search(this, kw);
+                    result = TiandituApi.search(this, kw);
                 } catch (Throwable t) {
                     err = t.getMessage();
-                    found = null;
                 }
+                final java.util.List<TiandituApi.Place> found = result;
                 final String errFinal = err;
                 runOnUiThread(() -> {
                     if (errFinal != null) {
