@@ -151,6 +151,15 @@ public final class DailyTaskRunner {
         }, "XiaoCanAssistant-DailyTask").start();
     }
 
+    /** 每任务独立开关（默认开启）。 */
+    private static boolean taskEnabled(String key) {
+        try {
+            return "1".equals(PurifyPrefs.getString(key, "1"));
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     private static void run(Context ctx) {
         if (!XiaoCanRpc.hasCredentials(ctx)) {
             MainHook.log("DailyTask: no credentials yet (open 小蚕 to capture), skip");
