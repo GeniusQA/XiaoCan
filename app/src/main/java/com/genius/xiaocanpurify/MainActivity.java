@@ -295,196 +295,36 @@ public class MainActivity extends Activity {
         autoCard.addView(autoDivider, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
 
-        // 行 2：立即执行
-        LinearLayout runRow = new LinearLayout(this);
-        runRow.setOrientation(LinearLayout.HORIZONTAL);
-        runRow.setGravity(Gravity.CENTER_VERTICAL);
-        runRow.setPadding(0, dp2px(12), 0, dp2px(6));
-        TextView runLabel = new TextView(this);
-        runLabel.setText("立即执行一键日常");
-        runLabel.setTextSize(14);
-        runLabel.setTextColor(ThemeHelper.accentGreen(this));
-        runRow.addView(runLabel, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView runArrow = new TextView(this);
-        runArrow.setText("›");
-        runArrow.setTextSize(18);
-        runArrow.setTextColor(ThemeHelper.textSecondary(this));
-        runRow.addView(runArrow);
-        runRow.setOnClickListener(v -> {
-            try {
-                // 宿主进程未运行时动态接收器不存在（广播无人接收）。
-                // 先拉起小蚕确保进程与接收器就绪，再延迟发送执行广播
-                android.content.Intent launch = getPackageManager()
-                        .getLaunchIntentForPackage("com.realtech.xiaocan");
-                if (launch != null) {
-                    launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(launch);
-                }
-                // 连发 3 次（5/12/20 秒）：小蚕冷启动（加固壳解密）期间动态
-                // 接收器可能尚未注册，宿主端 25 秒窗口去重，只执行首次
-                for (long delay : new long[]{5000L, 12000L, 20000L}) {
-                    final long d = delay;
-                    new android.os.Handler(android.os.Looper.getMainLooper())
-                            .postDelayed(() -> {
-                                try {
-                                    android.content.Intent i = new android.content.Intent(
-                                            "com.genius.xiaocanpurify.ACTION_DAILY_TASK");
-                                    i.setPackage("com.realtech.xiaocan");
-                                    sendBroadcast(i);
-                                    android.widget.Toast.makeText(this,
-                                            "已通知小蚕执行，结果见模块日志（约 1-2 分钟）",
-                                            android.widget.Toast.LENGTH_LONG).show();
-                                    LogStore.append(this, "I", "Daily",
-                                            "手动触发一键日常");
-                                } catch (Throwable t2) {
-                                    android.widget.Toast.makeText(this,
-                                            "触发失败：" + t2.getClass().getSimpleName(),
-                                            android.widget.Toast.LENGTH_SHORT).show();
-                                }
-                            }, d);
-                }
-            } catch (Throwable t) {
-                android.widget.Toast.makeText(this, "触发失败：" + t.getClass().getSimpleName(),
-                        android.widget.Toast.LENGTH_SHORT).show();
-            }
-        });
-        autoCard.addView(runRow);
-
-        View flashDivider = new View(this);
-        flashDivider.setBackgroundColor(ThemeHelper.cardStroke(this));
-        autoCard.addView(flashDivider, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
-
-        // 秒杀专区（空=仅巡检提醒，自动优选有货商品）
-        LinearLayout flashGoodsRow = new LinearLayout(this);
-        flashGoodsRow.setOrientation(LinearLayout.HORIZONTAL);
-        flashGoodsRow.setGravity(Gravity.CENTER_VERTICAL);
-        flashGoodsRow.setPadding(0, dp2px(10), 0, dp2px(10));
-        LinearLayout flashGoodsCol = new LinearLayout(this);
-        flashGoodsCol.setOrientation(LinearLayout.VERTICAL);
-        flashGoodsCol.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView flashGoodsLabel = new TextView(this);
-        flashGoodsLabel.setText("秒杀专区");
-        flashGoodsLabel.setTextSize(14);
-        flashGoodsLabel.setTextColor(ThemeHelper.textHeading(this));
-        flashGoodsCol.addView(flashGoodsLabel);
-        flashGoodsValueView = new TextView(this);
-        String goods = localPrefs.getString(PurifyPrefs.FLASH_SALE_GOODS_NAMES, "");
-        flashGoodsValueView.setText(goods.isEmpty() ? "未设置（自动优选有货商品）" : goods);
-        flashGoodsValueView.setTextSize(11);
-        flashGoodsValueView.setTextColor(ThemeHelper.textHint(this));
-        flashGoodsValueView.setPadding(0, dp2px(2), dp2px(8), 0);
-        flashGoodsCol.addView(flashGoodsValueView);
-        flashGoodsRow.addView(flashGoodsCol);
-        TextView flashGoodsArrow = new TextView(this);
-        flashGoodsArrow.setText("›");
-        flashGoodsArrow.setTextSize(18);
-        flashGoodsArrow.setTextColor(ThemeHelper.textSecondary(this));
-        flashGoodsRow.addView(flashGoodsArrow);
-        flashGoodsRow.setOnClickListener(v -> {
-            if (flashListWaiting) return;
-            flashListWaiting = true;
-            android.widget.Toast.makeText(this, "正在获取在架商品…（需小蚕进程存活）",
-                    android.widget.Toast.LENGTH_SHORT).show();
-            sendBroadcast(new android.content.Intent(
-                    "com.genius.xiaocanpurify.ACTION_FLASH_LIST")
-                    .setPackage("com.realtech.xiaocan"));
-            // 超时兜底：宿主 10 秒内未回包视为失败
-            new android.os.Handler(android.os.Looper.getMainLooper())
-                    .postDelayed(() -> {
-                        if (flashListWaiting) {
-                            flashListWaiting = false;
-                            android.widget.Toast.makeText(this,
-                                    "获取超时：小蚕未运行或未抓取到凭证",
-                                    android.widget.Toast.LENGTH_LONG).show();
-                        }
-                    }, 10_000L);
-        });
-        autoCard.addView(flashGoodsRow);
-
-        View flashDivider2 = new View(this);
-        flashDivider2.setBackgroundColor(ThemeHelper.cardStroke(this));
-        autoCard.addView(flashDivider2, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
-
-        // 秒杀自动兑换（默认关闭：下单消耗元宝不可逆）
-        LinearLayout flashAutoRow = new LinearLayout(this);
-        flashAutoRow.setOrientation(LinearLayout.HORIZONTAL);
-        flashAutoRow.setGravity(Gravity.CENTER_VERTICAL);
-        flashAutoRow.setPadding(0, dp2px(10), 0, dp2px(6));
-        LinearLayout flashAutoCol = new LinearLayout(this);
-        flashAutoCol.setOrientation(LinearLayout.VERTICAL);
-        flashAutoCol.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView flashAutoLabel = new TextView(this);
-        flashAutoLabel.setText("秒杀自动兑换");
-        flashAutoLabel.setTextSize(14);
-        flashAutoLabel.setTextColor(ThemeHelper.textHeading(this));
-        flashAutoCol.addView(flashAutoLabel);
-        TextView flashAutoDesc = new TextView(this);
-        flashAutoDesc.setText("有货即自动下单（消耗元宝不可逆；默认关闭，仅推送有货提醒）");
-        flashAutoDesc.setTextSize(11);
-        flashAutoDesc.setTextColor(ThemeHelper.textHint(this));
-        flashAutoDesc.setPadding(0, dp2px(2), dp2px(8), 0);
-        flashAutoCol.addView(flashAutoDesc);
-        flashAutoRow.addView(flashAutoCol);
-        Switch flashAutoSwitch = new Switch(this);
-        flashAutoSwitch.setChecked("1".equals(
-                localPrefs.getString(PurifyPrefs.FLASH_SALE_AUTO, "0")));
-        flashAutoSwitch.setOnCheckedChangeListener((v, checked) ->
-                setStringPref(PurifyPrefs.FLASH_SALE_AUTO, checked ? "1" : "0"));
-        flashAutoRow.addView(flashAutoSwitch);
-        autoCard.addView(flashAutoRow);
+        // 分类导航：日常任务 / 抢券任务 / 提醒
+        LinearLayout tabRow = new LinearLayout(this);
+        tabRow.setOrientation(LinearLayout.HORIZONTAL);
+        tabRow.setPadding(dp2px(4), dp2px(10), dp2px(4), dp2px(2));
+        String[] tabNames = new String[]{"日常任务", "抢券任务", "提醒"};
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            TextView t = new TextView(this);
+            t.setText(tabNames[i]);
+            t.setTextSize(14);
+            t.setPadding(dp2px(10), dp2px(6), dp2px(10), dp2px(6));
+            t.setGravity(Gravity.CENTER);
+            t.setOnClickListener(v -> {
+                autoTab = idx;
+                refreshAutoTabContent();
+            });
+            autoTabViews[i] = t;
+            tabRow.addView(t, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        autoCard.addView(tabRow);
+        tabContent = new LinearLayout(this);
+        tabContent.setOrientation(LinearLayout.VERTICAL);
+        tabContent.setPadding(dp2px(4), dp2px(4), dp2px(4), dp2px(8));
+        autoCard.addView(tabContent);
+        refreshAutoTabContent();
 
         View notifyDivider = new View(this);
         notifyDivider.setBackgroundColor(ThemeHelper.cardStroke(this));
         autoCard.addView(notifyDivider, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
-
-        // 每月免单券 14:00 抢购（需放量前打开小蚕）
-        LinearLayout freeRow = new LinearLayout(this);
-        freeRow.setOrientation(LinearLayout.HORIZONTAL);
-        freeRow.setGravity(Gravity.CENTER_VERTICAL);
-        freeRow.setPadding(0, dp2px(10), 0, dp2px(6));
-        LinearLayout freeCol = new LinearLayout(this);
-        freeCol.setOrientation(LinearLayout.VERTICAL);
-        freeCol.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView freeLabel = new TextView(this);
-        freeLabel.setText("每月免单券抢购");
-        freeLabel.setTextSize(14);
-        freeLabel.setTextColor(ThemeHelper.textHeading(this));
-        freeCol.addView(freeLabel);
-        TextView freeDesc = new TextView(this);
-        freeDesc.setText("14:00 放量前 10 秒自动预热、整点连发 3 次并复查持券（需提前打开小蚕）");
-        freeDesc.setTextSize(11);
-        freeDesc.setTextColor(ThemeHelper.textHint(this));
-        freeDesc.setPadding(0, dp2px(2), dp2px(8), 0);
-        freeCol.addView(freeDesc);
-        freeRow.addView(freeCol);
-        Switch freeSwitch = new Switch(this);
-        freeSwitch.setChecked("1".equals(
-                localPrefs.getString(PurifyPrefs.FREE_ORDER_GRAB, "0")));
-        freeSwitch.setOnCheckedChangeListener((v, checked) ->
-                setStringPref(PurifyPrefs.FREE_ORDER_GRAB, checked ? "1" : "0"));
-        freeRow.addView(freeSwitch);
-        autoCard.addView(freeRow);
-
-        // SVIP 抢券与提醒（VipGrabRunner 调度，均默认关闭）
-        autoCard.addView(grabSwitchRow("SVIP 专属返利券（09:00）",
-                "每日 09:00 放量，自动抢占大额返利券", PurifyPrefs.GRAB_SVIP_REBATE));
-        autoCard.addView(grabSwitchRow("SVIP 大牌放量券（09:30）",
-                "每日 09:30 额外放量券（type=99），不扣保底张数", PurifyPrefs.GRAB_BRAND_EXTRA));
-        autoCard.addView(grabSwitchRow("影音会员周卡（10/17/20 点）",
-                "三个场次自动抢网易云/腾讯视频周卡配额", PurifyPrefs.GRAB_MEDIA_VIP));
-        autoCard.addView(grabSwitchRow("卡券到期提醒（08:30）",
-                "每日巡检未使用卡券，临期 3 天内推送提醒", PurifyPrefs.GRAB_CARD_EXPIRE));
-
-        View notifyDivider2 = new View(this);
-        notifyDivider2.setBackgroundColor(ThemeHelper.cardStroke(this));
-        autoCard.addView(notifyDivider2, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
         LinearLayout notifyRow = new LinearLayout(this);
         notifyRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -974,6 +814,141 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private int autoTab;
+    private LinearLayout tabContent;
+    private final TextView[] autoTabViews = new TextView[3];
+
+    /** 分类标签内容构建：日常任务 / 抢券任务 / 提醒。 */
+    private void refreshAutoTabContent() {
+        if (tabContent == null) return;
+        for (int i = 0; i < autoTabViews.length; i++) {
+            TextView t = autoTabViews[i];
+            if (t == null) continue;
+            boolean sel = i == autoTab;
+            t.setTypeface(Typeface.create(Typeface.DEFAULT_BOLD,
+                    sel ? Typeface.BOLD : Typeface.NORMAL));
+            t.setTextColor(sel ? ThemeHelper.accentGreen(this)
+                    : ThemeHelper.textSecondary(this));
+        }
+        tabContent.removeAllViews();
+        if (autoTab == 0) {
+            tabContent.addView(taskSwitchRow("领天天赚元宝",
+                    "元宝任务打卡与聚拢元宝", PurifyPrefs.TASK_YB_CENTER, true));
+            tabContent.addView(taskSwitchRow("元宝签到",
+                    "每日元宝独立签到", PurifyPrefs.TASK_YB_SIGN, true));
+            tabContent.addView(taskSwitchRow("会员每日签到抽奖",
+                    "SVIP 成长礼包 + 签到抽奖", PurifyPrefs.TASK_VIP_SIGN, true));
+            tabContent.addView(taskSwitchRow("收取未收元宝",
+                    "自动收取待领元宝", PurifyPrefs.TASK_COLLECT_POINTS, true));
+            tabContent.addView(taskSwitchRow("免费开红包与抽奖",
+                    "领取机会 + 阶梯奖励 + 转盘 + 红包雨", PurifyPrefs.TASK_GROUP_LOTTERY, true));
+        } else if (autoTab == 1) {
+            tabContent.addView(flashGoodsEntryRow());
+            tabContent.addView(taskSwitchRow("秒杀自动兑换",
+                    "有货即自动下单（消耗元宝不可逆）", PurifyPrefs.FLASH_SALE_AUTO, false));
+            tabContent.addView(taskSwitchRow("每月免单券抢购（14:00）",
+                    "预热 + 连发 3 次 + 复查持券", PurifyPrefs.FREE_ORDER_GRAB, false));
+            tabContent.addView(taskSwitchRow("SVIP 专属返利券（09:00）",
+                    "自动抢占大额返利券", PurifyPrefs.GRAB_SVIP_REBATE, false));
+            tabContent.addView(taskSwitchRow("SVIP 大牌放量券（09:30）",
+                    "额外放量券，不扣保底张数", PurifyPrefs.GRAB_BRAND_EXTRA, false));
+            tabContent.addView(taskSwitchRow("影音会员周卡（10/17/20 点）",
+                    "三场次抢周卡配额", PurifyPrefs.GRAB_MEDIA_VIP, false));
+        } else {
+            tabContent.addView(taskSwitchRow("凭据到期巡检",
+                    "JWT 临期 3 天推送提醒", PurifyPrefs.TASK_CREDENTIAL_EXPIRE, true));
+            tabContent.addView(taskSwitchRow("卡券到期提醒（08:30）",
+                    "未使用卡券临期推送", PurifyPrefs.GRAB_CARD_EXPIRE, false));
+        }
+    }
+
+    /** 任务开关行（独立 pref）。 */
+    private LinearLayout taskSwitchRow(String title, String desc, String key, boolean defOn) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp2px(10), 0, dp2px(6));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(14);
+        t.setTextColor(ThemeHelper.textHeading(this));
+        col.addView(t);
+        TextView d = new TextView(this);
+        d.setText(desc);
+        d.setTextSize(11);
+        d.setTextColor(ThemeHelper.textHint(this));
+        d.setPadding(0, dp2px(2), dp2px(8), 0);
+        col.addView(d);
+        row.addView(col);
+        android.widget.Switch sw = new android.widget.Switch(this);
+        sw.setChecked(isSwitchOn(key, defOn));
+        sw.setOnCheckedChangeListener((v, checked) -> setStringPref(key, checked ? "1" : "0"));
+        row.addView(sw);
+        return row;
+    }
+
+    private boolean isSwitchOn(String key, boolean defOn) {
+        try {
+            return (defOn ? "1" : "0").equals(localPrefs.getString(key, defOn ? "1" : "0"));
+        } catch (Throwable t) {
+            return defOn;
+        }
+    }
+
+    /** 秒杀专区入口行（点击拉取在架商品勾选）。 */
+    private View flashGoodsEntryRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp2px(10), 0, dp2px(10));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView label = new TextView(this);
+        label.setText("秒杀专区");
+        label.setTextSize(14);
+        label.setTextColor(ThemeHelper.textHeading(this));
+        col.addView(label);
+        String goods = localPrefs.getString(PurifyPrefs.FLASH_SALE_GOODS_NAMES, "");
+        flashGoodsValueView = new TextView(this);
+        flashGoodsValueView.setText(goods.isEmpty() ? "未设置（自动优选有货商品）" : goods);
+        flashGoodsValueView.setTextSize(11);
+        flashGoodsValueView.setTextColor(ThemeHelper.textHint(this));
+        flashGoodsValueView.setPadding(0, dp2px(2), dp2px(8), 0);
+        col.addView(flashGoodsValueView);
+        row.addView(col);
+        TextView arrow = new TextView(this);
+        arrow.setText("›");
+        arrow.setTextSize(18);
+        arrow.setTextColor(ThemeHelper.textSecondary(this));
+        row.addView(arrow);
+        row.setOnClickListener(v -> {
+            if (flashListWaiting) return;
+            flashListWaiting = true;
+            android.widget.Toast.makeText(this, "正在获取在架商品…（需小蚕进程存活）",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            sendBroadcast(new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_FLASH_LIST")
+                    .setPackage("com.realtech.xiaocan"));
+            new android.os.Handler(android.os.Looper.getMainLooper())
+                    .postDelayed(() -> {
+                        if (flashListWaiting) {
+                            flashListWaiting = false;
+                            android.widget.Toast.makeText(this,
+                                    "获取超时：小蚕未运行或未抓取到凭证",
+                                    android.widget.Toast.LENGTH_LONG).show();
+                        }
+                    }, 10_000L);
+        });
+        return row;
+    }
+
+    private void setCacheCleanupMode(String mode) {
     private void setCacheCleanupMode(String mode) {
         try {
             localPrefs.edit().putString(PurifyPrefs.CACHE_CLEANUP_MODE, mode).apply();

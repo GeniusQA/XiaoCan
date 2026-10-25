@@ -113,6 +113,15 @@ public final class PurifyPrefs {
     public static final String GRAB_MEDIA_VIP = "grab_media_vip";
     public static final String GRAB_CARD_EXPIRE = "grab_card_expire";
 
+    // 一键日常的每任务独立开关（默认开启，字符串通道）
+    public static final String TASK_YB_CENTER = "task_yb_center";
+    public static final String TASK_YB_SIGN = "task_yb_sign";
+    public static final String TASK_VIP_SIGN = "task_vip_sign";
+    public static final String TASK_COLLECT_POINTS = "task_collect_points";
+    public static final String TASK_GROUP_LOTTERY = "task_group_lottery";
+    public static final String TASK_FLASH_SALE = "task_flash_sale";
+    public static final String TASK_CREDENTIAL_EXPIRE = "task_credential_expire";
+
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";
     public static final String ORDER_FREE = "hide_order_free";

@@ -54,8 +54,10 @@ public final class DailyTaskRunner {
                         started = true;
                         registerReceiver(a.getApplication());
                         maybeRunToday(a.getApplicationContext());
-                        // 凭据到期巡检 + 免单券抢购排程（14:00 窗口内）
-                        credentialExpireCheck(a.getApplicationContext());
+                        // 凭据到期巡检（独立开关）+ 免单券/SVIP 抢券排程
+                        if (taskEnabled(PurifyPrefs.TASK_CREDENTIAL_EXPIRE)) {
+                            credentialExpireCheck(a.getApplicationContext());
+                        }
                         FreeOrderGrabber.armIfDue(a.getApplicationContext());
                         VipGrabRunner.armAll(a.getApplicationContext());
                         // 启动后异步校准服务器时间（抢单/倒计时对齐用）
@@ -161,38 +163,52 @@ public final class DailyTaskRunner {
         int ok = 0, fail = 0;
         StringBuilder detail = new StringBuilder();
 
-        ok += step("元宝签到", () -> XiaoCanRpc.signIn(ctx, silk), detail);
-        sleep(1200);
-        ybCenterTasks(ctx, silk, detail);
-        sleep(1200);
-        ok += step("成长礼包", () -> XiaoCanRpc.upVipGift(ctx, silk), detail);
-        sleep(1200);
-        ok += step("会员签到抽奖", () -> XiaoCanRpc.vipSignLottery(ctx, silk), detail);
-        sleep(1200);
-        groupLottery(ctx, silk, detail);
-        sleep(1200);
-        redPackRain(ctx, silk, detail);
-
-        // 幸运转盘：查剩余次数后逐次抽
-        try {
-            JSONObject info = XiaoCanRpc.lotteryInfo(ctx, silk);
-            int times = extractLotteryTimes(info);
-            MainHook.log("DailyTask: lottery times=" + times);
-            for (int i = 0; i < Math.min(times, 10); i++) {
-                sleep(1500);
-                ok += step("转盘第" + (i + 1) + "次", () -> XiaoCanRpc.lotterySpin(ctx, silk), detail);
-            }
-        } catch (Throwable t) {
-            fail++;
-            MainHook.log("DailyTask: lottery info failed " + t);
-            detail.append("转盘: 查询失败\n");
+        if (taskEnabled(PurifyPrefs.TASK_YB_SIGN)) {
+            ok += step("元宝签到", () -> XiaoCanRpc.signIn(ctx, silk), detail);
+            sleep(1200);
+        }
+        if (taskEnabled(PurifyPrefs.TASK_YB_CENTER)) {
+            ybCenterTasks(ctx, silk, detail);
+            sleep(1200);
+        }
+        if (taskEnabled(PurifyPrefs.TASK_VIP_SIGN)) {
+            ok += step("成长礼包", () -> XiaoCanRpc.upVipGift(ctx, silk), detail);
+            sleep(1200);
+            ok += step("会员签到抽奖", () -> XiaoCanRpc.vipSignLottery(ctx, silk), detail);
+            sleep(1200);
+        }
+        if (taskEnabled(PurifyPrefs.TASK_GROUP_LOTTERY)) {
+            groupLottery(ctx, silk, detail);
+            sleep(1200);
+            redPackRain(ctx, silk, detail);
         }
 
-        sleep(1200);
-        ok += step("收取待领元宝", () -> XiaoCanRpc.collectPoints(ctx, silk), detail);
+        // 幸运转盘：查剩余次数后逐次抽（属「免费开红包与抽奖」）
+        if (taskEnabled(PurifyPrefs.TASK_GROUP_LOTTERY)) {
+            try {
+                JSONObject info = XiaoCanRpc.lotteryInfo(ctx, silk);
+                int times = extractLotteryTimes(info);
+                MainHook.log("DailyTask: lottery times=" + times);
+                for (int i = 0; i < Math.min(times, 10); i++) {
+                    sleep(1500);
+                    ok += step("转盘第" + (i + 1) + "次", () -> XiaoCanRpc.lotterySpin(ctx, silk), detail);
+                }
+            } catch (Throwable t) {
+                fail++;
+                MainHook.log("DailyTask: lottery info failed " + t);
+                detail.append("转盘: 查询失败\n");
+            }
+        }
 
-        sleep(1500);
-        flashSaleCheck(ctx, silk, detail);
+        if (taskEnabled(PurifyPrefs.TASK_COLLECT_POINTS)) {
+            sleep(1200);
+            ok += step("收取待领元宝", () -> XiaoCanRpc.collectPoints(ctx, silk), detail);
+        }
+
+        if (taskEnabled(PurifyPrefs.TASK_FLASH_SALE)) {
+            sleep(1500);
+            flashSaleCheck(ctx, silk, detail);
+        }
 
         try {
             ctx.getSharedPreferences("purify_rpc", Context.MODE_PRIVATE)
