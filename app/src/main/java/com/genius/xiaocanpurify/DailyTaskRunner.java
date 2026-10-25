@@ -189,6 +189,8 @@ public final class DailyTaskRunner {
         if (taskEnabled(PurifyPrefs.TASK_GROUP_LOTTERY)) {
             groupLottery(ctx, silk, detail);
             sleep(1200);
+        }
+        if (taskEnabled(PurifyPrefs.TASK_RED_RAIN)) {
             redPackRain(ctx, silk, detail);
         }
 
@@ -459,7 +461,7 @@ public final class DailyTaskRunner {
             if (today.equals(p.getString("exp_notice_day", null))) return;
             p.edit().putString("exp_notice_day", today).apply();
             MainHook.log("DailyTask: credential expires in " + days + " days");
-            Notifier.notifyEvent(Notifier.EV_ERROR, "登录凭据即将过期",
+            Notifier.notifyEvent(Notifier.EV_SECURITY, "登录凭据即将过期",
                     days <= 0 ? "凭据已过期，请重新打开小蚕完成登录"
                             : "凭据剩余约 " + days + " 天，过期后自动化任务将失效");
         } catch (Throwable ignored) {}
