@@ -17,7 +17,7 @@ import java.util.Locale;
  */
 public final class HostLogBridge {
     private static final Object LOCK = new Object();
-    private static final int MAX_ENTRIES = 500;
+    private static final int MAX_ENTRIES = 4000;
     private static final ArrayDeque<String> RING = new ArrayDeque<>();
     private static volatile boolean registered;
 

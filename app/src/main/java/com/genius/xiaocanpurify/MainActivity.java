@@ -321,24 +321,29 @@ public class MainActivity extends Activity {
                     launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                     startActivity(launch);
                 }
-                new android.os.Handler(android.os.Looper.getMainLooper())
-                        .postDelayed(() -> {
-                            try {
-                                android.content.Intent i = new android.content.Intent(
-                                        "com.genius.xiaocanpurify.ACTION_DAILY_TASK");
-                                i.setPackage("com.realtech.xiaocan");
-                                sendBroadcast(i);
-                                android.widget.Toast.makeText(this,
-                                        "已通知小蚕执行，结果见模块日志（约 1-2 分钟）",
-                                        android.widget.Toast.LENGTH_LONG).show();
-                                LogStore.append(this, "I", "Daily",
-                                        "手动触发一键日常");
-                            } catch (Throwable t2) {
-                                android.widget.Toast.makeText(this,
-                                        "触发失败：" + t2.getClass().getSimpleName(),
-                                        android.widget.Toast.LENGTH_SHORT).show();
-                            }
-                        }, 5000L);
+                // 连发 3 次（5/12/20 秒）：小蚕冷启动（加固壳解密）期间动态
+                // 接收器可能尚未注册，宿主端 25 秒窗口去重，只执行首次
+                for (long delay : new long[]{5000L, 12000L, 20000L}) {
+                    final long d = delay;
+                    new android.os.Handler(android.os.Looper.getMainLooper())
+                            .postDelayed(() -> {
+                                try {
+                                    android.content.Intent i = new android.content.Intent(
+                                            "com.genius.xiaocanpurify.ACTION_DAILY_TASK");
+                                    i.setPackage("com.realtech.xiaocan");
+                                    sendBroadcast(i);
+                                    android.widget.Toast.makeText(this,
+                                            "已通知小蚕执行，结果见模块日志（约 1-2 分钟）",
+                                            android.widget.Toast.LENGTH_LONG).show();
+                                    LogStore.append(this, "I", "Daily",
+                                            "手动触发一键日常");
+                                } catch (Throwable t2) {
+                                    android.widget.Toast.makeText(this,
+                                            "触发失败：" + t2.getClass().getSimpleName(),
+                                            android.widget.Toast.LENGTH_SHORT).show();
+                                }
+                            }, d);
+                }
             } catch (Throwable t) {
                 android.widget.Toast.makeText(this, "触发失败：" + t.getClass().getSimpleName(),
                         android.widget.Toast.LENGTH_SHORT).show();

@@ -25,6 +25,8 @@ import io.github.libxposed.api.XposedInterface;
  * 所有调用走 XiaoCanRpc（凭证由宿主请求头自动抓取），默认关闭避免风控。
  */
 public final class DailyTaskRunner {
+    private static final java.util.concurrent.atomic.AtomicBoolean INSTALLED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private static final String ACTION_RUN = "com.genius.xiaocanpurify.ACTION_DAILY_TASK";
     private static final String ACTION_FLASH_LIST =
             "com.genius.xiaocanpurify.ACTION_FLASH_LIST";
@@ -38,6 +40,8 @@ public final class DailyTaskRunner {
     private DailyTaskRunner() {}
 
     public static void install(XposedInterface xposed, ClassLoader cl) {
+        // 安装去重：宿主内多个 hook 入口会重复调用 installAll（实测 ×4）
+        if (!INSTALLED.compareAndSet(false, true)) return;
         // 宿主首次 Activity 创建后：每天自动执行一次
         try {
             Method onCreate = Activity.class.getDeclaredMethod(
@@ -79,9 +83,11 @@ public final class DailyTaskRunner {
                         return;
                     }
                     long now = SystemClock.uptimeMillis();
-                    if (now - lastManualTriggerMs < 5000L) return; // 防重复广播
+                    // 模块端会对同一触发连发 3 次广播（5/12/20 秒，防宿主
+                    // 冷启动时接收器未注册），25 秒窗口内只执行首次
+                    if (now - lastManualTriggerMs < 25_000L) return;
                     lastManualTriggerMs = now;
-                    MainHook.log("DailyTask: manual trigger");
+                    MainHook.log("DailyTask: manual trigger received, running");
                     runAsync(c);
                 }
             };
