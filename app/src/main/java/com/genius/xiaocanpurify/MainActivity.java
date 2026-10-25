@@ -495,11 +495,61 @@ public class MainActivity extends Activity {
             if ("定位".equals(groupName)) {
                 // 定位分组下追加缓存位置信息卡（POI 地址 + 经纬度 + 缓存时间）
                 parent.addView(createLocationInfoCard());
+                parent.addView(createGrabLocEntryRow());
             }
         }
     }
 
     private TextView locationInfoText;
+
+    /** 抢单位置设置入口行（搜索选点 + 坐标微调 + 历史位置，天地图 API）。 */
+    private View createGrabLocEntryRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp2px(14), dp2px(10), dp2px(14), dp2px(10));
+        TextView label = new TextView(this);
+        label.setText("抢单位置设置");
+        label.setTextSize(14);
+        label.setTextColor(ThemeHelper.accentGreen(this));
+        label.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(label);
+        TextView arrow = new TextView(this);
+        arrow.setText("›");
+        arrow.setTextSize(18);
+        arrow.setTextColor(ThemeHelper.textSecondary(this));
+        row.addView(arrow);
+        row.setOnClickListener(v -> showGrabLocDialog());
+        return row;
+    }
+
+    /** 历史位置读写（最近 5 条，JSON 数组）。 */
+    private android.content.SharedPreferences historyPrefs() {
+        return getSharedPreferences("purify_grab_loc_history", MODE_PRIVATE);
+    }
+
+    private void saveGrabLocHistory(String label, double lon, double lat) {
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(
+                    historyPrefs().getString("items", "[]"));
+            org.json.JSONArray next = new org.json.JSONArray();
+            org.json.JSONObject item = new org.json.JSONObject();
+            item.put("label", label);
+            item.put("lon", lon);
+            item.put("lat", lat);
+            next.put(item);
+            for (int i = 0; i < arr.length() && i < 4; i++) {
+                org.json.JSONObject old = arr.optJSONObject(i);
+                if (old == null) continue;
+                if (old.optDouble("lon", -1) == lon && old.optDouble("lat", -1) == lat) {
+                    continue;
+                }
+                next.put(old);
+            }
+            historyPrefs().edit().putString("items", next.toString()).apply();
+        } catch (Throwable ignored) {}
+    }
 
     /** 主题卡片：跟随系统 / 浅色 / 深色 三选一（参考 HyperIsland themeMode）。 */
     private LinearLayout createThemeCard() {
@@ -1430,3 +1480,193 @@ public class MainActivity extends Activity {
         return (int) (dp * scale + 0.5f);
     }
 }
+    /** 抢单位置设置弹窗：搜索选点 + 坐标微调 + 历史位置（天地图 API）。 */
+    private void showGrabLocDialog() {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int p14 = dp2px(14);
+
+        android.widget.LinearLayout searchRow = new android.widget.LinearLayout(this);
+        searchRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        final android.widget.EditText searchInput = new android.widget.EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setHint("搜索地址或地名");
+        searchInput.setTextSize(13);
+        searchInput.setBackgroundResource(android.R.drawable.edit_text);
+        searchInput.setPadding(dp2px(8), dp2px(6), dp2px(8), dp2px(6));
+        searchRow.addView(searchInput, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Button searchBtn = new android.widget.Button(this);
+        searchBtn.setText("搜索");
+        searchBtn.setTextSize(12);
+        searchRow.addView(searchBtn);
+        box.addView(searchRow, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        final android.widget.ListView resultList = new android.widget.ListView(this);
+        resultList.setDividerHeight(1);
+        final android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1, new ArrayList<String>());
+        resultList.setAdapter(adapter);
+        android.widget.LinearLayout.LayoutParams listLp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, dp2px(150));
+        listLp.topMargin = dp2px(6);
+        box.addView(resultList, listLp);
+
+        final double[] picked = new double[2];
+        picked[0] = Double.NaN;
+        picked[1] = Double.NaN;
+        final android.widget.EditText lonInput = new android.widget.EditText(this);
+        final android.widget.EditText latInput = new android.widget.EditText(this);
+        final android.widget.TextView addrView = new android.widget.TextView(this);
+        final Runnable confirmFill = () -> {
+            if (Double.isNaN(picked[0])) return;
+            lonInput.setText(String.format(java.util.Locale.US, "%.6f", picked[0]));
+            latInput.setText(String.format(java.util.Locale.US, "%.6f", picked[1]));
+        };        // 坐标微调行
+        android.widget.LinearLayout coordRow = new android.widget.LinearLayout(this);
+        coordRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        coordRow.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.TextView lonLabel = new android.widget.TextView(this);
+        lonLabel.setText("经度");
+        lonLabel.setTextSize(12);
+        coordRow.addView(lonLabel);
+        lonInput.setSingleLine(true);
+        lonInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
+        coordRow.addView(lonInput, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.TextView latLabel = new android.widget.TextView(this);
+        latLabel.setText("纬度");
+        latLabel.setTextSize(12);
+        coordRow.addView(latLabel);
+        latInput.setSingleLine(true);
+        latInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
+                | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
+        coordRow.addView(latInput, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(coordRow, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        addrView.setTextSize(11);
+        addrView.setTextColor(ThemeHelper.textHint(this));
+        addrView.setPadding(0, dp2px(6), 0, 0);
+        addrView.setText("选定坐标后自动反查地址");
+        box.addView(addrView);
+
+        // 历史位置
+        try {
+            org.json.JSONArray items = new org.json.JSONArray(
+                    historyPrefs().getString("items", "[]"));
+            if (items.length() > 0) {
+                android.widget.LinearLayout histRow = new android.widget.LinearLayout(this);
+                histRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                for (int i = 0; i < items.length(); i++) {
+                    final org.json.JSONObject old = items.optJSONObject(i);
+                    if (old == null) continue;
+                    android.widget.TextView chip = new android.widget.TextView(this);
+                    String lbl = old.optString("label", "历史位置");
+                    chip.setText(lbl.length() > 12 ? lbl.substring(0, 12) + "…" : lbl);
+                    chip.setTextSize(11);
+                    chip.setTextColor(ThemeHelper.accentGreen(this));
+                    chip.setPadding(dp2px(8), dp2px(4), dp2px(8), dp2px(4));
+                    chip.setOnClickListener(v -> {
+                        picked[0] = old.optDouble("lon", Double.NaN);
+                        picked[1] = old.optDouble("lat", Double.NaN);
+                        confirmFill.run();
+                        addrView.setText(lbl);
+                    });
+                    histRow.addView(chip);
+                }
+                android.widget.LinearLayout.LayoutParams hlp = new android.widget.LinearLayout.LayoutParams(
+                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                hlp.topMargin = dp2px(6);
+                box.addView(histRow, hlp);
+            }
+        } catch (Throwable ignored) {}        // 搜索逻辑
+        searchBtn.setOnClickListener(v -> {
+            String kw = searchInput.getText() == null ? ""
+                    : searchInput.getText().toString().trim();
+            if (kw.isEmpty()) return;
+            android.widget.Toast.makeText(this, "正在搜索…",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                String err = null;
+                final java.util.List<TiandituApi.Place> found;
+                try {
+                    found = TiandituApi.search(this, kw);
+                } catch (Throwable t) {
+                    err = t.getMessage();
+                    found = null;
+                }
+                final String errFinal = err;
+                runOnUiThread(() -> {
+                    if (errFinal != null) {
+                        android.widget.Toast.makeText(this, "搜索失败：" + errFinal,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    adapter.clear();
+                    for (TiandituApi.Place pl : found) adapter.add(pl.name
+                            + "（" + String.format(java.util.Locale.US,
+                            "%.4f,%.4f", pl.lon, pl.lat) + "）");
+                    adapter.notifyDataSetChanged();
+                    resultList.setOnItemClickListener((parent, view, pos, id) -> {
+                        if (pos < 0 || pos >= found.size()) return;
+                        TiandituApi.Place pl = found.get(pos);
+                        picked[0] = pl.lon;
+                        picked[1] = pl.lat;
+                        confirmFill.run();
+                        addrView.setText(pl.name + "（反查中…）");
+                        new Thread(() -> {
+                            final String addr = TiandituApi.reverseGeocode(
+                                    this, pl.lon, pl.lat);
+                            runOnUiThread(() -> addrView.setText(
+                                    addr == null ? pl.name : pl.name + "\n" + addr));
+                        }, "XiaoCanAssistant-RevGeo").start();
+                    });
+                });
+            }, "XiaoCanAssistant-TdtSearch").start();
+        });
+
+        android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle("抢单位置设置")
+                .setView(box)
+                .setPositiveButton("确定", (d, w) -> {
+                    double lon;
+                    double lat;
+                    try {
+                        lon = Double.parseDouble(lonInput.getText().toString().trim());
+                        lat = Double.parseDouble(latInput.getText().toString().trim());
+                    } catch (Throwable t) {
+                        android.widget.Toast.makeText(this, "坐标无效",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String addr = addrView.getText() == null ? ""
+                            : addrView.getText().toString().split("\n")[0];
+                    saveGrabLocHistory(addr, lon, lat);
+                    sendBroadcast(new android.content.Intent(
+                            "com.genius.xiaocanpurify.ACTION_SET_GRAB_LOC")
+                            .setPackage("com.realtech.xiaocan")
+                            .putExtra("lat", lat)
+                            .putExtra("lng", lon)
+                            .putExtra("address", addr));
+                    android.widget.Toast.makeText(this,
+                            "已下发选定位置：小蚕下次定位请求即使用该坐标",
+                            android.widget.Toast.LENGTH_LONG).show();
+                    LogStore.append(this, "I", "Loc",
+                            "设置抢单位置 " + lat + "," + lon + " " + addr);
+                })
+                .setNegativeButton("取消", null)
+                .create();
+        dlg.show();
+    }
+
+    private void setCacheCleanupMode(String mode) {

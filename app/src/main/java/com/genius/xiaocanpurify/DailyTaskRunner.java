@@ -81,6 +81,17 @@ public final class DailyTaskRunner {
                 @Override
                 public void onReceive(Context c, android.content.Intent i) {
                     String action = i.getAction();
+                    if ("com.genius.xiaocanpurify.ACTION_SET_GRAB_LOC".equals(action)) {
+                        double lat = i.getDoubleExtra("lat", Double.NaN);
+                        double lng = i.getDoubleExtra("lng", Double.NaN);
+                        String addr = i.getStringExtra("address");
+                        MainHook.log("LocationCache: set grab loc " + lat + "," + lng
+                                + (addr == null ? "" : " " + addr));
+                        if (!Double.isNaN(lat) && !Double.isNaN(lng)) {
+                            LocationCacheHook.cacheExternalLocation(lat, lng, addr);
+                        }
+                        return;
+                    }
                     if (ACTION_FLASH_LIST.equals(action)) {
                         handleFlashListQuery(c);
                         return;
@@ -96,6 +107,7 @@ public final class DailyTaskRunner {
             };
             android.content.IntentFilter f = new android.content.IntentFilter(ACTION_RUN);
             f.addAction(ACTION_FLASH_LIST);
+            f.addAction("com.genius.xiaocanpurify.ACTION_SET_GRAB_LOC");
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 app.registerReceiver(r, f, Context.RECEIVER_EXPORTED);
             } else {
