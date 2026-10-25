@@ -371,6 +371,9 @@ public final class NetworkAdInterceptor {
 
     /** 位置参数请求抓包上次时间（5 秒节流，同 methodname 全局节流）。 */
     private static volatile long lastLocReqDumpMs;
+    /** RPC 401 诊断节流。 */
+    private static volatile long lastRpcDiagMs;
+    private static volatile String lastRpcDiagTag = "";
     /** 逆地理请求原文转储上次时间（5 秒节流）。 */
     private static volatile long lastAddrReqDumpMs;
 
@@ -446,6 +449,24 @@ public final class NetworkAdInterceptor {
                 if (urlStr.contains("gw.xiaocantech.com/rpc")) {
                     try {
                         XiaoCanRpc.captureFromRequest(request);
+                    } catch (Throwable ignored) {}
+                    // 401 排查诊断：记录 App 自身请求的关键头（节流）
+                    try {
+                        long nowMs = System.currentTimeMillis();
+                        java.lang.reflect.Method hm = request.getClass()
+                                .getMethod("header", String.class);
+                        String mn = String.valueOf(hm.invoke(request, "methodname"));
+                        String tag = String.valueOf(hm.invoke(request, "servername")) + "." + mn;
+                        boolean diff = !tag.equals(lastRpcDiagTag);
+                        if (diff || nowMs - lastRpcDiagMs > 5000L) {
+                            lastRpcDiagTag = tag;
+                            lastRpcDiagMs = nowMs;
+                            String tk = String.valueOf(hm.invoke(request, "X-Sivir"));
+                            MainHook.log("RPCDIAG[app] " + tag
+                                    + " sivir=" + (tk.length() > 14
+                                    ? tk.substring(0, 14) + "..(" + tk.length() + ")" : tk)
+                                    + " teemo=" + hm.invoke(request, "X-Teemo"));
+                        }
                     } catch (Throwable ignored) {}
                 }
                 if (discoveryActive()) {

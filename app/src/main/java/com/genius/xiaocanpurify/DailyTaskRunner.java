@@ -291,7 +291,9 @@ public final class DailyTaskRunner {
                 } catch (Throwable ignored) {}
             } catch (Throwable e) {
                 MainHook.log("DailyTask: center task " + t[0] + " failed " + e);
-                detail.append("元宝任务#").append(t[0]).append(": 失败\n");
+                detail.append("元宝任务#").append(t[0]).append(": 失败 ")
+                        .append(e.getClass().getSimpleName()).append(' ')
+                        .append(e.getMessage() == null ? "" : e.getMessage()).append('\n');
             }
             sleep(350);
         }

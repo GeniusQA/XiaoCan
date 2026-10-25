@@ -260,6 +260,13 @@ public final class XiaoCanRpc {
             Object respBody = response.getClass().getMethod("body").invoke(response);
             String text = respBody == null ? ""
                     : (String) respBody.getClass().getMethod("string").invoke(respBody);
+            String token = headers.get("X-Sivir");
+            log("RPCDIAG[mod] " + serverName + "." + methodName + " HTTP " + code
+                    + " sivir=" + (token == null ? "null"
+                    : (token.length() > 14
+                    ? token.substring(0, 14) + "..(" + token.length() + ")" : token))
+                    + " teemo=" + headers.get("X-Teemo")
+                    + " bodyLen=" + payload.toString().length());
             if (text == null || text.trim().isEmpty()) {
                 throw new IllegalStateException("空响应 (HTTP " + code + ")");
             }
