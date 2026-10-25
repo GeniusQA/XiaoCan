@@ -20,14 +20,16 @@ public final class TiandituApi {
     public static final String DEFAULT_KEY = "109d48B4f99e3c0472ab15fa38fe2ac";
     private static final String BASE = "https://api.tianditu.gov.cn";
 
-    /** 一条搜索结果：名称 + 经纬度。 */
+    /** 一条搜索结果：名称 + 详细地址 + 经纬度。 */
     public static final class Place {
         public final String name;
+        public final String addr;
         public final double lon;
         public final double lat;
 
-        public Place(String name, double lon, double lat) {
+        public Place(String name, String addr, double lon, double lat) {
             this.name = name;
+            this.addr = addr == null ? "" : addr;
             this.lon = lon;
             this.lat = lat;
         }
@@ -59,11 +61,12 @@ public final class TiandituApi {
                 JSONObject po = pois.optJSONObject(i);
                 if (po == null) continue;
                 String name = po.optString("name", "地点");
+                String addr = po.optString("address", "");
                 String lonlat = po.optString("lonlat", "");
                 String[] parts = lonlat.split(",");
                 if (parts.length < 2) continue;
                 try {
-                    out.add(new Place(name,
+                    out.add(new Place(name, addr,
                             Double.parseDouble(parts[0].trim()),
                             Double.parseDouble(parts[1].trim())));
                 } catch (Throwable ignored) {}
@@ -109,3 +112,4 @@ public final class TiandituApi {
             conn.disconnect();
         }
     }
+}
