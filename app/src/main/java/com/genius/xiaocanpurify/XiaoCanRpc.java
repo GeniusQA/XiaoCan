@@ -30,19 +30,22 @@ public final class XiaoCanRpc {
 
     private static final String K_TOKEN = "token";
     private static final String K_UID = "uid";
+    private static final String K_VAYNE = "vayne";
     private static final String K_SILK = "silk";
     private static final String K_CITY = "city";
     private static final String K_UA = "ua";
     private static final String K_VER = "ver";
     private static final String K_SID = "sid";
+    private static final String K_SR = "sr";
 
     private XiaoCanRpc() {}
 
     // ---------------------------------------------------------------- 凭证抓取
 
-    /** 从宿主请求头抓取凭证（X-Sivir / X-Teemo / x-City / UA / 版本 / 会话）。 */
+    /** 从宿主请求头抓取凭证（App 原生认证集：X-Sivir/X-Vayne/x-Teemo/会话/UA 等）。 */
     public static void captureHeaders(Context ctx, String token, String uid, String city,
-                                      String ua, String ver, String sid) {
+                                      String ua, String ver, String sid,
+                                      String vayne, String sr) {
         SharedPreferences p = prefs(ctx);
         if (p == null) return;
         SharedPreferences.Editor e = p.edit();
@@ -54,6 +57,10 @@ public final class XiaoCanRpc {
         }
         if (uid != null && !uid.isEmpty() && !uid.equals(p.getString(K_UID, null))) {
             e.putString(K_UID, uid);
+            changed = true;
+        }
+        if (vayne != null && !vayne.isEmpty() && !vayne.equals(p.getString(K_VAYNE, null))) {
+            e.putString(K_VAYNE, vayne);
             changed = true;
         }
         if (city != null && !city.isEmpty() && !city.equals(p.getString(K_CITY, null))) {
@@ -72,9 +79,14 @@ public final class XiaoCanRpc {
             e.putString(K_SID, sid);
             changed = true;
         }
+        if (sr != null && !sr.isEmpty() && !sr.equals(p.getString(K_SR, null))) {
+            e.putString(K_SR, sr);
+            changed = true;
+        }
         if (changed) {
             e.apply();
-            MainHook.log("RPC: credentials captured (uid=" + uid + ")");
+            MainHook.log("RPC: credentials captured (vayne=" + vayne + " silk="
+                    + p.getString(K_SILK, "-") + ")");
         }
     }
 
@@ -108,7 +120,9 @@ public final class XiaoCanRpc {
                     (String) header.invoke(request, "x-City"),
                     (String) header.invoke(request, "User-Agent"),
                     (String) header.invoke(request, "X-Version"),
-                    (String) header.invoke(request, "X-Session-Id"));
+                    (String) header.invoke(request, "X-Session-Id"),
+                    (String) header.invoke(request, "X-Vayne"),
+                    (String) header.invoke(request, "X-App-Sr"));
             SharedPreferences p = prefs(ctx);
             if (p != null && p.getString(K_SILK, null) == null) {
                 Object b = request.getClass().getMethod("body").invoke(request);
@@ -171,12 +185,12 @@ public final class XiaoCanRpc {
         if (p == null) throw new IllegalStateException("prefs unavailable");
         String token = p.getString(K_TOKEN, null);
         if (token == null) throw new IllegalStateException("缺少凭证：请先打开小蚕产生一次请求");
-        String uid = p.getString(K_UID, "0");
+        String vayne = p.getString(K_VAYNE, null);
         String silk = p.getString(K_SILK, "0");
-        String city = p.getString(K_CITY, "510100");
         String ua = p.getString(K_UA, "XC;Android;3.21.5;");
         String ver = p.getString(K_VER, "3.21.5.4");
         String sid = p.getString(K_SID, null);
+        String sr = p.getString(K_SR, "16");
         if (sid == null) sid = UUID.randomUUID().toString();
 
         long ts = System.currentTimeMillis();
@@ -186,37 +200,30 @@ public final class XiaoCanRpc {
         JSONObject payload = body == null ? new JSONObject() : new JSONObject(body.toString());
         if (!payload.has("app_id")) payload.put("app_id", 10);
 
-        String cleanToken = token.startsWith("Bearer ") ? token.substring(7).trim() : token.trim();
-
-        // 头集合严格对齐 xiaocan-assistant 的 app 原生协议规范（写操作方法
-        // 需要 Authorization/token/x-Vayne/x-Teemo(silk_id) 完整认证集，
-        // 只有 x-Sivir 会被网关对写方法返回 401——用户实测）
+        // 头集合 1:1 复刻宿主 App 的真实请求头（RPCDIAG[app-hdrs] 实测）：
+        // servername/methodname/env=prod/X-Ashe/X-Nami/X-Garen/X-Platform=Android/
+        // x-Annie=XC/X-Session-Id/User-Agent/x-channel/X-App-Sr/X-Vayne(用户ID)/
+        // x-Teemo(silk_id)/X-Sivir(JWT)/X-Version —— 多发或少发任何头都会被
+        // 腾讯 WAF 按指纹 403（用户实测：换成 XiaoCan UA + 加 Authorization
+        // 等"增强"头后全量 403）。不加 Content-Type：OkHttp 从 RequestBody
+        // 自动带；UrlConnection 路径单独补。
         java.util.LinkedHashMap<String, String> headers = new java.util.LinkedHashMap<>();
-        headers.put("x-City", city);
-        headers.put("X-CityCode", city);
-        headers.put("X-Garen", String.valueOf(ts));
-        headers.put("X-Nami", nami);
-        headers.put("x-Annie", "XC");
         headers.put("servername", serverName);
         headers.put("methodname", methodName);
+        headers.put("env", "prod");
         headers.put("X-Ashe", ashe);
-        headers.put("Content-Type", "application/json");
-        headers.put("Accept", "application/json, text/plain, */*");
-        headers.put("Accept-Language", "zh-CN,zh;q=0.9");
+        headers.put("X-Nami", nami);
+        headers.put("X-Garen", String.valueOf(ts));
         headers.put("X-Platform", "Android");
-        headers.put("appid", "10");
-        headers.put("X-App-Sr", "10");
-        headers.put("version", ver);
-        headers.put("X-Version", ver);
+        headers.put("x-Annie", "XC");
+        headers.put("X-Session-Id", sid);
+        headers.put("User-Agent", ua);
         headers.put("x-channel", "xiaocan");
-        headers.put("X-Model", "Android Phone");
-        headers.put("User-Agent", "XiaoCan/" + ver
-                + " (Linux; U; Android 14; zh-cn; Mobile) okhttp/4.12.0");
-        headers.put("x-Vayne", uid);
-        headers.put("x-Teemo", silk != null ? silk : "0");
-        headers.put("Authorization", "Bearer " + cleanToken);
-        headers.put("token", cleanToken);
-        headers.put("x-Sivir", cleanToken);
+        headers.put("X-App-Sr", sr);
+        if (vayne != null && !vayne.isEmpty()) headers.put("X-Vayne", vayne);
+        if (silk != null && !silk.isEmpty()) headers.put("x-Teemo", silk);
+        headers.put("X-Sivir", token);
+        headers.put("X-Version", ver);
         // 内部请求标记：宿主拦截器对它直通（不改写/不拦截）
         headers.put("X-Purify-Internal", "1");
 
@@ -308,6 +315,7 @@ public final class XiaoCanRpc {
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(15000);
             conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
             for (java.util.Map.Entry<String, String> h : headers.entrySet()) {
                 conn.setRequestProperty(h.getKey(), h.getValue());
             }
