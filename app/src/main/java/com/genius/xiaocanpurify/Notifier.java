@@ -26,6 +26,8 @@ public final class Notifier {
     public static final String EV_DAILY = "daily";
     public static final String EV_ERROR = "error";
     public static final String EV_SPIKE = "spike";
+    public static final String EV_SECURITY = "security";
+    public static final String EV_ASSET = "asset";
 
     private Notifier() {}
 
