@@ -299,7 +299,7 @@ public class MainActivity extends Activity {
         LinearLayout tabRow = new LinearLayout(this);
         tabRow.setOrientation(LinearLayout.HORIZONTAL);
         tabRow.setPadding(dp2px(4), dp2px(10), dp2px(4), dp2px(2));
-        String[] tabNames = new String[]{"日常任务", "抢券任务", "提醒"};
+        String[] tabNames = new String[]{"日常任务", "秒杀抢券", "资产提醒"};
         for (int i = 0; i < 3; i++) {
             final int idx = i;
             TextView t = new TextView(this);
@@ -888,6 +888,12 @@ public class MainActivity extends Activity {
         sw.setChecked(isSwitchOn(key, defOn));
         sw.setOnCheckedChangeListener((v, checked) -> setStringPref(key, checked ? "1" : "0"));
         row.addView(sw);
+        // 整行点击兜底切换（避免个别主题/机型上开关触摸不生效）
+        row.setOnClickListener(v -> {
+            boolean now = !sw.isChecked();
+            sw.setChecked(now);
+            android.util.Log.i("XiaoCanAssistant", "taskSwitch row " + key + " -> " + now);
+        });
         return row;
     }
 
