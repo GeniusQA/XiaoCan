@@ -4,6 +4,11 @@
     <!-- 通知渠道（Webhook / SMTP）与测试发送所需 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 包可见性：一键日常需要拉起宿主小蚕 -->
+    <queries>
+        <package android:name="com.realtech.xiaocan" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
