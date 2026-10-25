@@ -91,6 +91,22 @@ public final class PurifyPrefs {
     // 定时清理缓存：off=关闭 / exit=退出时清缓存（退出杀掉宿主进程即清）
     public static final String CACHE_CLEANUP_MODE = "cache_cleanup_mode";
 
+    // 一键日常自动执行：字符串通道 "1"=开启 / "0"=关闭（默认关闭，避免风控）
+    public static final String RPC_AUTO_DAILY = "rpc_auto_daily";
+
+    // 通知配置（JSON 字符串：渠道 / 各渠道凭据 / 事件订阅）
+    public static final String NOTIFY_CONFIG = "notify_config";
+
+    // 元宝秒杀：目标商品 exchange_id（逗号分隔，空=仅巡检提醒）
+    public static final String FLASH_SALE_GOODS = "flash_sale_goods";
+    // 元宝秒杀：已选商品名称（仅设置页展示用，与上键一一对应）
+    public static final String FLASH_SALE_GOODS_NAMES = "flash_sale_goods_names";
+    // 元宝秒杀：自动兑换开关 "1"=开启（默认关闭，下单不可逆）
+    public static final String FLASH_SALE_AUTO = "flash_sale_auto";
+
+    // 每月免单券 14:00 抢购："1"=开启（默认关闭，需 App 在放量前打开）
+    public static final String FREE_ORDER_GRAB = "free_order_grab";
+
     // Order page
     public static final String ORDER_CHALLENGE = "hide_order_challenge";
     public static final String ORDER_FREE = "hide_order_free";

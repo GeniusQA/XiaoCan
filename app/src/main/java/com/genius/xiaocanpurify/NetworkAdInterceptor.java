@@ -18,6 +18,19 @@ public final class NetworkAdInterceptor {
     /** RPC 请求探针节流（1 秒一条）。 */
     private static volatile long lastRpcProbeMs;
 
+    /** 抽奖浏览任务窗口：点击「立即浏览」后，窗口期内放行穿山甲内容流量
+     *（任务落地页本身是穿山甲广告页，全拦截会导致页面空白）。 */
+    private static volatile long taskPageUntilMs;
+
+    /** 由 LotteryTaskAutomator 在任务点击时布防。 */
+    public static void armTaskPageWindow(long ms) {
+        taskPageUntilMs = android.os.SystemClock.uptimeMillis() + ms;
+    }
+
+    private static boolean isTaskPageWindowActive() {
+        return android.os.SystemClock.uptimeMillis() < taskPageUntilMs;
+    }
+
     private NetworkAdInterceptor() {}
 
     static void armDiscovery(long durationMs) {
@@ -404,9 +417,37 @@ public final class NetworkAdInterceptor {
                 Method requestMethod = chain.getClass().getMethod("request");
                 Object request = requestMethod.invoke(chain);
 
+                // 模块内部 RPC（X-Purify-Internal）直通：不改写/不拦截/不抓取，
+                // 否则会被本拦截器二次处理造成死循环
+                try {
+                    Object marker = request.getClass()
+                            .getMethod("header", String.class)
+                            .invoke(request, "X-Purify-Internal");
+                    if ("1".equals(marker)) {
+                        return chain.getClass()
+                                .getMethod("proceed", Object.class)
+                                .invoke(chain, request);
+                    }
+                } catch (Throwable ignored) {}
+
+                // 捕获宿主 OkHttpClient（模块 RPC 复用其 HTTPDNS/连接池）
+                try {
+                    if (XiaoCanRpc.capturedClient() == null) {
+                        Object call = chain.getClass().getMethod("call").invoke(chain);
+                        Object client = call.getClass().getMethod("client").invoke(call);
+                        XiaoCanRpc.captureOkHttpClient(client);
+                    }
+                } catch (Throwable ignored) {}
+
                 Method urlMethod = request.getClass().getMethod("url");
                 Object httpUrl = urlMethod.invoke(request);
                 String urlStr = httpUrl != null ? httpUrl.toString().toLowerCase(Locale.ROOT) : "";
+                // 协议凭证抓取（供一键日常等模块内 RPC 调用使用）
+                if (urlStr.contains("gw.xiaocantech.com/rpc")) {
+                    try {
+                        XiaoCanRpc.captureFromRequest(request);
+                    } catch (Throwable ignored) {}
+                }
                 if (discoveryActive()) {
                     String mn = "";
                     try {
@@ -445,11 +486,17 @@ public final class NetworkAdInterceptor {
                 }
 
                 if (isAdOrTrackingUrl(urlStr)) {
-                    MainHook.log("Blocked ad network request: " + urlStr);
-                    try {
-                        return createMockJsonResponse(request, "{\"code\":0,\"data\":{},\"msg\":\"ok\"}");
-                    } catch (Throwable t) {
-                        MainHook.log("Mock response error: " + t);
+                    // 抽奖浏览任务的落地页本身是穿山甲广告页（TTFullAdActivity）：
+                    // 窗口期内放行其内容流量，否则页面空白无内容（用户实测）
+                    if (isTaskPageWindowActive() && isAdContentHost(urlStr)) {
+                        MainHook.log("Allowed ad content for task page: " + urlStr);
+                    } else {
+                        MainHook.log("Blocked ad network request: " + urlStr);
+                        try {
+                            return createMockJsonResponse(request, "{\"code\":0,\"data\":{},\"msg\":\"ok\"}");
+                        } catch (Throwable t) {
+                            MainHook.log("Mock response error: " + t);
+                        }
                     }
                 }
 
@@ -496,6 +543,16 @@ public final class NetworkAdInterceptor {
             responseBuilderClass.getMethod("body", responseBodyClass).invoke(builder, responseBody);
 
             return responseBuilderClass.getMethod("build").invoke(builder);
+        }
+
+        /** 广告内容域名（渲染任务落地页所需）；埋点/展示类拦截域名不在此列。 */
+        private static boolean isAdContentHost(String url) {
+            return url.contains("pangolin")
+                    || url.contains("openadsdk")
+                    || url.contains("pangle")
+                    || url.contains("csj")
+                    || url.contains("ad.oceanengine")
+                    || url.contains("douyin");
         }
 
         private static boolean isAdOrTrackingUrl(String url) {

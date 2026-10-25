@@ -215,6 +215,13 @@ public final class MainHook extends XposedModule {
         }
 
         try {
+            DailyTaskRunner.install(xposed, classLoader);
+            log("DailyTaskRunner installed successfully.");
+        } catch (Throwable t) {
+            log("DailyTaskRunner install error: " + t);
+        }
+
+        try {
             LotteryTaskAutomator.install(xposed, classLoader);
             log("LotteryTaskAutomator installed successfully.");
         } catch (Throwable t) {
