@@ -949,7 +949,6 @@ public class MainActivity extends Activity {
     }
 
     private void setCacheCleanupMode(String mode) {
-    private void setCacheCleanupMode(String mode) {
         try {
             localPrefs.edit().putString(PurifyPrefs.CACHE_CLEANUP_MODE, mode).apply();
         } catch (Throwable ignored) {}
