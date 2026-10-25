@@ -411,7 +411,7 @@ public final class NetworkAdInterceptor {
                 return System.identityHashCode(proxy);
             }
             if ("toString".equals(method.getName())) {
-                return "XiaoCanPurifyAdInterceptor";
+                return "XiaoCanAssistantAdInterceptor";
             }
             return null;
         }

@@ -128,7 +128,7 @@ public final class FreeOrderGrabber {
             } finally {
                 scheduled = false;
             }
-        }, "XiaoCanPurify-FreeOrder").start();
+        }, "XiaoCanAssistant-FreeOrder").start();
     }
 
     /** 复查是否持券（info.had）。 */

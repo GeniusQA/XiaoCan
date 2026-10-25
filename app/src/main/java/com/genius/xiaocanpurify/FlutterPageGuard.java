@@ -25,7 +25,7 @@ import io.github.libxposed.api.XposedInterface;
  * removed it. The page itself stays visible from the first frame.
  */
 public final class FlutterPageGuard {
-    private static final String TAG = "XiaoCanPurify";
+    private static final String TAG = "XiaoCanAssistant";
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final WeakHashMap<Activity, View> COVER = new WeakHashMap<>();
     private static volatile long withdrawRouteAt;

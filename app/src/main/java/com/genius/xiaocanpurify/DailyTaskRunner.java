@@ -60,7 +60,7 @@ public final class DailyTaskRunner {
                         // 启动后异步校准服务器时间（抢单/倒计时对齐用）
                         final Context appCtx = a.getApplicationContext();
                         new Thread(() -> XiaoCanRpc.syncServerTime(appCtx),
-                                "XiaoCanPurify-TimeSync").start();
+                                "XiaoCanAssistant-TimeSync").start();
                     }
                 } catch (Throwable ignored) {}
                 return result;
@@ -145,7 +145,7 @@ public final class DailyTaskRunner {
             } finally {
                 RUNNING.set(false);
             }
-        }, "XiaoCanPurify-DailyTask").start();
+        }, "XiaoCanAssistant-DailyTask").start();
     }
 
     private static void run(Context ctx) {
@@ -276,7 +276,7 @@ public final class DailyTaskRunner {
                         .putExtra("json", result);
                 app.sendBroadcast(back);
             } catch (Throwable ignored) {}
-        }, "XiaoCanPurify-FlashList").start();
+        }, "XiaoCanAssistant-FlashList").start();
     }
 
     // ------------------------------------------------------------ 元宝中心任务

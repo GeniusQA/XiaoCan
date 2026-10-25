@@ -154,7 +154,7 @@ public class MainActivity extends Activity {
 
         // Header Title
         TextView title = new TextView(this);
-        title.setText("小蚕净化");
+        title.setText("小蚕助理");
         title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(ThemeHelper.textTitle(this));
@@ -1243,7 +1243,7 @@ public class MainActivity extends Activity {
             // 服务未连接/写入失败：排队，等服务绑定后补写
             pendingRemoteWrites.put(key, hide);
         }
-        android.util.Log.i("XiaoCanPurify", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
+        android.util.Log.i("XiaoCanAssistant", "Setting " + key + " -> " + (hide ? "HIDE" : "SHOW")
                 + " remoteSynced=" + synced);
         LogStore.append(this, "I", "Sync", "设置 " + key + " -> "
                 + (hide ? "HIDE" : "SHOW") + (synced ? "（已同步宿主）" : "（未同步：LSPosed 服务未连接）"));
@@ -1262,9 +1262,9 @@ public class MainActivity extends Activity {
                     ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                     : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
             pm.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP);
-            android.util.Log.i("XiaoCanPurify", "Launcher icon " + (enabled ? "shown" : "hidden"));
+            android.util.Log.i("XiaoCanAssistant", "Launcher icon " + (enabled ? "shown" : "hidden"));
         } catch (Throwable t) {
-            android.util.Log.e("XiaoCanPurify", "setLauncherIconEnabled failed: " + t);
+            android.util.Log.e("XiaoCanAssistant", "setLauncherIconEnabled failed: " + t);
         }
     }
 
@@ -1278,7 +1278,7 @@ public class MainActivity extends Activity {
             }
             if (editor.commit()) {
                 pendingRemoteWrites.clear();
-                android.util.Log.i("XiaoCanPurify", "Flushed pending settings to remote prefs");
+                android.util.Log.i("XiaoCanAssistant", "Flushed pending settings to remote prefs");
             }
         } catch (Throwable ignored) {
         }

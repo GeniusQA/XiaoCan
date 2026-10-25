@@ -15,14 +15,14 @@ import io.github.libxposed.api.XposedModuleInterface;
 
 public final class MainHook extends XposedModule {
     public static final String TARGET_PACKAGE = "com.realtech.xiaocan";
-    public static final String LOG_TAG = "XiaoCanPurify";
+    public static final String LOG_TAG = "XiaoCanAssistant";
     private static final AtomicBoolean HOOKED = new AtomicBoolean(false);
     private static volatile MainHook instance;
 
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
         instance = this;
-        log("XiaoCanPurify API 102 module loaded.");
+        log("XiaoCanAssistant API 102 module loaded.");
     }
 
     @Override
@@ -235,7 +235,7 @@ public final class MainHook extends XposedModule {
             log("OrderTabRedirect install error: " + t);
         }
 
-        log("All XiaoCanPurify hooks successfully initialized!");
+        log("All XiaoCanAssistant hooks successfully initialized!");
     }
 
     public static void log(String message) {

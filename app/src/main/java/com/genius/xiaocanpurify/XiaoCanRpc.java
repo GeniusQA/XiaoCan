@@ -327,7 +327,7 @@ public final class XiaoCanRpc {
             MainHook.log(msg);
         } catch (Throwable t) {
             try {
-                android.util.Log.i("XiaoCanPurify", msg);
+                android.util.Log.i("XiaoCanAssistant", msg);
             } catch (Throwable ignored) {}
         }
     }

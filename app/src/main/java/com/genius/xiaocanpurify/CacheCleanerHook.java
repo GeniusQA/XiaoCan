@@ -158,7 +158,7 @@ public final class CacheCleanerHook {
             MainHook.log("CacheCleaner: cache cleared, freed "
                     + android.text.format.Formatter.formatFileSize(app, freed)
                     + " (" + detail + ")");
-        }, "XiaoCanPurify-CacheCleaner").start();
+        }, "XiaoCanAssistant-CacheCleaner").start();
     }
 
     /** 递归删除目录内容（不删目录本身），返回释放的字节数并追加明细。 */

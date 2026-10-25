@@ -175,7 +175,7 @@ public final class LogStore {
             lines = readRawLinesLocked(ctx, levelFilter, source, null, Integer.MAX_VALUE);
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("XiaoCanPurify ")
+        sb.append("XiaoCanAssistant ")
                 .append(SOURCE_MODULE.equals(source) ? "模块日志" : "应用日志").append('\n');
         sb.append("导出时间: ").append(
                 new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append('\n');

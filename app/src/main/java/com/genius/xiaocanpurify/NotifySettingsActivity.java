@@ -317,7 +317,7 @@ public class NotifySettingsActivity extends Activity {
                 return;
             }
             Toast.makeText(this, "正在发送…", Toast.LENGTH_SHORT).show();
-            Notifier.sendAsync(this, cfg, "小蚕净化 · 测试通知",
+            Notifier.sendAsync(this, cfg, "小蚕助理 · 测试通知",
                     "这是一条测试通知，收到即表示渠道配置正确。\n时间："
                             + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
                             java.util.Locale.US).format(new java.util.Date()));

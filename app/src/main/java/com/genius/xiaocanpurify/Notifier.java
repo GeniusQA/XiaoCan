@@ -55,7 +55,7 @@ public final class Notifier {
             } catch (Throwable t) {
                 log("Notify: send failed (" + cfg.optString("channel") + ") " + t);
             }
-        }, "XiaoCanPurify-Notify").start();
+        }, "XiaoCanAssistant-Notify").start();
     }
 
     public static JSONObject config(Context ctx) {
@@ -325,7 +325,7 @@ public final class Notifier {
      *（其依赖的 libxposed.api 只在宿主进程可用，模块内会 NoClassDefFoundError）。 */
     private static void log(String msg) {
         try {
-            android.util.Log.i("XiaoCanPurify", msg);
+            android.util.Log.i("XiaoCanAssistant", msg);
         } catch (Throwable ignored) {}
     }
 
