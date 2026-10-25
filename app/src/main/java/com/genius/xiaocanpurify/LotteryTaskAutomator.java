@@ -60,10 +60,98 @@ public final class LotteryTaskAutomator {
                 }
                 return chain.proceed();
             });
+            // Activity 级触摸兜底：Kuikly 自定义 View 重写 dispatch/onTouchEvent
+            // 不调 super 时上面两个 hook 都收不到（用户实测点击后无任何捕获日志）。
+            // Activity.dispatchTouchEvent 必经，按坐标命中测试还原被点视图。
+            try {
+                Method dispatch = Activity.class.getDeclaredMethod(
+                        "dispatchTouchEvent", MotionEvent.class);
+                xposed.hook(dispatch).intercept(chain -> {
+                    Object result = chain.proceed();
+                    try {
+                        Activity act = chain.getThisObject() instanceof Activity
+                                ? (Activity) chain.getThisObject() : null;
+                        Object ev = chain.getArg(0);
+                        if (act != null && ev instanceof MotionEvent
+                                && ((MotionEvent) ev).getActionMasked() == MotionEvent.ACTION_UP) {
+                            MotionEvent me = (MotionEvent) ev;
+                            View decor = act.getWindow() != null
+                                    ? act.getWindow().getDecorView() : null;
+                            View hit = decor != null
+                                    ? findDeepestViewAt(decor, (int) me.getRawX(), (int) me.getRawY())
+                                    : null;
+                            if (hit != null) {
+                                handleTask(hit, "activity-touch");
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                    return result;
+                });
+                MainHook.log("LotteryTaskAutomator: Activity.dispatchTouchEvent fallback installed");
+            } catch (Throwable t) {
+                MainHook.log("LotteryTaskAutomator: dispatchTouchEvent hook failed: " + t);
+            }
+            // 免费开红包页可见即布防任务页流量窗口：不依赖点击捕获
+            //（Kuikly 吞点击时捕获可能失效），保证任务落地页能渲染内容
+            try {
+                Method onResume = Activity.class.getDeclaredMethod("onResume");
+                xposed.hook(onResume).intercept(chain -> {
+                    Object result = chain.proceed();
+                    try {
+                        Activity act = chain.getThisObject() instanceof Activity
+                                ? (Activity) chain.getThisObject() : null;
+                        if (act != null && act.getWindow() != null) {
+                            String text = subtreeText(act.getWindow().getDecorView());
+                            if (text.contains("免费开红包")
+                                    && (text.contains("立即浏览") || text.contains("看商城优惠"))) {
+                                NetworkAdInterceptor.armTaskPageWindow(600_000L);
+                                long nowMs = SystemClock.uptimeMillis();
+                                if (nowMs - lastWindowArmLogMs > 30_000L) {
+                                    lastWindowArmLogMs = nowMs;
+                                    MainHook.log("LotteryTaskAutomator: lottery page visible,"
+                                            + " task page window armed (10min)");
+                                }
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                    return result;
+                });
+                MainHook.log("LotteryTaskAutomator: resume window arm installed");
+            } catch (Throwable t) {
+                MainHook.log("LotteryTaskAutomator: resume arm hook failed: " + t);
+            }
             MainHook.log("LotteryTaskAutomator installed (click+touch)");
         } catch (Throwable t) {
             MainHook.log("LotteryTaskAutomator install error: " + t);
         }
+    }
+
+    private static volatile long lastWindowArmLogMs;
+
+    /** 屏幕上坐标命中的最深层可见 View（Kuikly 内部手势场景还原被点视图）。 */
+    private static View findDeepestViewAt(View root, int x, int y) {
+        if (!(root instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) root;
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
+            int[] loc = new int[2];
+            child.getLocationOnScreen(loc);
+            if (x < loc[0] || y < loc[1]
+                    || x >= loc[0] + child.getWidth() || y >= loc[1] + child.getHeight()) {
+                continue;
+            }
+            View deeper = findDeepestViewAt(child, x, y);
+            return deeper != null ? deeper : child;
+        }
+        return null;
+    }
+
+    /** 浏览任务窗口（点击后 ~40 秒内），期间放行穿山甲任务落地页不被广告秒关。 */
+    private static volatile long browseWindowUntilMs;
+
+    static boolean isBrowseTaskWindowActive() {
+        return SystemClock.uptimeMillis() < browseWindowUntilMs;
     }
 
     private static void handleTask(View view, String source) {
@@ -82,11 +170,13 @@ public final class LotteryTaskAutomator {
         lastTriggerType = type;
         lastTriggerMs = now;
         if (type == TYPE_MALL || type == TYPE_BROWSE) {
-            lastTaskActivity = new WeakReference<>(activityOf(view));
-            MainHook.log("LotteryTaskAutomator: task captured (" + source + ", type=" + type + ")");
-            scheduleAutoBack(
-                    type == TYPE_MALL ? PAGE_DWELL_MS : QUICK_BROWSE_MS,
-                    type == TYPE_MALL);
+            // 自动返回逻辑已移除（宿主任务页改为独立 Activity 后无法稳定工作）。
+            // 浏览任务恢复手动操作；但需放行任务落地页的穿山甲内容流量，
+            // 否则页面空白无法浏览（用户实测）。
+            NetworkAdInterceptor.armTaskPageWindow(90_000L);
+            MainHook.log("LotteryTaskAutomator: task seen (" + source + ", type=" + type
+                    + "), auto-back disabled, task page window armed");
+            return;
         } else if (type == TYPE_REDPACK) {
             // 美团/饿了么红包任务：拦截小程序/App 外跳，并开启 RPC 探针
             // （任务模式：不受用户触摸影响，窗口内始终拦截）

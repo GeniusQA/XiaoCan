@@ -403,10 +403,12 @@ public final class AdBlocker {
     }
 
     private static boolean isAdActivityName(String lowerName) {
-        return lowerName.contains("ttfulladactivity")
-                || lowerName.contains("tobidrewardvideoactivity")
+        // TTFullAdActivity / openadsdk 已从秒关列表移除：它们是「看商城优惠/
+        // 浏览外卖霸王餐」抽奖任务的落地页宿主，秒关会导致任务页卡在
+        // 「任务加载中」或整页纯白（用户实测）。广告填充仍由网络层
+        // isAdOrTrackingUrl 拦截兜底，无填充时不会拉起这些页面。
+        return lowerName.contains("tobidrewardvideoactivity")
                 || lowerName.contains("douyindramaactivity")
-                || lowerName.contains("openadsdk")
                 || lowerName.contains("kwad.sdk")
                 || lowerName.contains("sigmob")
                 || lowerName.contains("beizi")
