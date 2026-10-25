@@ -493,11 +493,50 @@ public class MainActivity extends Activity {
             }
             parent.addView(card);
             if ("定位".equals(groupName)) {
-                // 定位分组下追加缓存位置信息卡（POI 地址 + 经纬度 + 缓存时间）
-                parent.addView(createLocationInfoCard());
+                // 抢单位置设置（天地图搜索选点/微调/历史）替代旧定位缓存展示
                 parent.addView(createGrabLocEntryRow());
+                String tk = getSharedPreferences(PurifyPrefs.PREFS_NAME, MODE_PRIVATE)
+                        .getString("tianditu_key", TiandituApi.DEFAULT_KEY);
+                parent.addView(settingEntryRow("天地图服务密钥",
+                        tk.length() > 18 ? tk.substring(0, 12) + "…" : tk,
+                        v -> showTextInputDialog("天地图服务密钥",
+                                "tianditu.gov.cn 控制台生成的 Web API 密钥",
+                                TiandituApi.key(this),
+                                val -> setStringPref("tianditu_key", val))));
             }
         }
+    }
+
+    /** 通用设置入口行（标题 + 当前值摘要 + ›）。 */
+    private LinearLayout settingEntryRow(String title, String value,
+            android.view.View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp2px(14), dp2px(10), dp2px(14), dp2px(10));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(14);
+        t.setTextColor(ThemeHelper.accentGreen(this));
+        col.addView(t);
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextSize(11);
+        v.setTextColor(ThemeHelper.textHint(this));
+        v.setPadding(0, dp2px(2), dp2px(8), 0);
+        col.addView(v);
+        row.addView(col);
+        TextView arrow = new TextView(this);
+        arrow.setText("›");
+        arrow.setTextSize(18);
+        arrow.setTextColor(ThemeHelper.textSecondary(this));
+        row.addView(arrow);
+        row.setOnClickListener(onClick);
+        return row;
     }
 
     private TextView locationInfoText;
@@ -1482,16 +1521,53 @@ public class MainActivity extends Activity {
 }
     /** 抢单位置设置弹窗：搜索选点 + 坐标微调 + 历史位置（天地图 API）。 */
     private void showGrabLocDialog() {
-        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        android.content.SharedPreferences inbox =
+                getSharedPreferences("purify_cache_inbox", MODE_PRIVATE);
+        final android.widget.LinearLayout box = new android.widget.LinearLayout(this);
         box.setOrientation(android.widget.LinearLayout.VERTICAL);
         int p14 = dp2px(14);
+        box.setPadding(p14, dp2px(4), p14, 0);
 
+        // ── 当前位置块（宿主定位快照 / 上次选定） ──
+        android.widget.LinearLayout curBlock = new android.widget.LinearLayout(this);
+        curBlock.setOrientation(android.widget.LinearLayout.VERTICAL);
+        curBlock.setBackgroundColor(ThemeHelper.cardBg(this));
+        int cbp = dp2px(10);
+        curBlock.setPadding(cbp, cbp, cbp, cbp);
+        android.widget.LinearLayout curHead = new android.widget.LinearLayout(this);
+        curHead.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        curHead.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.TextView curTag = new android.widget.TextView(this);
+        curTag.setText("当前位置");
+        curTag.setTextSize(11);
+        curTag.setTextColor(ThemeHelper.textHint(this));
+        curHead.addView(curTag, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.Button locBtn = new android.widget.Button(this);
+        locBtn.setText("获取本机定位");
+        locBtn.setTextSize(11);
+        locBtn.setAllCaps(false);
+        curHead.addView(locBtn);
+        curBlock.addView(curHead);
+        final android.widget.TextView curAddr = new android.widget.TextView(this);
+        curAddr.setTextSize(14);
+        curAddr.setTextColor(ThemeHelper.textHeading(this));
+        curBlock.addView(curAddr);
+        final android.widget.TextView curCoord = new android.widget.TextView(this);
+        curCoord.setTextSize(11);
+        curCoord.setTextColor(ThemeHelper.textHint(this));
+        curBlock.addView(curCoord);
+        box.addView(curBlock, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // ── 搜索行 ──
         android.widget.LinearLayout searchRow = new android.widget.LinearLayout(this);
         searchRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         searchRow.setGravity(Gravity.CENTER_VERTICAL);
         final android.widget.EditText searchInput = new android.widget.EditText(this);
         searchInput.setSingleLine(true);
-        searchInput.setHint("搜索地址或地名");
+        searchInput.setHint("搜索地址或地标");
         searchInput.setTextSize(13);
         searchInput.setBackgroundResource(android.R.drawable.edit_text);
         searchInput.setPadding(dp2px(8), dp2px(6), dp2px(8), dp2px(6));
@@ -1500,11 +1576,13 @@ public class MainActivity extends Activity {
         android.widget.Button searchBtn = new android.widget.Button(this);
         searchBtn.setText("搜索");
         searchBtn.setTextSize(12);
+        searchBtn.setAllCaps(false);
         searchRow.addView(searchBtn);
-        box.addView(searchRow, new android.widget.LinearLayout.LayoutParams(
+        android.widget.LinearLayout.LayoutParams srlp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
-
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        srlp.topMargin = dp2px(10);
+        // ── 候选地点列表 ──
         final android.widget.ListView resultList = new android.widget.ListView(this);
         resultList.setDividerHeight(1);
         final android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this,
@@ -1515,81 +1593,172 @@ public class MainActivity extends Activity {
         listLp.topMargin = dp2px(6);
         box.addView(resultList, listLp);
 
+        // ── 坐标微调 + 反查地址 ──
         final double[] picked = new double[2];
         picked[0] = Double.NaN;
         picked[1] = Double.NaN;
         final android.widget.EditText lonInput = new android.widget.EditText(this);
         final android.widget.EditText latInput = new android.widget.EditText(this);
         final android.widget.TextView addrView = new android.widget.TextView(this);
-        final Runnable confirmFill = () -> {
+        final Runnable fillInputs = () -> {
             if (Double.isNaN(picked[0])) return;
             lonInput.setText(String.format(java.util.Locale.US, "%.6f", picked[0]));
             latInput.setText(String.format(java.util.Locale.US, "%.6f", picked[1]));
-        };        // 坐标微调行
+        };
         android.widget.LinearLayout coordRow = new android.widget.LinearLayout(this);
         coordRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
         coordRow.setGravity(Gravity.CENTER_VERTICAL);
         android.widget.TextView lonLabel = new android.widget.TextView(this);
-        lonLabel.setText("经度");
+        lonLabel.setText("坐标微调");
         lonLabel.setTextSize(12);
         coordRow.addView(lonLabel);
         lonInput.setSingleLine(true);
         lonInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
                 | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
                 | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
-        coordRow.addView(lonInput, new android.widget.LinearLayout.LayoutParams(
-                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        android.widget.TextView latLabel = new android.widget.TextView(this);
-        latLabel.setText("纬度");
-        latLabel.setTextSize(12);
-        coordRow.addView(latLabel);
+        android.widget.LinearLayout.LayoutParams lonLp = new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        lonLp.setMarginStart(dp2px(6));
+        coordRow.addView(lonInput, lonLp);
+        android.widget.Button revBtn = new android.widget.Button(this);
+        revBtn.setText("⟳ 反查地址");
+        revBtn.setTextSize(11);
+        revBtn.setAllCaps(false);
+        coordRow.addView(revBtn);
+        android.widget.LinearLayout.LayoutParams crlp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        crlp.topMargin = dp2px(8);
+        box.addView(coordRow, crlp);
         latInput.setSingleLine(true);
         latInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER
                 | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
                 | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
-        coordRow.addView(latInput, new android.widget.LinearLayout.LayoutParams(
-                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(coordRow, new android.widget.LinearLayout.LayoutParams(
+        android.widget.LinearLayout.LayoutParams latLp = new android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
-
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        latLp.topMargin = dp2px(4);
+        box.addView(latInput, latLp);
         addrView.setTextSize(11);
         addrView.setTextColor(ThemeHelper.textHint(this));
         addrView.setPadding(0, dp2px(6), 0, 0);
         addrView.setText("选定坐标后自动反查地址");
-        box.addView(addrView);
-
-        // 历史位置
-        try {
-            org.json.JSONArray items = new org.json.JSONArray(
-                    historyPrefs().getString("items", "[]"));
-            if (items.length() > 0) {
-                android.widget.LinearLayout histRow = new android.widget.LinearLayout(this);
-                histRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        box.addView(addrView, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        // ── 历史位置 chips + 清空 ──
+        android.widget.LinearLayout histHead = new android.widget.LinearLayout(this);
+        histHead.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        android.widget.TextView histLabel = new android.widget.TextView(this);
+        histLabel.setText("历史位置");
+        histLabel.setTextSize(11);
+        histLabel.setTextColor(ThemeHelper.textHint(this));
+        histHead.addView(histLabel, new android.widget.LinearLayout.LayoutParams(
+                0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        android.widget.TextView clearBtn = new android.widget.TextView(this);
+        clearBtn.setText("清空");
+        clearBtn.setTextSize(11);
+        clearBtn.setTextColor(ThemeHelper.accentRed(this));
+        histHead.addView(clearBtn);
+        android.widget.LinearLayout.LayoutParams hhlp = new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        hhlp.topMargin = dp2px(10);
+        box.addView(histHead, hhlp);
+        final android.widget.LinearLayout histRow = new android.widget.LinearLayout(this);
+        histRow.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        box.addView(histRow, new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        final Runnable[] renderHistory = new Runnable[1];
+        renderHistory[0] = () -> {
+            histRow.removeAllViews();
+            try {
+                org.json.JSONArray items = new org.json.JSONArray(
+                        historyPrefs().getString("items", "[]"));
+                if (items.length() == 0) {
+                    android.widget.TextView empty = new android.widget.TextView(this);
+                    empty.setText("暂无历史位置");
+                    empty.setTextSize(11);
+                    empty.setTextColor(ThemeHelper.textHint(this));
+                    histRow.addView(empty);
+                    return;
+                }
                 for (int i = 0; i < items.length(); i++) {
                     final org.json.JSONObject old = items.optJSONObject(i);
                     if (old == null) continue;
-                    android.widget.TextView chip = new android.widget.TextView(this);
+                    android.widget.LinearLayout chip = new android.widget.LinearLayout(this);
+                    chip.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+                    chip.setGravity(Gravity.CENTER_VERTICAL);
+                    chip.setBackgroundResource(android.R.drawable.edit_text);
+                    android.widget.LinearLayout.LayoutParams clp = new android.widget.LinearLayout.LayoutParams(
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+                    clp.setMarginEnd(dp2px(6));
+                    histRow.addView(chip, clp);
                     String lbl = old.optString("label", "历史位置");
-                    chip.setText(lbl.length() > 12 ? lbl.substring(0, 12) + "…" : lbl);
-                    chip.setTextSize(11);
-                    chip.setTextColor(ThemeHelper.accentGreen(this));
-                    chip.setPadding(dp2px(8), dp2px(4), dp2px(8), dp2px(4));
-                    chip.setOnClickListener(v -> {
+                    if (lbl.length() > 10) lbl = lbl.substring(0, 10) + "…";
+                    android.widget.TextView tv = new android.widget.TextView(this);
+                    tv.setText(lbl);
+                    tv.setTextSize(11);
+                    tv.setTextColor(ThemeHelper.textBody(this));
+                    chip.addView(tv);
+                    android.widget.TextView x = new android.widget.TextView(this);
+                    x.setText(" ×");
+                    x.setTextSize(11);
+                    x.setTextColor(ThemeHelper.accentRed(this));
+                    chip.addView(x);
+                    tv.setOnClickListener(v -> {
                         picked[0] = old.optDouble("lon", Double.NaN);
                         picked[1] = old.optDouble("lat", Double.NaN);
-                        confirmFill.run();
-                        addrView.setText(lbl);
+                        fillInputs.run();
+                        addrView.setText(old.optString("label", ""));
                     });
-                    histRow.addView(chip);
+                    x.setOnClickListener(v -> {
+                        try {
+                            org.json.JSONArray arr = new org.json.JSONArray(
+                                    historyPrefs().getString("items", "[]"));
+                            org.json.JSONArray next = new org.json.JSONArray();
+                            for (int j = 0; j < arr.length(); j++) {
+                                if (j != i) next.put(arr.get(j));
+                            }
+                            historyPrefs().edit().putString("items", next.toString()).apply();
+                        } catch (Throwable ignored) {}
+                        renderHistory[0].run();
+                    });
                 }
-                android.widget.LinearLayout.LayoutParams hlp = new android.widget.LinearLayout.LayoutParams(
-                        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-                hlp.topMargin = dp2px(6);
-                box.addView(histRow, hlp);
-            }
-        } catch (Throwable ignored) {}        // 搜索逻辑
+            } catch (Throwable ignored) {}
+        };
+        renderHistory[0].run();
+        clearBtn.setOnClickListener(v -> {
+            historyPrefs().edit().remove("items").apply();
+            renderHistory[0].run();
+        });
+
+        // ── 获取本机定位：读宿主定位快照 ──
+        locBtn.setOnClickListener(v -> {
+            try {
+                double la = Double.longBitsToDouble(inbox.getLong("lat", 0L));
+                double lo = Double.longBitsToDouble(inbox.getLong("lng", 0L));
+                String address = inbox.getString("address", "");
+                if (la == 0.0 && lo == 0.0) {
+                    android.widget.Toast.makeText(this,
+                            "暂无本机定位：请开启 GPS 进入小蚕定位一次",
+                            android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                picked[0] = lo;
+                picked[1] = la;
+                fillInputs.run();
+                addrView.setText(address == null || address.isEmpty()
+                        ? "（反查中…）" : address);
+                if (address == null || address.isEmpty()) {
+                    new Thread(() -> {
+                        final String a = TiandituApi.reverseGeocode(this, lo, la);
+                        runOnUiThread(() -> addrView.setText(
+                                a == null ? "（反查失败）" : a));
+                    }, "XiaoCanAssistant-RevGeo").start();
+        // ── 搜索逻辑 ──
         searchBtn.setOnClickListener(v -> {
             String kw = searchInput.getText() == null ? ""
                     : searchInput.getText().toString().trim();
@@ -1613,60 +1782,98 @@ public class MainActivity extends Activity {
                         return;
                     }
                     adapter.clear();
-                    for (TiandituApi.Place pl : found) adapter.add(pl.name
-                            + "（" + String.format(java.util.Locale.US,
-                            "%.4f,%.4f", pl.lon, pl.lat) + "）");
+                    for (TiandituApi.Place pl : found) {
+                        adapter.add(pl.addr.isEmpty() ? pl.name : pl.addr);
+                    }
                     adapter.notifyDataSetChanged();
+                    android.widget.Toast.makeText(this,
+                            "共 " + found.size() + " 条结果",
+                            android.widget.Toast.LENGTH_SHORT).show();
                     resultList.setOnItemClickListener((parent, view, pos, id) -> {
                         if (pos < 0 || pos >= found.size()) return;
                         TiandituApi.Place pl = found.get(pos);
                         picked[0] = pl.lon;
                         picked[1] = pl.lat;
-                        confirmFill.run();
+                        fillInputs.run();
                         addrView.setText(pl.name + "（反查中…）");
                         new Thread(() -> {
-                            final String addr = TiandituApi.reverseGeocode(
+                            final String a = TiandituApi.reverseGeocode(
                                     this, pl.lon, pl.lat);
                             runOnUiThread(() -> addrView.setText(
-                                    addr == null ? pl.name : pl.name + "\n" + addr));
+                                    a == null ? pl.name : pl.name + "\n" + a));
                         }, "XiaoCanAssistant-RevGeo").start();
                     });
                 });
             }, "XiaoCanAssistant-TdtSearch").start();
         });
 
+        // ── 反查地址按钮 ──
+        revBtn.setOnClickListener(v -> {
+            double lo;
+            double la;
+            try {
+                lo = Double.parseDouble(lonInput.getText().toString().trim());
+                la = Double.parseDouble(latInput.getText().toString().trim());
+            } catch (Throwable t) {
+                android.widget.Toast.makeText(this, "坐标无效",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                return;
+            }
+            picked[0] = lo;
+            picked[1] = la;
+            addrView.setText("（反查中…）");
+            new Thread(() -> {
+                final String a = TiandituApi.reverseGeocode(this, lo, la);
+                runOnUiThread(() -> addrView.setText(
+                        a == null ? "（反查失败）" : a));
+            }, "XiaoCanAssistant-RevGeo").start();
+        });
+
         android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
                 .setTitle("抢单位置设置")
                 .setView(box)
                 .setPositiveButton("确定", (d, w) -> {
-                    double lon;
-                    double lat;
+                    double lo;
+                    double la;
                     try {
-                        lon = Double.parseDouble(lonInput.getText().toString().trim());
-                        lat = Double.parseDouble(latInput.getText().toString().trim());
+                        lo = Double.parseDouble(lonInput.getText().toString().trim());
+                        la = Double.parseDouble(latInput.getText().toString().trim());
                     } catch (Throwable t) {
                         android.widget.Toast.makeText(this, "坐标无效",
                                 android.widget.Toast.LENGTH_SHORT).show();
                         return;
                     }
+                    if (Math.abs(lo) < 1 || Math.abs(la) < 1) {
+                        android.widget.Toast.makeText(this, "请先选点或填写坐标",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     String addr = addrView.getText() == null ? ""
                             : addrView.getText().toString().split("\n")[0];
-                    saveGrabLocHistory(addr, lon, lat);
+                    if (addr.startsWith("（")) addr = "";
+                    saveGrabLocHistory(addr, lo, la);
                     sendBroadcast(new android.content.Intent(
                             "com.genius.xiaocanpurify.ACTION_SET_GRAB_LOC")
                             .setPackage("com.realtech.xiaocan")
-                            .putExtra("lat", lat)
-                            .putExtra("lng", lon)
+                            .putExtra("lat", la)
+                            .putExtra("lng", lo)
                             .putExtra("address", addr));
                     android.widget.Toast.makeText(this,
-                            "已下发选定位置：小蚕下次定位请求即使用该坐标",
+                            "已下发选定位置：小蚕定位请求将使用该坐标",
                             android.widget.Toast.LENGTH_LONG).show();
                     LogStore.append(this, "I", "Loc",
-                            "设置抢单位置 " + lat + "," + lon + " " + addr);
+                            "设置抢单位置 " + la + "," + lo + " " + addr);
                 })
                 .setNegativeButton("取消", null)
                 .create();
         dlg.show();
     }
+                }
+            } catch (Throwable t) {
+                android.widget.Toast.makeText(this, "读取失败",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
 
+        box.addView(searchRow, srlp);
     private void setCacheCleanupMode(String mode) {
