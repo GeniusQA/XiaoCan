@@ -231,9 +231,24 @@ public class NotifySettingsActivity extends Activity {
         sectionTitle("通知事件");
         LinearLayout card = createCard();
         String events = cfg.optString("events", "daily");
-        addEventRow(card, Notifier.EV_DAILY, "一键日常结果", "每天任务执行完成后推送汇总", events);
-        addEventRow(card, Notifier.EV_SPIKE, "元宝秒杀提醒", "秒杀商品有货 / 兑换成功时推送", events);
-        addEventRow(card, Notifier.EV_ERROR, "异常告警", "凭证缺失、任务失败等异常推送", events);
+        // 老配置迁移：旧版仅有 daily 单值，升级为多事件订阅（执行监控保持默认关）
+        if (events.trim().isEmpty() || events.equals("daily")) {
+            events = "daily,spike,security,asset";
+            try {
+                cfg.put("events", events);
+            } catch (Throwable ignored) {}
+            saveConfig();
+        }
+        addEventRow(card, Notifier.EV_DAILY, "一键日常执行结果",
+                "一键日常全流程执行完成后，发送逐步结果汇总", events);
+        addEventRow(card, Notifier.EV_SPIKE, "秒杀抢券与限时放量通知",
+                "元宝秒杀有货提醒、免单券 / SVIP 返利券 / 大牌放量券 / 影音周卡抢券结果均即时全通道提醒", events);
+        addEventRow(card, Notifier.EV_SECURITY, "账号凭据与安全风控预警",
+                "检测到 401 凭据失效、Token 临期、登录过期或被风控拦截时，第一时间紧急告警", events);
+        addEventRow(card, Notifier.EV_ASSET, "特权卡券与红包到期提醒",
+                "账户内持有的卡券或红包即将到期时自动推送预警，防止权益过期作废", events);
+        addEventRow(card, Notifier.EV_ERROR, "任务失败与异常中断通知",
+                "任务执行失败、接口异常或抢券名额已空时通知（默认关闭，开启后可能产生较多消息）", events);
         content.addView(card);
     }
 
