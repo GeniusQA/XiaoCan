@@ -803,6 +803,7 @@ public class MainActivity extends Activity {
                         pre.add(Long.parseLong(s.trim()));
                     } catch (Throwable ignored) {}
                 }
+                String[] nameOnly = new String[arr.length()];
                 for (int idx = 0; idx < arr.length(); idx++) {
                     org.json.JSONObject o = arr.getJSONObject(idx);
                     ids[idx] = o.optLong("id");
@@ -810,6 +811,7 @@ public class MainActivity extends Activity {
                             + "] " + o.optString("name", "商品")
                             + "（" + o.optLong("price") + " 元宝 · 剩 "
                             + o.optInt("left", 0) + "）";
+                    nameOnly[idx] = o.optString("name", "商品");
                     state[idx] = pre.contains(ids[idx]);
                 }
                 final android.widget.ListView listView = new android.widget.ListView(this);
@@ -872,7 +874,7 @@ public class MainActivity extends Activity {
                                     nameSb.append("、");
                                 }
                                 idSb.append(ids[idx]);
-                                nameSb.append(names[idx]);
+                                nameSb.append(nameOnly[idx]);
                             }
                             setStringPref(PurifyPrefs.FLASH_SALE_GOODS, idSb.toString());
                             setStringPref(PurifyPrefs.FLASH_SALE_GOODS_NAMES, nameSb.toString());
