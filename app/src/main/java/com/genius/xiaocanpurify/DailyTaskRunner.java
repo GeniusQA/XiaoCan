@@ -214,11 +214,14 @@ public final class DailyTaskRunner {
             JSONObject res = s.call();
             String msg = res.optString("msg", "");
             int code = res.optInt("code", -1);
+            // 信息性通知码（今日已完成/重复提交等）视为成功
+            boolean notice = code == 3 || code == 25 || (code >= 40002 && code <= 40040);
+            boolean ok = code == 0 || notice;
             MainHook.log("DailyTask: " + name + " -> code=" + code
                     + (msg.isEmpty() ? "" : " msg=" + msg));
-            detail.append(name).append(": ").append(code == 0 ? "成功" : "code=" + code)
+            detail.append(name).append(": ").append(ok ? "成功" : "code=" + code)
                     .append(msg.isEmpty() ? "" : " " + msg).append('\n');
-            return code == 0 ? 1 : 0;
+            return ok ? 1 : 0;
         } catch (Throwable t) {
             MainHook.log("DailyTask: " + name + " failed " + t);
             detail.append(name).append(": 失败 ").append(t.getMessage()).append('\n');

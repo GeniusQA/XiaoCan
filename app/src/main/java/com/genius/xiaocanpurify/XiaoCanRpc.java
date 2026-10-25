@@ -231,11 +231,19 @@ public final class XiaoCanRpc {
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
                 Object client = capturedClient;
-                if (client != null) {
-                    return executeWithOkHttp(client, GW, payload, headers);
-                }
-                return executeWithUrlConnection(GW, payload, headers);
-            } catch (java.io.IOException | IllegalStateException e) {
+                JSONObject res = (client != null)
+                        ? executeWithOkHttp(client, GW, payload, headers)
+                        : executeWithUrlConnection(GW, payload, headers);
+                return normalize(ctx, serverName, methodName, res);
+            } catch (IllegalStateException e) {
+                // WAF 拦截不重试（避免延长封锁计时）
+                if (String.valueOf(e.getMessage()).contains("WAF")) throw e;
+                last = e;
+                log("RPC: attempt" + (attempt + 1) + " failed " + e);
+                try {
+                    Thread.sleep(900);
+                } catch (Throwable ignored) {}
+            } catch (java.io.IOException e) {
                 last = e;
                 log("RPC: attempt" + (attempt + 1) + " failed " + e);
                 try {
@@ -244,6 +252,67 @@ public final class XiaoCanRpc {
             }
         }
         throw last != null ? last : new IllegalStateException("invoke failed");
+    }
+
+    /**
+     * 响应判定归一化（对齐 xiaocan-assistant 的 invoke_rpc 逻辑）：
+     *  1. 顶层 "error" = Go micro 网关错误（可能是 JSON 字符串，取 code/detail）；
+     *  2. "status" 为对象时取 status.code/status.msg；
+     *  3. 否则取顶层 code（非整数视为 500）；
+     *  4. 无任何状态字段的未知形态：code=500 并记录响应体前缀，便于排查。
+     * 信息性通知码（3/25/40002-40040，如「今日已完成」）视为成功。
+     */
+    private static JSONObject normalize(Context ctx, String serverName, String methodName,
+                                        JSONObject res) {
+        try {
+            String prefix = "（响应体超长，见模块日志诊断）";
+            if (res.has("error")) {
+                int ec = 500;
+                String em = String.valueOf(res.opt("error"));
+                try {
+                    if (em.startsWith("{")) {
+                        JSONObject pe = new JSONObject(em);
+                        ec = pe.optInt("code", 500);
+                        em = pe.has("detail") ? pe.optString("detail")
+                                : pe.optString("status", em);
+                    }
+                } catch (Throwable ignored) {}
+                log("RPC: " + methodName + " gateway error code=" + ec + " msg=" + em);
+                res.put("code", ec);
+                res.put("msg", em);
+                return res;
+            }
+            JSONObject status = res.optJSONObject("status");
+            int effCode;
+            String effMsg;
+            if (status != null) {
+                effCode = status.optInt("code", 0);
+                effMsg = status.optString("msg", "ok");
+            } else if (res.has("code") && (res.get("code") instanceof Integer)) {
+                effCode = res.getInt("code");
+                effMsg = res.optString("msg", res.optString("detail",
+                        res.optString("status", "RPC Error")));
+            } else {
+                effCode = 500;
+                effMsg = "未知响应形态";
+            }
+            if (effCode != 0) {
+                boolean notice = effCode == 3 || effCode == 25
+                        || (effCode >= 40002 && effCode <= 40040);
+                log("RPC: " + methodName + (notice ? " notice" : " rejected")
+                        + " code=" + effCode + " msg=" + effMsg);
+            }
+            res.put("code", effCode);
+            res.put("msg", effMsg);
+            return res;
+        } catch (Throwable t) {
+            log("RPC: normalize failed " + t);
+            try {
+                res.put("code", 500);
+                res.put("msg", "normalize failed");
+            } catch (Throwable ignored) {}
+            return res;
+        }
     }
 
     /** 优先路径：复用宿主 OkHttpClient（HTTPDNS 解析，规避系统 DNS 失败）。 */
@@ -293,9 +362,9 @@ public final class XiaoCanRpc {
             }
             if (code == 403) throw new IllegalStateException("WAF 拦截(403)，暂停调用");
             JSONObject res = new JSONObject(text);
-            int bizCode = res.optInt("code", -1);
-            if (bizCode != 0) {
-                log("RPC: code=" + bizCode + " msg=" + res.optString("msg", ""));
+            if (!res.has("code") && !res.has("status") && !res.has("error")) {
+                log("RPC: unknown shape body=" + (text.length() > 300
+                        ? text.substring(0, 300) : text));
             }
             return res;
         } finally {
@@ -337,7 +406,12 @@ public final class XiaoCanRpc {
             if (text == null || text.trim().isEmpty()) {
                 throw new IllegalStateException("空响应 (HTTP " + code + ")");
             }
-            return new JSONObject(text);
+            JSONObject res = new JSONObject(text);
+            if (!res.has("code") && !res.has("status") && !res.has("error")) {
+                log("RPC: unknown shape body=" + (text.length() > 300
+                        ? text.substring(0, 300) : text));
+            }
+            return res;
         } finally {
             if (conn != null) conn.disconnect();
         }
