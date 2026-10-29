@@ -694,6 +694,8 @@ public final class XiaoCanRpc {
         b.put("silk_id", parseLong(silkId));
         b.put("new_level", 5);
         b.put("is_plus", isPlus);
+        // 城市参数：去掉 x-City 请求头后接口返回 code=2 参数错误，改为 body 传
+        b.put("city_code", parseLong(cityCode(ctx)));
         return invoke(ctx, "SilkwormCommunity",
                 "SilkwormMobileCommunityService.ListFlashSaleExchanges", b);
     }
