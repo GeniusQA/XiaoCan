@@ -1,0 +1,5 @@
+# 强制 shell 脚本以 LF 换行，避免 Windows 提交 CRLF 导致 GitHub Actions bash 解析失败
+.github/scripts/** text eol=lf
+*.sh text eol=lf
+.github/workflows/** text eol=lf
+*.yml text eol=lf

@@ -1,0 +1,20 @@
+.gradle/
+build/
+app/build/
+*.iml
+.idea/
+local.properties
+work/
+xiaocan.apk
+
+# 本地签名密钥
+signing/
+sign/
+*.jks
+*.keystore
+
+# 本地构建/推送脚本与逆向分析产物
+install-beta.ps1
+build_install.ps1
+push_files.ps1
+reverse/

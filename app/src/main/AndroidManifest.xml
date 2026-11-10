@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 地图源反查 / 地址搜索所需网络访问 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 「获取本机定位」读取实时 GPS/网络定位所需 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- 包可见性：模块设置页需要拉起宿主小蚕 -->
+    <queries>
+        <package android:name="com.realtech.xiaocan" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.XiaoCanPurify">
+
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="去除小蚕霸王餐的所有广告、弹窗，精简底部导航栏（仅保留首页、订单、我）" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="102" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
+
+        <!-- 查看日志页：仅模块内部跳转，不对外暴露 -->
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
+
+        <!-- 抢单位置设置页：仅模块内部跳转，不对外暴露 -->
+        <activity
+            android:name=".GrabLocActivity"
+            android:exported="false" />
+
+        <!-- 缓存位置推送入口：目标 App 通过显式广播写入本模块（绕过包可见性，模块无需 root） -->
+        <receiver
+            android:name=".CacheReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.genius.xiaocanpurify.ACTION_LOC_CACHE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 承载桌面图标的入口：隐藏图标时禁用该 alias 即可，设置页仍可通过 LSPosed 模块列表打开 -->
+        <activity-alias
+            android:name=".MainActivityAlias"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+    </application>
+
+</manifest>
