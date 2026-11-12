@@ -445,19 +445,53 @@ public final class HomePagePurifier {
     private static void collapseHeader(View root) {
         if (root == null) return;
         if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
-        // 只折叠 fl_banner 内的活动大图，保留容器本身——3.21.5 把地址栏入口
-        // 放进了 fl_banner 容器，GONE 容器会连带隐藏地址栏。保留容器 + 清背景 +
-        // 折叠图片子视图后高度自然塌陷，地址栏与搜索框都在。
+        // 顶部活动 Banner 容器（fl_banner）。只折叠直接 ImageView 不够——
+        // 该 Banner 实际是「卡片容器(ViewPager/FrameLayout)嵌套图片」结构，
+        // 非 fl_banner 的直接 ImageView 子视图，所以漏折叠。改为递归折叠容器
+        // 内所有子视图并把高度归零。地址栏(layout_address)/搜索框(searchView)
+        // 位于 toolBar（与 fl_banner 不同容器），若意外出现在 fl_banner 内则按
+        // id 排除保留。首次打印子树便于真机确认结构。
         View banner = findViewByName(root, "fl_banner");
-        if (banner != null) {
-            banner.setBackground(null);
-            if (banner instanceof ViewGroup) {
-                ViewGroup g = (ViewGroup) banner;
-                for (int j = 0; j < g.getChildCount(); j++) {
-                    View child = g.getChildAt(j);
-                    if (child instanceof android.widget.ImageView) collapseView(child);
-                }
-            }
+        if (banner == null) return;
+        banner.setBackground(null);
+        if (!bannerTreeLogged) {
+            bannerTreeLogged = true;
+            logBannerTree(banner, 0);
+        }
+        collapseBannerContent(banner);
+        android.view.ViewGroup.LayoutParams lp = banner.getLayoutParams();
+        if (lp != null && lp.height != 0) {
+            lp.height = 0;
+            banner.setLayoutParams(lp);
+        }
+        banner.requestLayout();
+    }
+
+    private static volatile boolean bannerTreeLogged;
+
+    /** 递归折叠 Banner 容器内所有子视图，保留地址栏/搜索框。 */
+    private static void collapseBannerContent(View v) {
+        if (!(v instanceof ViewGroup)) return;
+        ViewGroup g = (ViewGroup) v;
+        for (int i = 0; i < g.getChildCount(); i++) {
+            View c = g.getChildAt(i);
+            String id = getViewIdName(c);
+            if ("layout_address".equals(id) || "searchView".equals(id)
+                    || "ll_collapse_title_bar".equals(id)) continue;
+            collapseView(c);
+            collapseBannerContent(c);
+        }
+    }
+
+    /** 诊断：打印 Banner 子树（id/类型/可见性/尺寸），定位真实 Banner 容器。 */
+    private static void logBannerTree(View v, int depth) {
+        if (v == null || depth > 6) return;
+        MainHook.log("BannerTree " + depth + " id=" + getViewIdName(v)
+                + " cls=" + v.getClass().getSimpleName()
+                + " vis=" + v.getVisibility() + " " + v.getWidth() + "x" + v.getHeight());
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) logBannerTree(g.getChildAt(i), depth + 1);
         }
     }
 
