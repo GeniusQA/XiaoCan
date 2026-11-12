@@ -911,6 +911,18 @@ public final class HomePagePurifier {
         if (root instanceof ViewGroup) {
             cleanHomeTree((ViewGroup) root);
             collapseMerchantCouponTabs((ViewGroup) root);
+            // 顶部红包 Banner / 活动背景：隐藏首页 feed 顶部活动卡片 (promotions_view)。
+            // 原 hookTopBanner 依赖的 HomeFragmentBannerExtKt 在当前版本已不存在，
+            // 无法折叠 binding 内 banner 字段；该活动卡片实际是 HomePromotionAdapter
+            // 的首项（id=promotions_view），GONE 后地址栏/搜索框自然露出，且只去掉
+            // rv 内这一项，不会像 GONE 整个 header 那样裁切首 item 名称。
+            if (PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
+                View pv = findViewByName(root, "promotions_view");
+                if (pv != null) {
+                    pv.setBackground(null);
+                    collapseView(pv);
+                }
+            }
         }
     }
 
