@@ -784,30 +784,35 @@ public final class NetworkAdInterceptor {
          */
         private static boolean filterHomeTabs(org.json.JSONObject resource) {
             if (!PurifyPrefs.hide(PurifyPrefs.PLACEMENT_HIDE_ACTIVITY_TAB)) return false;
-            org.json.JSONArray vals = resource.optJSONArray("value");
-            if (vals == null || vals.length() == 0) return false;
-            org.json.JSONArray kept = new org.json.JSONArray();
-            boolean changed = false;
-            for (int j = 0; j < vals.length(); j++) {
-                org.json.JSONObject v = vals.optJSONObject(j);
-                if (v == null) { kept.put(new org.json.JSONObject()); continue; }
-                int tabType = 1;
-                String name = "";
-                try {
-                    org.json.JSONObject c = new org.json.JSONObject(v.optString("content", "{}"));
-                    tabType = c.optInt("tab_type", 1);
-                    name = c.optString("tab_name", "");
-                } catch (Throwable ignored) {}
-                if (tabType != 1) {
-                    changed = true;
-                    MainHook.log("PlacementFilter hid activity tab: " + name
-                            + " (tab_type=" + tabType + ")");
-                } else {
-                    kept.put(v);
+            try {
+                org.json.JSONArray vals = resource.optJSONArray("value");
+                if (vals == null || vals.length() == 0) return false;
+                org.json.JSONArray kept = new org.json.JSONArray();
+                boolean changed = false;
+                for (int j = 0; j < vals.length(); j++) {
+                    org.json.JSONObject v = vals.optJSONObject(j);
+                    if (v == null) { kept.put(new org.json.JSONObject()); continue; }
+                    int tabType = 1;
+                    String name = "";
+                    try {
+                        org.json.JSONObject c = new org.json.JSONObject(v.optString("content", "{}"));
+                        tabType = c.optInt("tab_type", 1);
+                        name = c.optString("tab_name", "");
+                    } catch (Throwable ignored) {}
+                    if (tabType != 1) {
+                        changed = true;
+                        MainHook.log("PlacementFilter hid activity tab: " + name
+                                + " (tab_type=" + tabType + ")");
+                    } else {
+                        kept.put(v);
+                    }
                 }
+                if (changed) resource.put("value", kept);
+                return changed;
+            } catch (Throwable t) {
+                MainHook.log("filterHomeTabs failed: " + t);
+                return false;
             }
-            if (changed) resource.put("value", kept);
-            return changed;
         }
 
         /**
