@@ -444,10 +444,21 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        collapseView(root);
-        ViewGroup.LayoutParams lp = root.getLayoutParams();
-        if (lp != null && lp.height != 0) { lp.height = 0; root.setLayoutParams(lp); }
-        if (root.getMinimumHeight() != 0) root.setMinimumHeight(0);
+        // 不再 GONE 整个 header root、也不再把 height/minimumHeight 置 0。
+        // 实测：header 高度归零会让 RecyclerView 首 item 顶到吸顶筛选栏下，
+        // 第一个商家卡片的名称行被裁（关闭 HOME_TOP_BANNER 开关后即恢复完整）。
+        // 改为只精细折叠 fl_banner 内的活动大图并清背景，容器本身保留，
+        // 内容为空后高度自然塌陷，地址栏与首 item 布局都不受影响。
+        View banner = findViewByName(root, "fl_banner");
+        if (banner == null) return;
+        banner.setBackground(null);
+        if (banner instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) banner;
+            for (int j = 0; j < g.getChildCount(); j++) {
+                View child = g.getChildAt(j);
+                if (child instanceof android.widget.ImageView) collapseView(child);
+            }
+        }
     }
 
     /** 搜索框 leftMargin 修正次数（防止宿主重排导致的无限重布局）。 */
