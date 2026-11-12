@@ -444,21 +444,13 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        // 不再 GONE 整个 header root、也不再把 height/minimumHeight 置 0。
-        // 实测：header 高度归零会让 RecyclerView 首 item 顶到吸顶筛选栏下，
-        // 第一个商家卡片的名称行被裁（关闭 HOME_TOP_BANNER 开关后即恢复完整）。
-        // 改为只精细折叠 fl_banner 内的活动大图并清背景，容器本身保留，
-        // 内容为空后高度自然塌陷，地址栏与首 item 布局都不受影响。
-        View banner = findViewByName(root, "fl_banner");
-        if (banner == null) return;
-        banner.setBackground(null);
-        if (banner instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) banner;
-            for (int j = 0; j < g.getChildCount(); j++) {
-                View child = g.getChildAt(j);
-                if (child instanceof android.widget.ImageView) collapseView(child);
-            }
-        }
+        // 回滚到「GONE 整个 header」方案（用户确认接受首 item 名称被裁的代价）：
+        // 直接隐藏 HomeHeadAdapter 的根布局，顶部活动卡片 (promotions_view) 随之消失；
+        // 地址栏/搜索框位于独立 toolBar（不在 header 内）因此仍可见。
+        // 受 HOME_TOP_BANNER 开关控制。
+        if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
+        root.setBackground(null);
+        collapseView(root);
     }
 
     /** 搜索框 leftMargin 修正次数（防止宿主重排导致的无限重布局）。 */
@@ -911,18 +903,6 @@ public final class HomePagePurifier {
         if (root instanceof ViewGroup) {
             cleanHomeTree((ViewGroup) root);
             collapseMerchantCouponTabs((ViewGroup) root);
-            // 顶部红包 Banner / 活动背景：隐藏首页 feed 顶部活动卡片 (promotions_view)。
-            // 原 hookTopBanner 依赖的 HomeFragmentBannerExtKt 在当前版本已不存在，
-            // 无法折叠 binding 内 banner 字段；该活动卡片实际是 HomePromotionAdapter
-            // 的首项（id=promotions_view），GONE 后地址栏/搜索框自然露出，且只去掉
-            // rv 内这一项，不会像 GONE 整个 header 那样裁切首 item 名称。
-            if (PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
-                View pv = findViewByName(root, "promotions_view");
-                if (pv != null) {
-                    pv.setBackground(null);
-                    collapseView(pv);
-                }
-            }
         }
     }
 
