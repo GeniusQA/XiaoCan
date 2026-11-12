@@ -354,6 +354,58 @@ public final class NetworkAdInterceptor {
         }
     }
 
+    /**
+     * 搜索请求注入 rebate_type=1（仅实付满返）。
+     * 搜索与首页 feed 共用 getfeedpromotions，唯一区分是搜索请求体带 "keyword"。
+     * 仅当请求体含 keyword 且未带 rebate_type 时注入；首页 feed（无 keyword）与
+     * 用户已选的筛选参数都不受影响。
+     *
+     * @return 注入后的 Request；不需要或失败返回 null（走原始请求）
+     */
+    private static Object injectSearchRebateType(ClassLoader classLoader, Object request) {
+        try {
+            Object reqBody = request.getClass().getMethod("body").invoke(request);
+            if (reqBody == null) return null;
+            Class<?> bufferClass = classLoader.loadClass("okio.Buffer");
+            Object buf = bufferClass.getDeclaredConstructor().newInstance();
+            reqBody.getClass().getMethod("writeTo", classLoader.loadClass("okio.BufferedSink"))
+                    .invoke(reqBody, buf);
+            String body = (String) buf.getClass().getMethod("readUtf8").invoke(buf);
+            if (body == null || body.isEmpty() || body.length() > 200000) return null;
+            if (!body.contains("\"keyword\"")) return null;     // 非搜索请求，跳过
+            if (body.contains("\"rebate_type\"")) return null;  // 已带筛选参数，尊重
+            int brace = body.indexOf('{');
+            if (brace < 0) return null;
+            String injected = body.substring(0, brace + 1)
+                    + "\"rebate_type\":1,"
+                    + body.substring(brace + 1);
+
+            Class<?> requestBodyClass = classLoader.loadClass("okhttp3.RequestBody");
+            Class<?> mediaTypeClass = classLoader.loadClass("okhttp3.MediaType");
+            Object mediaType = reqBody.getClass().getMethod("contentType").invoke(reqBody);
+            Object newBody;
+            try {
+                // OkHttp 4.x：create(MediaType, String, Charset)
+                newBody = requestBodyClass.getMethod("create", mediaTypeClass,
+                        String.class, java.nio.charset.Charset.class)
+                        .invoke(null, mediaType, injected,
+                                java.nio.charset.StandardCharsets.UTF_8);
+            } catch (NoSuchMethodException e) {
+                // OkHttp 3.x：create(MediaType, String)
+                newBody = requestBodyClass.getMethod("create", mediaTypeClass,
+                        String.class).invoke(null, mediaType, injected);
+            }
+            String method = (String) request.getClass().getMethod("method").invoke(request);
+            Object builder = request.getClass().getMethod("newBuilder").invoke(request);
+            builder.getClass().getMethod("method", String.class, requestBodyClass)
+                    .invoke(builder, method, newBody);
+            return builder.getClass().getMethod("build").invoke(builder);
+        } catch (Throwable t) {
+            MainHook.log("search rebate inject failed: " + t);
+            return null;
+        }
+    }
+
     /** URL 查询参数坐标改写兜底：GET 请求的 lat/lng 在 query string 里时 body 改写会漏掉。 */
     private static Object rewriteRequestUrl(ClassLoader classLoader, Object request) {
         try {
@@ -543,10 +595,23 @@ public final class NetworkAdInterceptor {
                     }
                 }
 
+                // 搜索请求注入 rebate_type=1（仅实付满返）：搜索与首页 feed 共用
+                // getfeedpromotions，唯一区分是搜索请求体带 keyword。只改搜索请求，
+                // 首页 feed（无 keyword）完全不动，零客户端删除、零误删。
+                Object effectiveRequest = request;
+                if (methodName != null
+                        && methodName.toLowerCase(Locale.ROOT).contains("getfeedpromotions")) {
+                    Object injected = injectSearchRebateType(classLoader, request);
+                    if (injected != null) {
+                        effectiveRequest = injected;
+                        MainHook.log("REQ search rebate_type=1 injected");
+                    }
+                }
+
                 // 定位缓存：逆地理/附近查询请求的坐标改写为缓存坐标，
                 // 使 GPS 关闭时 App 的地址与附近结果表现为缓存位置
                 try {
-                    Object newRequest = rewriteRequestCoords(classLoader, request);
+                    Object newRequest = rewriteRequestCoords(classLoader, effectiveRequest);
                     if (newRequest != null) {
                         MainHook.log("REQ coords rewritten to cache");
                         Method proceedRewritten = chain.getClass().getMethod("proceed", newRequest.getClass());
@@ -556,8 +621,8 @@ public final class NetworkAdInterceptor {
                 } catch (Throwable ignored) {
                 }
 
-                Method proceedMethod = chain.getClass().getMethod("proceed", request.getClass());
-                Object response = proceedMethod.invoke(chain, request);
+                Method proceedMethod = chain.getClass().getMethod("proceed", effectiveRequest.getClass());
+                Object response = proceedMethod.invoke(chain, effectiveRequest);
                 return filterPopupPayload(request, urlStr, response);
             }
         }
