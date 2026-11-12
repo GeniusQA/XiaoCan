@@ -612,19 +612,29 @@ public final class NetworkAdInterceptor {
                                 + " rid=" + r.optInt("resource_id", -1)
                                 + " slug=" + r.optString("resource_slug", "")
                                 + " vals=" + (vals == null ? 0 : vals.length()));
+                        String slug = r.optString("resource_slug", "");
+                        // MESSAGE_PLACE 是插在首页列表里的 Banner 集合，
+                        // 逐条全量打印（含 information_location），确认
+                        // 「元气早餐/饱餐一顿」时段卡片是否也在其中。
+                        boolean detail = slug.contains("MESSAGE_PLACE");
                         if (vals != null) {
-                            for (int j = 0; j < vals.length() && j < 3; j++) {
+                            for (int j = 0; j < vals.length(); j++) {
                                 org.json.JSONObject v = vals.optJSONObject(j);
                                 if (v == null) continue;
                                 String c = v.optString("content", "");
-                                sb.append(" | ").append(c, 0, Math.min(c.length(), 220));
+                                if (detail) {
+                                    MainHook.log("PromoBanner " + slug + " #" + j + " "
+                                            + c.substring(0, Math.min(c.length(), 700)));
+                                } else if (j < 3) {
+                                    sb.append(" | ").append(c, 0, Math.min(c.length(), 220));
+                                }
                             }
                         }
                         MainHook.log("PromoBanner " + sb);
                     }
                 } else {
                     MainHook.log("PromoBanner head="
-                            + body.substring(0, Math.min(body.length(), 1500)));
+                            + body.substring(0, Math.min(body.length(), 3000)));
                 }
             } catch (Throwable t) {
                 MainHook.log("PromoBanner parse failed: " + t);
@@ -677,8 +687,10 @@ public final class NetworkAdInterceptor {
                     if (!mn.isEmpty() && dumpedRpcNames.add(mn)) {
                         MainHook.log("RPC[list] mn=" + mn + " len=" + body.length());
                     }
-                    // banner/情报/促销类响应：按方法名+内容指纹去重，避免节流漏掉不同请求
-                    if ((mn.contains("placement") || mn.contains("promotion") || mn.contains("banner"))
+                    // banner/情报/促销/餐段分类响应：按方法名+内容指纹去重
+                    if ((mn.contains("placement") || mn.contains("promotion")
+                            || mn.contains("banner") || mn.contains("mealperiod")
+                            || mn.contains("quickfilter") || mn.contains("getfeedpromotions"))
                             && dumpedPromoBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) {
                         dumpPromoBannerStructure(mn, body);
                     }
