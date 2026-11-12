@@ -44,8 +44,7 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.HOME_FAB, "浮动红包 / 新手引导", "红包雨浮动球、新手引导浮标、订单 Banner 浮标"},
                     {PurifyPrefs.HOME_BOTTOM_PLACEMENT, "底部悬浮红包", "「¥18 领红包」等底部悬浮推广位"},
                     {PurifyPrefs.HOME_SECOND_FLOOR, "下拉二楼", "关闭首页下拉进入的第二层活动页，保留普通下拉刷新"},
-                    {PurifyPrefs.PLACEMENT_FILTER, "响应层屏蔽首页广告 Banner", "接口返回层面清空插入式广告图（外卖红包/省钱攻略/福利群等），保留元气早餐与正常商品"},
-                    {PurifyPrefs.PLACEMENT_HIDE_ACTIVITY_TAB, "隐藏「闪购叠红包」等活动 tab", "按 tab_type 剔除服务端动态下发的活动外跳 tab，保留「爆品好价」等原生 tab"},
+                    {PurifyPrefs.PLACEMENT_FILTER, "响应层屏蔽首页广告 Banner", "接口返回层面清空插入式广告图（外卖红包/省钱攻略等），保留元气早餐与正常商品"},
                     {PurifyPrefs.PLACEMENT_AUTO_BLOCK, "自动识别新增广告位", "按结构特征自动屏蔽新出现的插入式广告图；可能误判，默认关闭"},
             }},
             {"「我」页面", new String[][]{
@@ -74,8 +73,6 @@ public class MainActivity extends Activity {
             }},
             {"搜索页", new String[][]{
                     {PurifyPrefs.HIDE_SEARCH_INTEL, "「小蚕情报」板块", "搜索页历史搜索下方的商户情报榜单（标题与 5 条商户推荐整块隐藏）"},
-                    {PurifyPrefs.INTEL_RESPONSE_FILTER, "响应层清空情报列表（实验）", "直接把 GetStorePromotionList 返回的 promotion_list 置空；默认关，确认该接口未被其他页面共用后再开启"},
-                    {PurifyPrefs.SEARCH_ONLY_FULL_REBATE, "仅展示「实付满返」商家", "搜索结果只保留 rebate_condition==99 的实付满返商家，过滤比例返等其它返利形式；默认关"},
             }},
             {"详情页 / 订单页", new String[][]{
                     {PurifyPrefs.DETAIL_SHARE, "「分享赚豆」浮动入口", "详情页右下角分享赚豆浮标"},
@@ -1052,9 +1049,7 @@ public class MainActivity extends Activity {
     private boolean getHide(String key) {
         // 隐藏桌面图标、自动识别新增广告位默认关闭（false），其余净化开关默认开启（true）
         boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
-                || PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key)
-                || PurifyPrefs.INTEL_RESPONSE_FILTER.equals(key)
-                || PurifyPrefs.SEARCH_ONLY_FULL_REBATE.equals(key) ? false : true;
+                || PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key) ? false : true;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
@@ -1139,9 +1134,7 @@ public class MainActivity extends Activity {
     /** 开关默认值（与 getHide 一致：桌面图标、自动识别默认关闭，其余默认开启）。 */
     private boolean defaultHide(String key) {
         return !PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
-                && !PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key)
-                && !PurifyPrefs.INTEL_RESPONSE_FILTER.equals(key)
-                && !PurifyPrefs.SEARCH_ONLY_FULL_REBATE.equals(key);
+                && !PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key);
     }
 
     /**

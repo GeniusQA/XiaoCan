@@ -21,11 +21,7 @@ public final class NetworkAdInterceptor {
                     java.util.Arrays.asList(
                             "MESSAGE_PLACE", "MESSAGE_PLACE_NEW", "XC_JG",
                             "HOME_BOTTOM", "AGG_HOME_BOTTOM", "DOUYIN_BANNER",
-                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW",
-                            // 首页列表内插入的运营卡/群卡/活动跳转（实测 content）
-                            "BARGAIN_HOME_SEEDS", "HOME_KJBANNER_TO_MINI",
-                            "MAIN_TO_TANDIAN_MINI", "BESTSELLERS_TAG",
-                            "CERAMIC_NEW", "UP_FRIST_PAGE_GIF")));
+                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW")));
 
     /**
      * 保护名单：正常商品/分类/时段导航资源位，即使开启特征识别也不删。
@@ -39,8 +35,8 @@ public final class NetworkAdInterceptor {
                             "HOMEPAGE_CATEGORY_FLITER", "HOME_TAB", "SECOND_TAB",
                             "HOMEPAGE_BIGBRAND_INSERT_POSITION",
                             "HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
-                            "VIP_BRAND_ROLL_DATA", "EVENT_TAG",
-                            "INSTORE_SWITCH", "TD_TAB_SORT")));
+                            "VIP_BRAND_ROLL_DATA", "BESTSELLERS_TAG", "EVENT_TAG",
+                            "INSTORE_SWITCH", "TD_TAB_SORT", "BARGAIN_HOME_SEEDS")));
 
     /** 已上报过的资源位，避免每次响应都写偏好。 */
     private static final java.util.Set<String> REPORTED_SLUGS =
@@ -354,58 +350,6 @@ public final class NetworkAdInterceptor {
         }
     }
 
-    /**
-     * 搜索请求注入 rebate_type=1（仅实付满返）。
-     * 搜索与首页 feed 共用 getfeedpromotions，唯一区分是搜索请求体带 "keyword"。
-     * 仅当请求体含 keyword 且未带 rebate_type 时注入；首页 feed（无 keyword）与
-     * 用户已选的筛选参数都不受影响。
-     *
-     * @return 注入后的 Request；不需要或失败返回 null（走原始请求）
-     */
-    private static Object injectSearchRebateType(ClassLoader classLoader, Object request) {
-        try {
-            Object reqBody = request.getClass().getMethod("body").invoke(request);
-            if (reqBody == null) return null;
-            Class<?> bufferClass = classLoader.loadClass("okio.Buffer");
-            Object buf = bufferClass.getDeclaredConstructor().newInstance();
-            reqBody.getClass().getMethod("writeTo", classLoader.loadClass("okio.BufferedSink"))
-                    .invoke(reqBody, buf);
-            String body = (String) buf.getClass().getMethod("readUtf8").invoke(buf);
-            if (body == null || body.isEmpty() || body.length() > 200000) return null;
-            if (!body.contains("\"keyword\"")) return null;     // 非搜索请求，跳过
-            if (body.contains("\"rebate_type\"")) return null;  // 已带筛选参数，尊重
-            int brace = body.indexOf('{');
-            if (brace < 0) return null;
-            String injected = body.substring(0, brace + 1)
-                    + "\"rebate_type\":1,"
-                    + body.substring(brace + 1);
-
-            Class<?> requestBodyClass = classLoader.loadClass("okhttp3.RequestBody");
-            Class<?> mediaTypeClass = classLoader.loadClass("okhttp3.MediaType");
-            Object mediaType = reqBody.getClass().getMethod("contentType").invoke(reqBody);
-            Object newBody;
-            try {
-                // OkHttp 4.x：create(MediaType, String, Charset)
-                newBody = requestBodyClass.getMethod("create", mediaTypeClass,
-                        String.class, java.nio.charset.Charset.class)
-                        .invoke(null, mediaType, injected,
-                                java.nio.charset.StandardCharsets.UTF_8);
-            } catch (NoSuchMethodException e) {
-                // OkHttp 3.x：create(MediaType, String)
-                newBody = requestBodyClass.getMethod("create", mediaTypeClass,
-                        String.class).invoke(null, mediaType, injected);
-            }
-            String method = (String) request.getClass().getMethod("method").invoke(request);
-            Object builder = request.getClass().getMethod("newBuilder").invoke(request);
-            builder.getClass().getMethod("method", String.class, requestBodyClass)
-                    .invoke(builder, method, newBody);
-            return builder.getClass().getMethod("build").invoke(builder);
-        } catch (Throwable t) {
-            MainHook.log("search rebate inject failed: " + t);
-            return null;
-        }
-    }
-
     /** URL 查询参数坐标改写兜底：GET 请求的 lat/lng 在 query string 里时 body 改写会漏掉。 */
     private static Object rewriteRequestUrl(ClassLoader classLoader, Object request) {
         try {
@@ -595,23 +539,10 @@ public final class NetworkAdInterceptor {
                     }
                 }
 
-                // 搜索请求注入 rebate_type=1（仅实付满返）：搜索与首页 feed 共用
-                // getfeedpromotions，唯一区分是搜索请求体带 keyword。只改搜索请求，
-                // 首页 feed（无 keyword）完全不动，零客户端删除、零误删。
-                Object effectiveRequest = request;
-                if (methodName != null
-                        && methodName.toLowerCase(Locale.ROOT).contains("getfeedpromotions")) {
-                    Object injected = injectSearchRebateType(classLoader, request);
-                    if (injected != null) {
-                        effectiveRequest = injected;
-                        MainHook.log("REQ search rebate_type=1 injected");
-                    }
-                }
-
                 // 定位缓存：逆地理/附近查询请求的坐标改写为缓存坐标，
                 // 使 GPS 关闭时 App 的地址与附近结果表现为缓存位置
                 try {
-                    Object newRequest = rewriteRequestCoords(classLoader, effectiveRequest);
+                    Object newRequest = rewriteRequestCoords(classLoader, request);
                     if (newRequest != null) {
                         MainHook.log("REQ coords rewritten to cache");
                         Method proceedRewritten = chain.getClass().getMethod("proceed", newRequest.getClass());
@@ -621,8 +552,8 @@ public final class NetworkAdInterceptor {
                 } catch (Throwable ignored) {
                 }
 
-                Method proceedMethod = chain.getClass().getMethod("proceed", effectiveRequest.getClass());
-                Object response = proceedMethod.invoke(chain, effectiveRequest);
+                Method proceedMethod = chain.getClass().getMethod("proceed", request.getClass());
+                Object response = proceedMethod.invoke(chain, request);
                 return filterPopupPayload(request, urlStr, response);
             }
         }
@@ -749,9 +680,7 @@ public final class NetworkAdInterceptor {
          * 并在响应含「情报」字样时打印上下文，用于定位该板块来自哪个接口/字段。
          */
         private static void dumpIntelStructure(String mn, String body) {
-            // 搜索接口每次响应都打印（不去重），以便抓到含「比例返」批次的字段
-            boolean isSearch = mn.toLowerCase().contains("searchpromotions");
-            if (!isSearch && !dumpedIntelBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
+            if (!dumpedIntelBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 StringBuilder sb = new StringBuilder("Intel[" + mn + "] len=" + body.length()
@@ -776,28 +705,6 @@ public final class NetworkAdInterceptor {
                             Math.max(0, idx - 120), Math.min(body.length(), idx + 180)));
                 }
                 MainHook.log(sb.length() > 3000 ? sb.substring(0, 3000) : sb.toString());
-                // 搜索结果逐条打印返利字段值，用于确定「实付满返 vs 比例返」的真实区分字段
-                if (mn.toLowerCase().contains("searchpromotions")) {
-                    org.json.JSONArray pl = root.optJSONArray("promotions");
-                    if (pl != null) {
-                        for (int i = 0; i < pl.length(); i++) {
-                            org.json.JSONObject p = pl.optJSONObject(i);
-                            if (p == null) continue;
-                            org.json.JSONObject st = p.optJSONObject("store");
-                            String nm = st == null ? "?" : st.optString("name", "?");
-                            MainHook.log("SearchItem#" + i + " " + nm
-                                    + " cond=" + p.optInt("rebate_condition", -1)
-                                    + " condStr=" + p.optString("rebate_condition_str", "")
-                                    + " ptype=" + p.optInt("promotion_type", -1)
-                                    + " om=" + p.optInt("order_money", -1)
-                                    + " ur=" + p.optInt("user_rebate", -1)
-                                    + " pcond=" + p.optInt("promotion_condition", -1)
-                                    + " disc=" + p.optInt("discount_amount", -1)
-                                    + " left=" + p.optInt("left_number", -1)
-                                    + " src=" + p.optString("source", ""));
-                        }
-                    }
-                }
             } catch (Throwable t) {
                 MainHook.log("Intel parse failed: " + t);
             }
@@ -835,14 +742,6 @@ public final class NetworkAdInterceptor {
                     if (slug.isEmpty()) continue;
                     if (REPORTED_SLUGS.add(slug)) discovered.add(slug);
 
-                    // HOME_TAB 不能整组清空（会连「爆品好价」一起消失）：
-                    // 按 tab_type 精确剔除活动外跳 tab（tab_type!=1），保留原生 tab。
-                    // tab_name/web_url 由服务端动态下发，故不按文案判定。
-                    if ("HOME_TAB".equals(slug)) {
-                        if (filterHomeTabs(r)) changed = true;
-                        continue;
-                    }
-
                     boolean hit = blocked.contains(slug) && !PROTECTED_SLUGS.contains(slug);
                     if (!hit && auto && !PROTECTED_SLUGS.contains(slug)) {
                         hit = looksLikeInsertedBanner(r);
@@ -861,115 +760,6 @@ public final class NetworkAdInterceptor {
                 return replaceResponseBody(response, root.toString());
             } catch (Throwable t) {
                 MainHook.log("PlacementFilter failed: " + t);
-                return null;
-            }
-        }
-
-        /**
-         * 首页顶部导航 tab：剔除活动外跳 tab（tab_type != 1），保留 tab_type=1 的
-         * 原生商品 tab（如「爆品好价」）。value[].content 是内嵌 JSON 字符串。
-         *
-         * @return 是否有条目被移除
-         */
-        private static boolean filterHomeTabs(org.json.JSONObject resource) {
-            if (!PurifyPrefs.hide(PurifyPrefs.PLACEMENT_HIDE_ACTIVITY_TAB)) return false;
-            try {
-                org.json.JSONArray vals = resource.optJSONArray("value");
-                if (vals == null || vals.length() == 0) return false;
-                org.json.JSONArray kept = new org.json.JSONArray();
-                boolean changed = false;
-                for (int j = 0; j < vals.length(); j++) {
-                    org.json.JSONObject v = vals.optJSONObject(j);
-                    if (v == null) { kept.put(new org.json.JSONObject()); continue; }
-                    int tabType = 1;
-                    String name = "";
-                    try {
-                        org.json.JSONObject c = new org.json.JSONObject(v.optString("content", "{}"));
-                        tabType = c.optInt("tab_type", 1);
-                        name = c.optString("tab_name", "");
-                    } catch (Throwable ignored) {}
-                    if (tabType != 1) {
-                        changed = true;
-                        MainHook.log("PlacementFilter hid activity tab: " + name
-                                + " (tab_type=" + tabType + ")");
-                    } else {
-                        kept.put(v);
-                    }
-                }
-                if (changed) resource.put("value", kept);
-                return changed;
-            } catch (Throwable t) {
-                MainHook.log("filterHomeTabs failed: " + t);
-                return false;
-            }
-        }
-
-        /**
-         * 小蚕情报响应层过滤：只把 promotion_list 置空，保留 status 等外层结构，
-         * 宿主按「空列表」渲染时板块自然不展示。默认关闭（opt-in）。
-         */
-        private Object filterIntelResponse(Object response, String body) {
-            if (!PurifyPrefs.hideOptIn(PurifyPrefs.INTEL_RESPONSE_FILTER)) return null;
-            try {
-                org.json.JSONObject root = new org.json.JSONObject(body);
-                org.json.JSONArray list = root.optJSONArray("promotion_list");
-                if (list == null || list.length() == 0) return null;
-                root.put("promotion_list", new org.json.JSONArray());
-                MainHook.log("IntelFilter cleared promotion_list(" + list.length() + ")");
-                return replaceResponseBody(response, root.toString());
-            } catch (Throwable t) {
-                MainHook.log("IntelFilter failed: " + t);
-                return null;
-            }
-        }
-
-        /**
-         * 搜索结果响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
-         * 判定依据是接口真实返回的 order_money（实付门槛，单位分）：
-         *   - 实付满返：order_money > 0（如「满20返10.3」→ order_money=2000）
-         *   - 比例返：order_money <= 0（UI 显示「无实付要求」+「最高返X」，
-         *     如朴正喜/德克士），这类商家剔除。
-         * 注意：不能用 rebate_condition 判定（99 是「无需反馈」，不代表满返）。
-         * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
-         */
-        /**
-         * 搜索结果响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
-         * 判定依据：带返利属性的 item（含 promotion_id/rebate_condition/user_rebate）中，
-         *   - order_money > 0    → 实付满返（如「满20返10」），保留
-         *   - order_money 缺失/<=0（UI 显示「无实付要求·最高返」）→ 比例返，剔除
-         * 非返利 item（无返利属性）一律保留，避免误删。
-         * 仅在 searchpromotions（搜索）响应上生效；首页 feed 不过滤。
-         * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
-         */
-        private Object filterRebateResponse(Object response, String body) {
-            if (!PurifyPrefs.hideOptIn(PurifyPrefs.SEARCH_ONLY_FULL_REBATE)) return null;
-            try {
-                org.json.JSONObject root = new org.json.JSONObject(body);
-                org.json.JSONArray list = root.optJSONArray("promotions");
-                String arrKey = "promotions";
-                if (list == null) { list = root.optJSONArray("feed_items"); arrKey = "feed_items"; }
-                if (list == null || list.length() == 0) return null;
-                int removed = 0;
-                org.json.JSONArray kept = new org.json.JSONArray();
-                for (int i = 0; i < list.length(); i++) {
-                    org.json.JSONObject it = list.optJSONObject(i);
-                    if (it == null) continue;
-                    boolean hasRebate = it.has("promotion_id") || it.has("rebate_condition")
-                            || it.has("user_rebate");
-                    int om = it.optInt("order_money", -1);
-                    // 仅对带返利属性的 item：无实付门槛(order_money<=0)的比例返剔除，满返保留
-                    if (hasRebate && om <= 0) { removed++; continue; }
-                    kept.put(it);
-                }
-                if (removed == 0) return null;
-                root.put(arrKey, kept);
-                int total = root.optInt("total", -1);
-                if (total > 0) root.put("total", Math.max(0, total - removed));
-                MainHook.log("RebateFilter(" + arrKey + ") kept=" + kept.length()
-                        + " removed=" + removed);
-                return replaceResponseBody(response, root.toString());
-            } catch (Throwable t) {
-                MainHook.log("RebateFilter failed: " + t);
                 return null;
             }
         }
@@ -1098,18 +888,6 @@ public final class NetworkAdInterceptor {
                     // 首页 Banner 响应层过滤（诊断之后执行，保证日志能看到原始结构）
                     if (mn.contains("batchmatchplacement")) {
                         Object filtered = filterPlacementResponse(response, body);
-                        if (filtered != null) return filtered;
-                    }
-                    // 小蚕情报：实验性响应层清空（默认关，见开关说明）
-                    if (mn.contains("getstorepromotionlist")) {
-                        Object filtered = filterIntelResponse(response, body);
-                        if (filtered != null) return filtered;
-                    }
-                    // 仅搜索页：保留「实付满返」，剔除比例返（无实付要求）。
-                    // 注意：首页 feed(getfeedpromotions) 不在此过滤，避免影响首页
-                    // 「筛选比例返 / 展示比例返商家」功能。
-                    if (mn.toLowerCase().contains("searchpromotions")) {
-                        Object filtered = filterRebateResponse(response, body);
                         if (filtered != null) return filtered;
                     }
                 }
