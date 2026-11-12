@@ -684,7 +684,9 @@ public final class NetworkAdInterceptor {
          * 并在响应含「情报」字样时打印上下文，用于定位该板块来自哪个接口/字段。
          */
         private static void dumpIntelStructure(String mn, String body) {
-            if (!dumpedIntelBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
+            // 搜索接口每次响应都打印（不去重），以便抓到含「比例返」批次的字段
+            boolean isSearch = mn.toLowerCase().contains("searchpromotions");
+            if (!isSearch && !dumpedIntelBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 StringBuilder sb = new StringBuilder("Intel[" + mn + "] len=" + body.length()
@@ -857,10 +859,12 @@ public final class NetworkAdInterceptor {
         }
 
         /**
-         * 搜索结果响应层过滤：仅保留「实付满返」商家 (rebate_condition == 99)，
-         * 剔除比例返 (rebate_condition == 2) 等其它返利形式的条目。
-         * 判定依据是接口真实返回的 rebate_condition 字段，不依赖展示文案
-         * （「满X返Y」「最高返Z%」等均由客户端按字段动态拼装）。
+         * 搜索结果响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
+         * 判定依据是接口真实返回的 order_money（实付门槛，单位分）：
+         *   - 实付满返：order_money > 0（如「满20返10.3」→ order_money=2000）
+         *   - 比例返：order_money <= 0（UI 显示「无实付要求」+「最高返X」，
+         *     如朴正喜/德克士），这类商家剔除。
+         * 注意：不能用 rebate_condition 判定（99 是「无需反馈」，不代表满返）。
          * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
          */
         private Object filterSearchRebateResponse(Object response, String body) {
@@ -873,9 +877,10 @@ public final class NetworkAdInterceptor {
                 org.json.JSONArray kept = new org.json.JSONArray();
                 for (int i = 0; i < list.length(); i++) {
                     org.json.JSONObject it = list.optJSONObject(i);
-                    int cond = it == null ? -1 : it.optInt("rebate_condition", 0);
-                    // 仅保留实付满返 (99)；比例返 (2) 等其它类型剔除
-                    if (cond != 99) { removed++; continue; }
+                    if (it == null) continue;
+                    int om = it.optInt("order_money", -1);
+                    // 保留有实付门槛的「实付满返」；「无实付要求」的比例返剔除
+                    if (om <= 0) { removed++; continue; }
                     kept.put(it);
                 }
                 if (removed == 0) return null;
