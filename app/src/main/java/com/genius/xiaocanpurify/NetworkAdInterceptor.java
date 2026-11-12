@@ -589,6 +589,45 @@ public final class NetworkAdInterceptor {
          * 响应体较小（<=20KB，独立弹窗配置接口）直接返回空成功响应；
          * 大响应体（页面聚合配置）不能整体吞掉，只记日志留待按接口名精确拦截。
          */
+        /**
+         * 诊断：按接口输出资源位/列表结构，避免大段原文淹没日志。
+         * BatchMatchPlacement 逐条打印 resource_id 与 content 摘要，
+         * 用于定位首页各 Banner 与「元气早餐」对应的资源位。
+         */
+        private static void dumpPromoBannerStructure(String mn, String body) {
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                MainHook.log("PromoBanner[" + mn + "] len=" + body.length()
+                        + " keys=" + root.names());
+                org.json.JSONArray resources = root.optJSONArray("resources");
+                if (resources != null) {
+                    for (int i = 0; i < resources.length(); i++) {
+                        org.json.JSONObject r = resources.optJSONObject(i);
+                        if (r == null) continue;
+                        org.json.JSONArray vals = r.optJSONArray("value");
+                        StringBuilder sb = new StringBuilder("res#" + i
+                                + " rid=" + r.optInt("resource_id", -1)
+                                + " slug=" + r.optString("resource_slug", "")
+                                + " vals=" + (vals == null ? 0 : vals.length()));
+                        if (vals != null) {
+                            for (int j = 0; j < vals.length() && j < 3; j++) {
+                                org.json.JSONObject v = vals.optJSONObject(j);
+                                if (v == null) continue;
+                                String c = v.optString("content", "");
+                                sb.append(" | ").append(c, 0, Math.min(c.length(), 220));
+                            }
+                        }
+                        MainHook.log("PromoBanner " + sb);
+                    }
+                } else {
+                    MainHook.log("PromoBanner head="
+                            + body.substring(0, Math.min(body.length(), 1500)));
+                }
+            } catch (Throwable t) {
+                MainHook.log("PromoBanner parse failed: " + t);
+            }
+        }
+
         private Object filterPopupPayload(Object request, String url, Object response) {
             if (response == null) return null;
             try {
@@ -634,8 +673,7 @@ public final class NetworkAdInterceptor {
                     if ((mn.contains("getstorepromotionlist") || mn.contains("batchmatchplacement"))
                             && System.currentTimeMillis() - lastPromoDumpMs > 30000L) {
                         lastPromoDumpMs = System.currentTimeMillis();
-                        MainHook.log("PromoBanner resp(" + body.length() + "): " + mn + " => "
-                                + body.substring(0, Math.min(body.length(), 2500)));
+                        dumpPromoBannerStructure(mn, body);
                     }
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
