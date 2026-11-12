@@ -444,55 +444,13 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
+        // 回滚到「GONE 整个 header」方案（用户确认接受首 item 名称被裁的代价）：
+        // 直接隐藏 HomeHeadAdapter 的根布局，顶部活动卡片 (promotions_view) 随之消失；
+        // 地址栏/搜索框位于独立 toolBar（不在 header 内）因此仍可见。
+        // 受 HOME_TOP_BANNER 开关控制。
         if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
-        // 顶部活动 Banner 容器（fl_banner）。只折叠直接 ImageView 不够——
-        // 该 Banner 实际是「卡片容器(ViewPager/FrameLayout)嵌套图片」结构，
-        // 非 fl_banner 的直接 ImageView 子视图，所以漏折叠。改为递归折叠容器
-        // 内所有子视图并把高度归零。地址栏(layout_address)/搜索框(searchView)
-        // 位于 toolBar（与 fl_banner 不同容器），若意外出现在 fl_banner 内则按
-        // id 排除保留。首次打印子树便于真机确认结构。
-        View banner = findViewByName(root, "fl_banner");
-        if (banner == null) return;
-        banner.setBackground(null);
-        if (!bannerTreeLogged) {
-            bannerTreeLogged = true;
-            logBannerTree(banner, 0);
-        }
-        collapseBannerContent(banner);
-        android.view.ViewGroup.LayoutParams lp = banner.getLayoutParams();
-        if (lp != null && lp.height != 0) {
-            lp.height = 0;
-            banner.setLayoutParams(lp);
-        }
-        banner.requestLayout();
-    }
-
-    private static volatile boolean bannerTreeLogged;
-
-    /** 递归折叠 Banner 容器内所有子视图，保留地址栏/搜索框。 */
-    private static void collapseBannerContent(View v) {
-        if (!(v instanceof ViewGroup)) return;
-        ViewGroup g = (ViewGroup) v;
-        for (int i = 0; i < g.getChildCount(); i++) {
-            View c = g.getChildAt(i);
-            String id = getViewIdName(c);
-            if ("layout_address".equals(id) || "searchView".equals(id)
-                    || "ll_collapse_title_bar".equals(id)) continue;
-            collapseView(c);
-            collapseBannerContent(c);
-        }
-    }
-
-    /** 诊断：打印 Banner 子树（id/类型/可见性/尺寸），定位真实 Banner 容器。 */
-    private static void logBannerTree(View v, int depth) {
-        if (v == null || depth > 6) return;
-        MainHook.log("BannerTree " + depth + " id=" + getViewIdName(v)
-                + " cls=" + v.getClass().getSimpleName()
-                + " vis=" + v.getVisibility() + " " + v.getWidth() + "x" + v.getHeight());
-        if (v instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) v;
-            for (int i = 0; i < g.getChildCount(); i++) logBannerTree(g.getChildAt(i), depth + 1);
-        }
+        root.setBackground(null);
+        collapseView(root);
     }
 
     /** 搜索框 leftMargin 修正次数（防止宿主重排导致的无限重布局）。 */
@@ -945,24 +903,6 @@ public final class HomePagePurifier {
         if (root instanceof ViewGroup) {
             cleanHomeTree((ViewGroup) root);
             collapseMerchantCouponTabs((ViewGroup) root);
-            if (PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
-                hidePromotionsView((ViewGroup) root);
-            }
-        }
-    }
-
-    /** 顶部活动卡片 promotions_view（RecyclerView 首项）单独隐藏，不影响地址栏/搜索框。 */
-    private static void hidePromotionsView(ViewGroup group) {
-        for (int i = 0; i < group.getChildCount(); i++) {
-            View child = group.getChildAt(i);
-            if ("promotions_view".equals(getViewIdName(child))) {
-                if (child.getVisibility() != View.GONE) {
-                    collapseView(child);
-                    MainHook.log("HomePromoView collapsed");
-                }
-                continue;
-            }
-            if (child instanceof ViewGroup) hidePromotionsView((ViewGroup) child);
         }
     }
 
