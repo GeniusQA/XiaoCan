@@ -389,6 +389,10 @@ public final class NetworkAdInterceptor {
         private static volatile long lastCarouselDumpMs;
         /** 入口配置响应上次 dump 时间（30 秒节流）。 */
         private static volatile long lastMenuCfgDumpMs;
+        /** 首页 banner / 小蚕情报响应上次 dump 时间（30 秒节流）。 */
+        private static volatile long lastPromoDumpMs;
+        /** BatchMatchPlacement 请求体（含 resource_slug）上次 dump 时间（30 秒节流）。 */
+        private static volatile long lastPlacementReqDumpMs;
 
     /** 位置参数请求抓包上次时间（5 秒节流，同 methodname 全局节流）。 */
     private static volatile long lastLocReqDumpMs;
@@ -452,9 +456,10 @@ public final class NetworkAdInterceptor {
                 }
 
                 // Check methodname header for blocked RPC calls
+                String methodName = null;
                 try {
                     Method headerMethod = request.getClass().getMethod("header", String.class);
-                    String methodName = (String) headerMethod.invoke(request, "methodname");
+                    methodName = (String) headerMethod.invoke(request, "methodname");
                     if (methodName != null) {
                         String mLower = methodName.toLowerCase(Locale.ROOT);
                         if (isWithdrawCardName(mLower)) {
@@ -468,6 +473,20 @@ public final class NetworkAdInterceptor {
                         }
                     }
                 } catch (Throwable ignored) {}
+
+                // 诊断：BatchMatchPlacement 请求体 resource_slug，用于后续响应层按类型屏蔽首页 banner
+                if (methodName != null && methodName.toLowerCase(Locale.ROOT).contains("batchmatchplacement")
+                        && System.currentTimeMillis() - lastPlacementReqDumpMs > 30000L) {
+                    lastPlacementReqDumpMs = System.currentTimeMillis();
+                    try {
+                        Object rb = request.getClass().getMethod("body").invoke(request);
+                        if (rb != null) {
+                            Object pb = rb.getClass().getMethod("peekBody", long.class).invoke(rb, 65536L);
+                            String rs = (String) pb.getClass().getMethod("string").invoke(pb);
+                            MainHook.log("Placement req: " + (rs == null ? "null" : rs));
+                        }
+                    } catch (Throwable ignored) {}
+                }
 
                 if (isDiscoveryName(urlStr)) {
                     MainHook.log("Blocked search discovery URL");
@@ -609,6 +628,14 @@ public final class NetworkAdInterceptor {
                         lastMenuCfgDumpMs = System.currentTimeMillis();
                         MainHook.log("MenuCfg resp: " + mn + " => "
                                 + body.substring(0, Math.min(body.length(), 1500)));
+                    }
+                    // 诊断：小蚕情报(GetStorePromotionList) / 首页 banner(BatchMatchPlacement)
+                    // 响应结构，用于后续响应层按开关剔除数据，替代当前视图层隐藏。
+                    if ((mn.contains("getstorepromotionlist") || mn.contains("batchmatchplacement"))
+                            && System.currentTimeMillis() - lastPromoDumpMs > 30000L) {
+                        lastPromoDumpMs = System.currentTimeMillis();
+                        MainHook.log("PromoBanner resp(" + body.length() + "): " + mn + " => "
+                                + body.substring(0, Math.min(body.length(), 2500)));
                     }
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示
