@@ -867,31 +867,44 @@ public final class NetworkAdInterceptor {
          * 注意：不能用 rebate_condition 判定（99 是「无需反馈」，不代表满返）。
          * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
          */
-        private Object filterSearchRebateResponse(Object response, String body) {
+        /**
+         * 搜索结果 / 首页 feed 响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
+         * 判定依据：带返利属性的 item（含 promotion_id/rebate_condition/user_rebate）中，
+         *   - order_money > 0    → 实付满返（如「满20返10」），保留
+         *   - order_money 缺失/<=0（UI 显示「无实付要求·最高返」）→ 比例返，剔除
+         * 非返利 item（无返利属性，如 banner/活动卡片）一律保留，避免误删。
+         * 覆盖 searchpromotions（搜索）与 getfeedpromotions（首页 feed）两种响应数组名。
+         * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
+         */
+        private Object filterRebateResponse(Object response, String body) {
             if (!PurifyPrefs.hideOptIn(PurifyPrefs.SEARCH_ONLY_FULL_REBATE)) return null;
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 org.json.JSONArray list = root.optJSONArray("promotions");
+                String arrKey = "promotions";
+                if (list == null) { list = root.optJSONArray("feed_items"); arrKey = "feed_items"; }
                 if (list == null || list.length() == 0) return null;
                 int removed = 0;
                 org.json.JSONArray kept = new org.json.JSONArray();
                 for (int i = 0; i < list.length(); i++) {
                     org.json.JSONObject it = list.optJSONObject(i);
                     if (it == null) continue;
+                    boolean hasRebate = it.has("promotion_id") || it.has("rebate_condition")
+                            || it.has("user_rebate");
                     int om = it.optInt("order_money", -1);
-                    // 保留有实付门槛的「实付满返」；「无实付要求」的比例返剔除
-                    if (om <= 0) { removed++; continue; }
+                    // 仅对带返利属性的 item：无实付门槛(order_money<=0)的比例返剔除，满返保留
+                    if (hasRebate && om <= 0) { removed++; continue; }
                     kept.put(it);
                 }
                 if (removed == 0) return null;
-                root.put("promotions", kept);
+                root.put(arrKey, kept);
                 int total = root.optInt("total", -1);
                 if (total > 0) root.put("total", Math.max(0, total - removed));
-                MainHook.log("SearchRebateFilter kept=" + kept.length()
+                MainHook.log("RebateFilter(" + arrKey + ") kept=" + kept.length()
                         + " removed=" + removed);
                 return replaceResponseBody(response, root.toString());
             } catch (Throwable t) {
-                MainHook.log("SearchRebateFilter failed: " + t);
+                MainHook.log("RebateFilter failed: " + t);
                 return null;
             }
         }
@@ -1027,9 +1040,10 @@ public final class NetworkAdInterceptor {
                         Object filtered = filterIntelResponse(response, body);
                         if (filtered != null) return filtered;
                     }
-                    // 搜索结果：仅保留「实付满返」(rebate_condition==99)，过滤比例返等类型
-                    if (mn.toLowerCase().contains("searchpromotions")) {
-                        Object filtered = filterSearchRebateResponse(response, body);
+                    // 搜索结果 / 首页 feed：仅保留「实付满返」，过滤比例返（无实付要求）
+                    if (mn.toLowerCase().contains("searchpromotions")
+                            || mn.toLowerCase().contains("getfeedpromotions")) {
+                        Object filtered = filterRebateResponse(response, body);
                         if (filtered != null) return filtered;
                     }
                 }
