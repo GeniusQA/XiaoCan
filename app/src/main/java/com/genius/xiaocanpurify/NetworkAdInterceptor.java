@@ -868,12 +868,12 @@ public final class NetworkAdInterceptor {
          * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
          */
         /**
-         * 搜索结果 / 首页 feed 响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
+         * 搜索结果响应层过滤：仅保留「实付满返」商家，剔除「比例返」。
          * 判定依据：带返利属性的 item（含 promotion_id/rebate_condition/user_rebate）中，
          *   - order_money > 0    → 实付满返（如「满20返10」），保留
          *   - order_money 缺失/<=0（UI 显示「无实付要求·最高返」）→ 比例返，剔除
-         * 非返利 item（无返利属性，如 banner/活动卡片）一律保留，避免误删。
-         * 覆盖 searchpromotions（搜索）与 getfeedpromotions（首页 feed）两种响应数组名。
+         * 非返利 item（无返利属性）一律保留，避免误删。
+         * 仅在 searchpromotions（搜索）响应上生效；首页 feed 不过滤。
          * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
          */
         private Object filterRebateResponse(Object response, String body) {
@@ -1040,9 +1040,10 @@ public final class NetworkAdInterceptor {
                         Object filtered = filterIntelResponse(response, body);
                         if (filtered != null) return filtered;
                     }
-                    // 搜索结果 / 首页 feed：仅保留「实付满返」，过滤比例返（无实付要求）
-                    if (mn.toLowerCase().contains("searchpromotions")
-                            || mn.toLowerCase().contains("getfeedpromotions")) {
+                    // 仅搜索页：保留「实付满返」，剔除比例返（无实付要求）。
+                    // 注意：首页 feed(getfeedpromotions) 不在此过滤，避免影响首页
+                    // 「筛选比例返 / 展示比例返商家」功能。
+                    if (mn.toLowerCase().contains("searchpromotions")) {
                         Object filtered = filterRebateResponse(response, body);
                         if (filtered != null) return filtered;
                     }
