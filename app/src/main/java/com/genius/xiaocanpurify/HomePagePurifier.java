@@ -444,11 +444,12 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        // 不再 GONE 整个 header root、也不再把 height/minimumHeight 置 0。
-        // 实测：header 高度归零会让 RecyclerView 首 item 顶到吸顶筛选栏下，
-        // 第一个商家卡片的名称行被裁（关闭 HOME_TOP_BANNER 开关后即恢复完整）。
-        // 改为只精细折叠 fl_banner 内的活动大图并清背景，容器本身保留，
-        // 内容为空后高度自然塌陷，地址栏与首 item 布局都不受影响。
+        if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
+        // 精准隐藏顶部轮播 Banner：fl_banner 内除搜索框 search_view 外的所有子视图
+        // 一律设为 INVISIBLE（占位保留、布局高度不变）。
+        // 这样"砍价抢漏"轮播(theme_banner)被隐藏、搜索框保留、地址栏(若在内)保留，
+        // 且 fl_banner 总高度不变，下方 RecyclerView 首 item 不会被顶到吸顶筛选栏下
+        // 导致名称被裁（之前 GONE 整个 header 会误删搜索框并因高度归零而裁首 item）。
         View banner = findViewByName(root, "fl_banner");
         if (banner == null) return;
         banner.setBackground(null);
@@ -456,7 +457,9 @@ public final class HomePagePurifier {
             ViewGroup g = (ViewGroup) banner;
             for (int j = 0; j < g.getChildCount(); j++) {
                 View child = g.getChildAt(j);
-                if (child instanceof android.widget.ImageView) collapseView(child);
+                String id = getViewIdName(child);
+                if ("search_view".equals(id) || "layout_address".equals(id)) continue;
+                try { child.setVisibility(View.INVISIBLE); } catch (Throwable ignored) {}
             }
         }
     }
