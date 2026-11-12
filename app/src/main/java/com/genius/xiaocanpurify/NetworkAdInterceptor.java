@@ -709,6 +709,28 @@ public final class NetworkAdInterceptor {
                             Math.max(0, idx - 120), Math.min(body.length(), idx + 180)));
                 }
                 MainHook.log(sb.length() > 3000 ? sb.substring(0, 3000) : sb.toString());
+                // 搜索结果逐条打印返利字段值，用于确定「实付满返 vs 比例返」的真实区分字段
+                if (mn.toLowerCase().contains("searchpromotions")) {
+                    org.json.JSONArray pl = root.optJSONArray("promotions");
+                    if (pl != null) {
+                        for (int i = 0; i < pl.length(); i++) {
+                            org.json.JSONObject p = pl.optJSONObject(i);
+                            if (p == null) continue;
+                            org.json.JSONObject st = p.optJSONObject("store");
+                            String nm = st == null ? "?" : st.optString("name", "?");
+                            MainHook.log("SearchItem#" + i + " " + nm
+                                    + " cond=" + p.optInt("rebate_condition", -1)
+                                    + " condStr=" + p.optString("rebate_condition_str", "")
+                                    + " ptype=" + p.optInt("promotion_type", -1)
+                                    + " om=" + p.optInt("order_money", -1)
+                                    + " ur=" + p.optInt("user_rebate", -1)
+                                    + " pcond=" + p.optInt("promotion_condition", -1)
+                                    + " disc=" + p.optInt("discount_amount", -1)
+                                    + " left=" + p.optInt("left_number", -1)
+                                    + " src=" + p.optString("source", ""));
+                        }
+                    }
+                }
             } catch (Throwable t) {
                 MainHook.log("Intel parse failed: " + t);
             }
