@@ -18,6 +18,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import io.github.libxposed.service.XposedService;
@@ -43,6 +44,8 @@ public class MainActivity extends Activity {
                     {PurifyPrefs.HOME_FAB, "浮动红包 / 新手引导", "红包雨浮动球、新手引导浮标、订单 Banner 浮标"},
                     {PurifyPrefs.HOME_BOTTOM_PLACEMENT, "底部悬浮红包", "「¥18 领红包」等底部悬浮推广位"},
                     {PurifyPrefs.HOME_SECOND_FLOOR, "下拉二楼", "关闭首页下拉进入的第二层活动页，保留普通下拉刷新"},
+                    {PurifyPrefs.PLACEMENT_FILTER, "响应层屏蔽首页广告 Banner", "接口返回层面清空插入式广告图（外卖红包/省钱攻略等），保留元气早餐与正常商品"},
+                    {PurifyPrefs.PLACEMENT_AUTO_BLOCK, "自动识别新增广告位", "按结构特征自动屏蔽新出现的插入式广告图；可能误判，默认关闭"},
             }},
             {"「我」页面", new String[][]{
                     {PurifyPrefs.USER_MENU_CHALLENGE, "活动行「挑战赛」", "挑战赛/免费抽奖活动行中的挑战赛入口"},
@@ -391,6 +394,9 @@ public class MainActivity extends Activity {
                 }
             }
             parent.addView(card);
+            if ("首页".equals(groupName)) {
+                parent.addView(createPlacementConfigCard());
+            }
             if ("定位".equals(groupName)) {
                 // 定位分组下追加缓存位置信息卡（POI 地址 + 经纬度 + 缓存时间）
                 parent.addView(createGrabLocEntryRow());
@@ -1041,8 +1047,9 @@ public class MainActivity extends Activity {
     }
 
     private boolean getHide(String key) {
-        // 隐藏桌面图标默认关闭（false），其余净化开关默认隐藏（true）
-        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key) ? false : true;
+        // 隐藏桌面图标、自动识别新增广告位默认关闭（false），其余净化开关默认开启（true）
+        boolean def = PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
+                || PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key) ? false : true;
         SharedPreferences rp = remotePrefs;
         if (rp != null) {
             try {
@@ -1124,9 +1131,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 开关默认值（与 getHide 一致：桌面图标默认显示，其余默认隐藏）。 */
+    /** 开关默认值（与 getHide 一致：桌面图标、自动识别默认关闭，其余默认开启）。 */
     private boolean defaultHide(String key) {
-        return !PurifyPrefs.HIDE_DESKTOP_ICON.equals(key);
+        return !PurifyPrefs.HIDE_DESKTOP_ICON.equals(key)
+                && !PurifyPrefs.PLACEMENT_AUTO_BLOCK.equals(key);
     }
 
     /**
@@ -1184,6 +1192,122 @@ public class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /**
+     * 首页 Banner 响应层过滤配置：追加屏蔽的资源位（逗号分隔，改完下一次请求生效），
+     * 以及 Hook 侧自动回写的「最近发现的资源位」，点击可把某个 slug 追加进屏蔽列表。
+     */
+    private LinearLayout createPlacementConfigCard() {
+        TextView title = new TextView(this);
+        title.setText("广告资源位（高级）");
+        title.setTextSize(13);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(ThemeHelper.accentOrangeRed(this));
+        title.setPadding(dp2px(4), dp2px(10), 0, dp2px(6));
+        // 标题单独返回不了，用外层容器承载
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.addView(title);
+
+        LinearLayout card = createCard();
+
+        TextView extraLabel = new TextView(this);
+        extraLabel.setText("额外屏蔽的资源位 slug");
+        extraLabel.setTextSize(14);
+        extraLabel.setTextColor(ThemeHelper.textHeading(this));
+        card.addView(extraLabel);
+
+        final TextView extraSummary = new TextView(this);
+        extraSummary.setTextSize(11);
+        extraSummary.setTextColor(ThemeHelper.textHint(this));
+        extraSummary.setPadding(0, dp2px(2), 0, dp2px(8));
+        extraSummary.setText(extraSummaryText(getStringPref(
+                PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")));
+        card.addView(extraSummary);
+
+        LinearLayout extraRow = new LinearLayout(this);
+        extraRow.setOrientation(LinearLayout.HORIZONTAL);
+        extraRow.setGravity(Gravity.CENTER_VERTICAL);
+        extraRow.setPadding(0, dp2px(4), 0, dp2px(10));
+        TextView extraHint = new TextView(this);
+        extraHint.setText("逗号分隔，例如 NEW_BANNER,FOO_AD");
+        extraHint.setTextSize(12);
+        extraHint.setTextColor(ThemeHelper.textHint(this));
+        extraHint.setLayoutParams(new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        extraRow.addView(extraHint);
+        extraRow.setOnClickListener(v -> showTextInputDialog(
+                "额外屏蔽的资源位",
+                "逗号分隔，留空恢复默认黑名单",
+                getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, ""),
+                val -> {
+                    setStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, val);
+                    extraSummary.setText(extraSummaryText(val));
+                }));
+        card.addView(extraRow);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(ThemeHelper.cardStroke(this));
+        card.addView(divider, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(1)));
+
+        TextView foundLabel = new TextView(this);
+        foundLabel.setText("最近发现的资源位");
+        foundLabel.setTextSize(14);
+        foundLabel.setTextColor(ThemeHelper.textHeading(this));
+        foundLabel.setPadding(0, dp2px(10), 0, dp2px(2));
+        card.addView(foundLabel);
+
+        TextView foundDesc = new TextView(this);
+        foundDesc.setText("宿主返回过的全部 slug；点击某个可追加到上面的屏蔽列表");
+        foundDesc.setTextSize(11);
+        foundDesc.setTextColor(ThemeHelper.textHint(this));
+        card.addView(foundDesc);
+
+        final TextView foundList = new TextView(this);
+        foundList.setTextSize(11);
+        foundList.setTextColor(ThemeHelper.textBody(this));
+        foundList.setPadding(0, dp2px(6), 0, 0);
+        foundList.setText(foundListText());
+        foundList.setOnClickListener(v -> {
+            String found = foundListText();
+            if (found.isEmpty() || found.startsWith("（")) return;
+            String cur = getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "");
+            java.util.Set<String> merged = new java.util.LinkedHashSet<>();
+            for (String s : (cur + "," + found).split("[,，\\s]+")) {
+                if (!s.trim().isEmpty()) merged.add(s.trim().toUpperCase(Locale.ROOT));
+            }
+            String val = android.text.TextUtils.join(",", merged);
+            setStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, val);
+            extraSummary.setText(extraSummaryText(val));
+        });
+        card.addView(foundList);
+
+        wrap.addView(card);
+        return wrap;
+    }
+
+    private String extraSummaryText(String val) {
+        return val == null || val.trim().isEmpty()
+                ? "当前：仅内置黑名单（9 个广告位）"
+                : "当前：内置黑名单 + " + val.trim();
+    }
+
+    /** 优先读 Hook 侧回写的远程值，再回落本地镜像。 */
+    private String foundListText() {
+        String v = getStringPref(PurifyPrefs.PLACEMENT_DISCOVERED, "");
+        if (v == null || v.trim().isEmpty()) {
+            return "（暂无，打开一次小蚕首页后自动生成）";
+        }
+        String[] parts = v.split(",");
+        if (parts.length <= 14) return v;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 14; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(parts[i]);
+        }
+        return sb.append(" … 共 ").append(parts.length).append(" 个").toString();
     }
 
     private LinearLayout createCard() {

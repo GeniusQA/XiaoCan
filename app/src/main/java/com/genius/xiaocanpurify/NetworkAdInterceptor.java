@@ -12,6 +12,36 @@ import io.github.libxposed.api.XposedInterface;
 public final class NetworkAdInterceptor {
     private static final Map<Object, Boolean> INJECTED_BUILDERS = new WeakHashMap<>();
 
+    /**
+     * 首页列表插入式广告位默认黑名单（实测确认，均为纯广告/弹窗）。
+     * 只按 slug 精确匹配，绝不做关键词模糊匹配，避免误删正常商品与时段分类。
+     */
+    private static final java.util.Set<String> DEFAULT_BLOCKED_SLUGS =
+            java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
+                    java.util.Arrays.asList(
+                            "MESSAGE_PLACE", "MESSAGE_PLACE_NEW", "XC_JG",
+                            "HOME_BOTTOM", "AGG_HOME_BOTTOM", "DOUYIN_BANNER",
+                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW")));
+
+    /**
+     * 保护名单：正常商品/分类/时段导航资源位，即使开启特征识别也不删。
+     * 「元气早餐/饱餐一顿」来自 fusionservice.getmealperiodcategory（另一个接口），
+     * 天然不受影响；此处保护的是同一 BatchMatchPlacement 响应里的正常内容。
+     */
+    private static final java.util.Set<String> PROTECTED_SLUGS =
+            java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
+                    java.util.Arrays.asList(
+                            "BEST_SELLER_GREAT_PRICE", "FLASH_SALE_CAROUSEL_PRODUCT",
+                            "HOMEPAGE_CATEGORY_FLITER", "HOME_TAB", "SECOND_TAB",
+                            "HOMEPAGE_BIGBRAND_INSERT_POSITION",
+                            "HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
+                            "VIP_BRAND_ROLL_DATA", "BESTSELLERS_TAG", "EVENT_TAG",
+                            "INSTORE_SWITCH", "TD_TAB_SORT", "BARGAIN_HOME_SEEDS")));
+
+    /** 已上报过的资源位，避免每次响应都写偏好。 */
+    private static final java.util.Set<String> REPORTED_SLUGS =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
     /** RPC 探针窗口截止时间：红包任务点击后临时记录宿主全部请求，用于发现领奖上报接口。 */
     private static volatile long DISCOVERY_UNTIL = 0L;
 
@@ -641,6 +671,161 @@ public final class NetworkAdInterceptor {
             }
         }
 
+        /** 情报板块响应诊断去重（按方法名+内容指纹）。 */
+        private static final java.util.Set<String> dumpedIntelBodies =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+        /**
+         * 情报板块数据源诊断：打印顶层结构、各数组字段长度、首条元素字段，
+         * 并在响应含「情报」字样时打印上下文，用于定位该板块来自哪个接口/字段。
+         */
+        private static void dumpIntelStructure(String mn, String body) {
+            if (!dumpedIntelBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                StringBuilder sb = new StringBuilder("Intel[" + mn + "] len=" + body.length()
+                        + " keys=" + root.names());
+                java.util.Iterator<String> it = root.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    Object v = root.opt(k);
+                    if (v instanceof org.json.JSONArray) {
+                        org.json.JSONArray a = (org.json.JSONArray) v;
+                        sb.append(" ").append(k).append("[").append(a.length()).append("]");
+                        org.json.JSONObject f = a.optJSONObject(0);
+                        if (f != null) sb.append("{").append(f.names()).append("}");
+                    } else if (v instanceof org.json.JSONObject) {
+                        sb.append(" ").append(k).append("{")
+                                .append(((org.json.JSONObject) v).names()).append("}");
+                    }
+                }
+                int idx = body.indexOf("情报");
+                if (idx >= 0) {
+                    sb.append(" HAS_INTEL ctx=").append(body.substring(
+                            Math.max(0, idx - 120), Math.min(body.length(), idx + 180)));
+                }
+                MainHook.log(sb.length() > 3000 ? sb.substring(0, 3000) : sb.toString());
+            } catch (Throwable t) {
+                MainHook.log("Intel parse failed: " + t);
+            }
+        }
+
+        /**
+         * 首页 Banner 响应层过滤：只清空黑名单 slug 的 value（保留条目本身，
+         * 避免宿主解析异常），其余资源位原样保留。
+         *
+         * @return 重建后的响应；无改动或失败时返回 null 由调用方继续用原响应
+         */
+        private Object filterPlacementResponse(Object response, String body) {
+            if (!PurifyPrefs.hide(PurifyPrefs.PLACEMENT_FILTER)) return null;
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONArray resources = root.optJSONArray("resources");
+                if (resources == null || resources.length() == 0) return null;
+
+                java.util.Set<String> blocked = new java.util.HashSet<>(DEFAULT_BLOCKED_SLUGS);
+                // 用户自定义追加：每次响应实时读取，改完下一次请求即生效
+                String extra = PurifyPrefs.getString(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "");
+                if (extra != null && !extra.trim().isEmpty()) {
+                    for (String s : extra.split("[,，\\s]+")) {
+                        String u = s.trim().toUpperCase(Locale.ROOT);
+                        if (!u.isEmpty() && !PROTECTED_SLUGS.contains(u)) blocked.add(u);
+                    }
+                }
+                boolean auto = PurifyPrefs.hideOptIn(PurifyPrefs.PLACEMENT_AUTO_BLOCK);
+                java.util.List<String> discovered = new java.util.ArrayList<>();
+                boolean changed = false;
+                for (int i = 0; i < resources.length(); i++) {
+                    org.json.JSONObject r = resources.optJSONObject(i);
+                    if (r == null) continue;
+                    String slug = r.optString("resource_slug", "").toUpperCase(Locale.ROOT);
+                    if (slug.isEmpty()) continue;
+                    if (REPORTED_SLUGS.add(slug)) discovered.add(slug);
+
+                    boolean hit = blocked.contains(slug) && !PROTECTED_SLUGS.contains(slug);
+                    if (!hit && auto && !PROTECTED_SLUGS.contains(slug)) {
+                        hit = looksLikeInsertedBanner(r);
+                    }
+                    if (hit) {
+                        org.json.JSONArray vals = r.optJSONArray("value");
+                        if (vals != null && vals.length() > 0) {
+                            r.put("value", new org.json.JSONArray());
+                            changed = true;
+                            MainHook.log("PlacementFilter blocked " + slug);
+                        }
+                    }
+                }
+                if (!discovered.isEmpty()) persistDiscovered(discovered);
+                if (!changed) return null;
+                return replaceResponseBody(response, root.toString());
+            } catch (Throwable t) {
+                MainHook.log("PlacementFilter failed: " + t);
+                return null;
+            }
+        }
+
+        /** 插入式广告图的结构特征：content 带 information_location / ad_type。 */
+        private static boolean looksLikeInsertedBanner(org.json.JSONObject r) {
+            org.json.JSONArray vals = r.optJSONArray("value");
+            if (vals == null) return false;
+            for (int j = 0; j < vals.length() && j < 3; j++) {
+                org.json.JSONObject v = vals.optJSONObject(j);
+                if (v == null) continue;
+                String c = v.optString("content", "");
+                if (c.contains("information_location") || c.contains("\"ad_type\"")) return true;
+            }
+            return false;
+        }
+
+        /** 把新发现的资源位写回偏好，供设置页展示/一键复制。 */
+        private static void persistDiscovered(java.util.List<String> slugs) {
+            try {
+                java.util.Set<String> all = new java.util.TreeSet<>();
+                String old = PurifyPrefs.getString(PurifyPrefs.PLACEMENT_DISCOVERED, "");
+                if (old != null && !old.isEmpty()) {
+                    for (String s : old.split("[,，\\s]+")) {
+                        if (!s.trim().isEmpty()) all.add(s.trim());
+                    }
+                }
+                all.addAll(slugs);
+                PurifyPrefs.putRemoteString(PurifyPrefs.PLACEMENT_DISCOVERED,
+                        android.text.TextUtils.join(",", all));
+            } catch (Throwable ignored) {}
+        }
+
+        /** 用 newBuilder 重建响应 body，保留原 headers/protocol/code，去掉压缩相关头。 */
+        private Object replaceResponseBody(Object response, String json) {
+            try {
+                Class<?> bodyClass = Class.forName("okhttp3.ResponseBody", false, classLoader);
+                Class<?> mediaClass = Class.forName("okhttp3.MediaType", false, classLoader);
+                Object oldBody = response.getClass().getMethod("body").invoke(response);
+                Object mediaType = null;
+                try {
+                    if (oldBody != null) {
+                        mediaType = oldBody.getClass().getMethod("contentType").invoke(oldBody);
+                    }
+                } catch (Throwable ignored) {}
+                if (mediaType == null) {
+                    mediaType = mediaClass.getMethod("parse", String.class)
+                            .invoke(null, "application/json; charset=utf-8");
+                }
+                Object newBody = bodyClass.getMethod("create", mediaClass, String.class)
+                        .invoke(null, mediaType, json);
+                Object builder = response.getClass().getMethod("newBuilder").invoke(response);
+                try {
+                    builder.getClass().getMethod("removeHeader", String.class)
+                            .invoke(builder, "Content-Encoding");
+                    builder.getClass().getMethod("removeHeader", String.class)
+                            .invoke(builder, "Content-Length");
+                } catch (Throwable ignored) {}
+                builder.getClass().getMethod("body", bodyClass).invoke(builder, newBody);
+                return builder.getClass().getMethod("build").invoke(builder);
+            } catch (Throwable t) {
+                MainHook.log("PlacementFilter rebuild failed: " + t);
+                return null;
+            }
+        }
+
         private Object filterPopupPayload(Object request, String url, Object response) {
             if (response == null) return null;
             try {
@@ -693,6 +878,17 @@ public final class NetworkAdInterceptor {
                             || mn.contains("quickfilter") || mn.contains("getfeedpromotions"))
                             && dumpedPromoBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) {
                         dumpPromoBannerStructure(mn, body);
+                    }
+                    // 情报板块诊断：定位「小蚕情报」来自哪个接口/字段
+                    if (mn.contains("search") || mn.contains("promotion")
+                            || mn.contains("feed") || mn.contains("intel")
+                            || body.contains("情报")) {
+                        dumpIntelStructure(mn, body);
+                    }
+                    // 首页 Banner 响应层过滤（诊断之后执行，保证日志能看到原始结构）
+                    if (mn.contains("batchmatchplacement")) {
+                        Object filtered = filterPlacementResponse(response, body);
+                        if (filtered != null) return filtered;
                     }
                 }
                 // 地址来源探测：响应含中文地址特征时记录并推送给模块设置页展示

@@ -90,6 +90,15 @@ public final class PurifyPrefs {
     // 搜索页
     public static final String HIDE_SEARCH_INTEL = "hide_search_intel";
 
+    // 首页 Banner 响应层过滤总开关（默认开启）
+    public static final String PLACEMENT_FILTER = "placement_filter";
+    // 首页 Banner 响应层过滤：用户可追加的资源位 slug（逗号分隔）
+    public static final String PLACEMENT_BLOCK_EXTRA = "placement_block_extra";
+    // 按结构特征自动屏蔽新增的插入式广告位（默认关，避免误删正常内容）
+    public static final String PLACEMENT_AUTO_BLOCK = "placement_auto_block";
+    // Hook 侧回写的「最近发现的资源位」slug 清单，供设置页展示/一键复制
+    public static final String PLACEMENT_DISCOVERED = "placement_discovered";
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 
