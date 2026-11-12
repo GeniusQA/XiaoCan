@@ -444,13 +444,21 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        // 回滚到「GONE 整个 header」方案（用户确认接受首 item 名称被裁的代价）：
-        // 直接隐藏 HomeHeadAdapter 的根布局，顶部活动卡片 (promotions_view) 随之消失；
-        // 地址栏/搜索框位于独立 toolBar（不在 header 内）因此仍可见。
-        // 受 HOME_TOP_BANNER 开关控制。
         if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
-        root.setBackground(null);
-        collapseView(root);
+        // 只折叠 fl_banner 内的活动大图，保留容器本身——3.21.5 把地址栏入口
+        // 放进了 fl_banner 容器，GONE 容器会连带隐藏地址栏。保留容器 + 清背景 +
+        // 折叠图片子视图后高度自然塌陷，地址栏与搜索框都在。
+        View banner = findViewByName(root, "fl_banner");
+        if (banner != null) {
+            banner.setBackground(null);
+            if (banner instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) banner;
+                for (int j = 0; j < g.getChildCount(); j++) {
+                    View child = g.getChildAt(j);
+                    if (child instanceof android.widget.ImageView) collapseView(child);
+                }
+            }
+        }
     }
 
     /** 搜索框 leftMargin 修正次数（防止宿主重排导致的无限重布局）。 */
@@ -903,6 +911,24 @@ public final class HomePagePurifier {
         if (root instanceof ViewGroup) {
             cleanHomeTree((ViewGroup) root);
             collapseMerchantCouponTabs((ViewGroup) root);
+            if (PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
+                hidePromotionsView((ViewGroup) root);
+            }
+        }
+    }
+
+    /** 顶部活动卡片 promotions_view（RecyclerView 首项）单独隐藏，不影响地址栏/搜索框。 */
+    private static void hidePromotionsView(ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if ("promotions_view".equals(getViewIdName(child))) {
+                if (child.getVisibility() != View.GONE) {
+                    collapseView(child);
+                    MainHook.log("HomePromoView collapsed");
+                }
+                continue;
+            }
+            if (child instanceof ViewGroup) hidePromotionsView((ViewGroup) child);
         }
     }
 
