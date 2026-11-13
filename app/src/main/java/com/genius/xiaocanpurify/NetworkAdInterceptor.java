@@ -836,7 +836,7 @@ public final class NetworkAdInterceptor {
          * （「满X返Y」「最高返Z%」等均由客户端按字段动态拼装）。
          * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
          */
-        private static Object filterSearchRebateResponse(Object response, String body) {
+        private Object filterSearchRebateResponse(Object response, String body) {
             if (!PurifyPrefs.hideOptIn(PurifyPrefs.SEARCH_ONLY_FULL_REBATE)) return null;
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
