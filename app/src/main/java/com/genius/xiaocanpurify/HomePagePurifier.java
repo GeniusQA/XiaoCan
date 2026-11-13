@@ -444,21 +444,10 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        // 不再 GONE 整个 header root、也不再把 height/minimumHeight 置 0。
-        // 实测：header 高度归零会让 RecyclerView 首 item 顶到吸顶筛选栏下，
-        // 第一个商家卡片的名称行被裁（关闭 HOME_TOP_BANNER 开关后即恢复完整）。
-        // 改为只精细折叠 fl_banner 内的活动大图并清背景，容器本身保留，
-        // 内容为空后高度自然塌陷，地址栏与首 item 布局都不受影响。
-        View banner = findViewByName(root, "fl_banner");
-        if (banner == null) return;
-        banner.setBackground(null);
-        if (banner instanceof ViewGroup) {
-            ViewGroup g = (ViewGroup) banner;
-            for (int j = 0; j < g.getChildCount(); j++) {
-                View child = g.getChildAt(j);
-                if (child instanceof android.widget.ImageView) collapseView(child);
-            }
-        }
+        collapseView(root);
+        ViewGroup.LayoutParams lp = root.getLayoutParams();
+        if (lp != null && lp.height != 0) { lp.height = 0; root.setLayoutParams(lp); }
+        if (root.getMinimumHeight() != 0) root.setMinimumHeight(0);
     }
 
     /** 搜索框 leftMargin 修正次数（防止宿主重排导致的无限重布局）。 */
@@ -907,6 +896,34 @@ public final class HomePagePurifier {
                 }
             } catch (Throwable ignored) {}
         }
+        // 顶部活动容器整段塌陷后，RecyclerView 首 item 会顶到吸顶筛选栏下被裁；
+        // 参考实现：按搜索框底部动态设置 RecyclerView 顶部 padding 补偿，既不裁首卡片
+        // 又不破坏吸顶筛选栏。
+        try {
+            View rv = asView(field(binding, "rv"));
+            View tb = asView(field(binding, "toolBar"));
+            if (rv != null && tb != null && tb.getHeight() > 0) {
+                View search = findViewByName(tb, "search_view");
+                if (search == null || search.getHeight() <= 0) search = findViewByName(tb, "searchView");
+                View anchor = (search != null && search.getHeight() > 0) ? search : tb;
+                int[] aLoc = new int[2], lLoc = new int[2];
+                anchor.getLocationInWindow(aLoc);
+                rv.getLocationInWindow(lLoc);
+                int searchBottom = aLoc[1] + anchor.getHeight();
+                int top = Math.max(0, searchBottom - lLoc[1]);
+                if (!rv.canScrollVertically(-1)) {
+                    View row = topmostContent(rv);
+                    if (row != null) {
+                        int[] rLoc = new int[2];
+                        row.getLocationInWindow(rLoc);
+                        int gap = rLoc[1] - searchBottom;
+                        if (gap > 1) top = Math.max(0, rv.getPaddingTop() - gap);
+                    }
+                }
+                if (rv.getPaddingTop() != top) rv.setPadding(rv.getPaddingLeft(), top, rv.getPaddingRight(), rv.getPaddingBottom());
+                if (rv instanceof ViewGroup) ((ViewGroup) rv).setClipToPadding(true);
+            }
+        } catch (Throwable ignored) {}
         View root = asView(binding);
         if (root instanceof ViewGroup) {
             cleanHomeTree((ViewGroup) root);
@@ -990,29 +1007,13 @@ public final class HomePagePurifier {
             View child = group.getChildAt(i);
             String id = getViewIdName(child);
             if ("fl_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
-                // 3.21.5：fl_banner 内既有「砍价抢漏」轮播 theme_banner（com.youth.banner
-                // .Banner，是个 ViewGroup，不是 ImageView）又有 full_refund_gamify_hero_stub
-                // / full_refund_first_order_banner_stub 两个 ViewStub 延迟 inflate 的满返
-                // banner，还有 search_view 搜索框。以前只折直接 ImageView 子视图，折不到
-                // ViewGroup / ViewStub 的 banner，所以仍然显示。
-                // 这里改为：除搜索框 search_view / 地址栏 layout_address 外，其余子视图
-                // 全部 GONE，彻底隐藏 banner 同时保留搜索框与地址栏。cleanHomeTree 由
-                // enforceHome 的 OnGlobalLayoutListener 在每次布局时调用，迟到 inflate 的
-                // 满返 banner 也会在下一帧被隐藏。
+                // fl_banner 即顶部活动容器（含 theme_banner 轮播 / full_refund 满返 ViewStub
+                // / 红橙活动背景）；搜索框是它的平级兄弟节点（不在其内），整段 GONE 不影响搜索。
+                // 宿主会在自身布局里把 theme_banner 重新 VISIBLE——只 GONE 子节点会被即时还原；
+                // GONE 整个 fl_banner 容器后，子节点再怎么显示都不可见。高度归零 + 每次布局
+                // 重跑（enforceHome 的全局监听）确保迟到 inflate 的 banner 下一帧即隐藏。
                 child.setBackground(null);
-                if (child instanceof ViewGroup) {
-                    ViewGroup g = (ViewGroup) child;
-                    for (int j = 0; j < g.getChildCount(); j++) {
-                        View s = g.getChildAt(j);
-                        if (s == null) continue;
-                        String sid = getViewIdName(s);
-                        if ("search_view".equals(sid) || "layout_address".equals(sid)
-                                || (sid != null && sid.contains("address"))) {
-                            continue;   // 保留搜索框与地址栏
-                        }
-                        collapseView(s);
-                    }
-                }
+                collapseHeader(child);
             }
             boolean hide = ("layout_traffic_exp_c_order_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_ORDER_BANNER))
                     || ("layout_bottom_placement".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_BOTTOM_PLACEMENT))
@@ -1023,6 +1024,21 @@ public final class HomePagePurifier {
             if (hide) collapseView(child);
             if (child instanceof ViewGroup) cleanHomeTree((ViewGroup) child);
         }
+    }
+
+    private static View topmostContent(View rv) {
+        if (!(rv instanceof ViewGroup)) return null;
+        ViewGroup group = (ViewGroup) rv;
+        View best = null;
+        int bestTop = Integer.MAX_VALUE;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE || child.getHeight() <= 2) continue;
+            int[] location = new int[2];
+            child.getLocationInWindow(location);
+            if (location[1] < bestTop) { bestTop = location[1]; best = child; }
+        }
+        return best;
     }
 
     private static void collapseChildrenByIdName(android.view.ViewGroup vg, String idName) {
