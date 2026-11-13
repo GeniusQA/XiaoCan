@@ -53,6 +53,11 @@
             android:name=".GrabLocActivity"
             android:exported="false" />
 
+        <!-- 资源位 slug 全量列表页：内置黑名单/保护名单/候选/最近发现明细（设置页截断时跳转） -->
+        <activity
+            android:name=".SlugListActivity"
+            android:exported="false" />
+
         <!-- 缓存位置推送入口：目标 App 通过显式广播写入本模块（绕过包可见性，模块无需 root） -->
         <receiver
             android:name=".CacheReceiver"

@@ -135,6 +135,27 @@ public final class PurifyPrefs {
         DEFAULT_SLUG_DESC.put("FLASH_SALE_CAROUSEL_PRODUCT", "闪购轮播商品卡插入");
     }
 
+    /**
+     * 保护名单 slug → 说明（特征识别/黑名单均不删的正常内容，与响应层判定同一份映射）。
+     * 手动把保护 slug 加进「额外屏蔽」可覆盖保护判定。
+     */
+    public static final java.util.LinkedHashMap<String, String> PROTECTED_SLUG_DESC =
+            new java.util.LinkedHashMap<>();
+    static {
+        PROTECTED_SLUG_DESC.put("BEST_SELLER_GREAT_PRICE", "爆品好价标签");
+        PROTECTED_SLUG_DESC.put("HOMEPAGE_CATEGORY_FLITER", "首页分类筛选（FLITER 为宿主原始拼写）");
+        PROTECTED_SLUG_DESC.put("HOME_TAB", "首页 Tab 结构");
+        PROTECTED_SLUG_DESC.put("SECOND_TAB", "二级 Tab 结构");
+        PROTECTED_SLUG_DESC.put("HOMEPAGE_BIGBRAND_INSERT_POSITION",
+                "首页大牌插入位置配置（手动加进额外屏蔽可覆盖）");
+        PROTECTED_SLUG_DESC.put("HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
+                "每 VIP 等级大牌插入位置配置（手动加进额外屏蔽可覆盖）");
+        PROTECTED_SLUG_DESC.put("VIP_BRAND_ROLL_DATA", "VIP 品牌轮播数据");
+        PROTECTED_SLUG_DESC.put("EVENT_TAG", "活动标签");
+        PROTECTED_SLUG_DESC.put("INSTORE_SWITCH", "到店开关");
+        PROTECTED_SLUG_DESC.put("TD_TAB_SORT", "探店 Tab 排序");
+    }
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 

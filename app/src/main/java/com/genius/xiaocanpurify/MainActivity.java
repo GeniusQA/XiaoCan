@@ -577,6 +577,9 @@ public class MainActivity extends Activity {
     }
 
     private TextView locationInfoText;
+    /** 广告资源位卡片里的摘要行/最近发现列表：从列表页返回后 onResume 刷新。 */
+    private TextView extraSummaryView;
+    private TextView foundListView;
 
     /** 主题卡片：跟随系统 / 浅色 / 深色 三选一（参考 HyperIsland themeMode）。 */
     private LinearLayout createThemeCard() {
@@ -995,6 +998,12 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshLocationInfo();
+        // 从 slug 列表页返回：刷新额外屏蔽摘要与最近发现划线状态
+        if (extraSummaryView != null) {
+            extraSummaryView.setText(extraSummaryText(
+                    getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")));
+        }
+        if (foundListView != null) renderFoundList(foundListView, null);
         // 自动清理惰性触发：打开设置页时检查是否到达清理间隔
         LogStore.maybeAutoCleanup(this);
     }
@@ -1233,17 +1242,30 @@ public class MainActivity extends Activity {
                 PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")));
         card.addView(extraSummary);
 
+        // 编辑入口：做成明显的按钮样式（橙色描边圆角块 + 加粗强调色 + 箭头），一眼可点
         LinearLayout extraRow = new LinearLayout(this);
         extraRow.setOrientation(LinearLayout.HORIZONTAL);
         extraRow.setGravity(Gravity.CENTER_VERTICAL);
-        extraRow.setPadding(0, dp2px(4), 0, dp2px(10));
-        TextView extraHint = new TextView(this);
-        extraHint.setText("逗号分隔，例如 NEW_BANNER,FOO_AD");
-        extraHint.setTextSize(12);
-        extraHint.setTextColor(ThemeHelper.textHint(this));
-        extraHint.setLayoutParams(new LinearLayout.LayoutParams(
+        extraRow.setPadding(dp2px(12), dp2px(10), dp2px(12), dp2px(10));
+        android.graphics.drawable.GradientDrawable editBg =
+                new android.graphics.drawable.GradientDrawable();
+        editBg.setColor(0x14FF6600);
+        editBg.setCornerRadius(dp2px(8));
+        editBg.setStroke(dp2px(1), ThemeHelper.accentOrangeRed(this));
+        extraRow.setBackground(editBg);
+        TextView extraEdit = new TextView(this);
+        extraEdit.setText("编辑额外屏蔽 slug（逗号分隔，点按编辑）");
+        extraEdit.setTextSize(13);
+        extraEdit.setTypeface(Typeface.DEFAULT_BOLD);
+        extraEdit.setTextColor(ThemeHelper.accentOrangeRed(this));
+        extraEdit.setLayoutParams(new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        extraRow.addView(extraHint);
+        extraRow.addView(extraEdit);
+        TextView extraArrow = new TextView(this);
+        extraArrow.setText("›");
+        extraArrow.setTextSize(16);
+        extraArrow.setTextColor(ThemeHelper.accentOrangeRed(this));
+        extraRow.addView(extraArrow);
         extraRow.setOnClickListener(v -> showTextInputDialog(
                 "额外屏蔽的资源位",
                 "逗号分隔，留空恢复默认黑名单",
@@ -1254,23 +1276,15 @@ public class MainActivity extends Activity {
                 }));
         card.addView(extraRow);
 
-        // 内置黑名单明细：展开查看每个 slug 对应的广告位（与响应层拦截同一份映射）
-        TextView builtinToggle = new TextView(this);
-        builtinToggle.setText("内置黑名单明细（点按展开/收起）");
-        builtinToggle.setTextSize(12);
-        builtinToggle.setTextColor(ThemeHelper.textHint(this));
-        builtinToggle.setPadding(0, dp2px(2), 0, dp2px(4));
-        card.addView(builtinToggle);
-        final TextView builtinList = new TextView(this);
-        builtinList.setTextSize(11);
-        builtinList.setTextColor(ThemeHelper.textBody(this));
-        builtinList.setPadding(0, dp2px(2), 0, dp2px(8));
-        builtinList.setText(builtinSlugsText());
-        builtinList.setVisibility(android.view.View.GONE);
-        builtinToggle.setOnClickListener(v -> builtinList.setVisibility(
-                builtinList.getVisibility() == android.view.View.GONE
-                        ? android.view.View.VISIBLE : android.view.View.GONE));
-        card.addView(builtinList);
+        // 黑名单/保护/候选明细：跳转独立列表页（设置页卡片截断展示不下，页面看全量）
+        TextView detailEntry = new TextView(this);
+        detailEntry.setText("黑名单/保护/候选明细 ›（点按打开列表页）");
+        detailEntry.setTextSize(12);
+        detailEntry.setTextColor(ThemeHelper.accentOrangeRed(this));
+        detailEntry.setPadding(0, dp2px(2), 0, dp2px(8));
+        detailEntry.setOnClickListener(v -> startActivity(
+                new android.content.Intent(this, SlugListActivity.class)));
+        card.addView(detailEntry);
 
         View divider = new View(this);
         divider.setBackgroundColor(ThemeHelper.cardStroke(this));
@@ -1285,7 +1299,7 @@ public class MainActivity extends Activity {
         card.addView(foundLabel);
 
         TextView foundDesc = new TextView(this);
-        foundDesc.setText("宿主返回过的全部 slug；点击某个可追加到上面的屏蔽列表");
+        foundDesc.setText("点击单个 slug 追加到上面的屏蔽列表；已追加的划线置灰");
         foundDesc.setTextSize(11);
         foundDesc.setTextColor(ThemeHelper.textHint(this));
         card.addView(foundDesc);
@@ -1294,7 +1308,17 @@ public class MainActivity extends Activity {
         foundList.setTextSize(11);
         foundList.setTextColor(ThemeHelper.textBody(this));
         foundList.setPadding(0, dp2px(6), 0, 0);
-        foundList.setText(foundListText());
+        // 点按单个 slug 追加单个；追加后刷新摘要与划线状态
+        final Runnable[] refreshFound = new Runnable[1];
+        refreshFound[0] = () -> {
+            extraSummary.setText(extraSummaryText(
+                    getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")));
+            renderFoundList(foundList, refreshFound[0]);
+        };
+        renderFoundList(foundList, refreshFound[0]);
+        // 保存引用：从列表页返回后 onResume 刷新摘要与划线状态
+        extraSummaryView = extraSummary;
+        foundListView = foundList;
         // 请求宿主重发最近发现的资源位：模块进程 stopped/被杀期间宿主发出的广播会被丢弃，
         // 设置页打开（进程活着）时发请求，宿主收到后重发，2 秒后刷新显示
         try {
@@ -1302,21 +1326,19 @@ public class MainActivity extends Activity {
                     "com.genius.xiaocanpurify.ACTION_DISCOVERED_RESEND");
             i.setPackage("com.realtech.xiaocan");
             sendBroadcast(i);
-            foundList.postDelayed(() -> foundList.setText(foundListText()), 2000);
+            foundList.postDelayed(() -> renderFoundList(foundList, refreshFound[0]), 2000);
         } catch (Throwable ignored) {}
-        foundList.setOnClickListener(v -> {
-            String found = foundListText();
-            if (found.isEmpty() || found.startsWith("（")) return;
-            String cur = getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "");
-            java.util.Set<String> merged = new java.util.LinkedHashSet<>();
-            for (String s : (cur + "," + found).split("[,，\\s]+")) {
-                if (!s.trim().isEmpty()) merged.add(s.trim().toUpperCase(Locale.ROOT));
-            }
-            String val = android.text.TextUtils.join(",", merged);
-            setStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, val);
-            extraSummary.setText(extraSummaryText(val));
-        });
         card.addView(foundList);
+
+        // 全量列表：截断展示不下时跳转独立页看全部 slug
+        TextView viewAll = new TextView(this);
+        viewAll.setText("查看全部（共 " + discoveredCount() + " 个）›");
+        viewAll.setTextSize(12);
+        viewAll.setTextColor(ThemeHelper.accentOrangeRed(this));
+        viewAll.setPadding(0, dp2px(6), 0, 0);
+        viewAll.setOnClickListener(v -> startActivity(
+                new android.content.Intent(this, SlugListActivity.class)));
+        card.addView(viewAll);
 
         wrap.addView(card);
         return wrap;
@@ -1324,35 +1346,85 @@ public class MainActivity extends Activity {
 
     private String extraSummaryText(String val) {
         int n = PurifyPrefs.DEFAULT_SLUG_DESC.size();
-        return val == null || val.trim().isEmpty()
-                ? "当前：仅内置黑名单（" + n + " 个广告位，点下方「内置黑名单明细」查看）"
-                : "当前：内置黑名单（" + n + " 个）+ " + val.trim();
-    }
-
-    /** 内置黑名单 slug → 广告位说明，逐行列出（与响应层拦截同一份映射）。 */
-    private String builtinSlugsText() {
-        StringBuilder sb = new StringBuilder();
-        for (java.util.Map.Entry<String, String> e : PurifyPrefs.DEFAULT_SLUG_DESC.entrySet()) {
-            if (sb.length() > 0) sb.append('\n');
-            sb.append(e.getKey()).append(" — ").append(e.getValue());
+        int m = 0;
+        if (val != null && !val.trim().isEmpty()) {
+            java.util.Set<String> set = new java.util.LinkedHashSet<>();
+            for (String s : val.split("[,，\\s]+")) {
+                if (!s.trim().isEmpty()) set.add(s.trim().toUpperCase(Locale.ROOT));
+            }
+            m = set.size();
         }
-        return sb.toString();
+        return m == 0
+                ? "当前：仅内置黑名单（" + n + " 个广告位，点下方明细查看具体 slug）"
+                : "当前：内置黑名单（" + n + " 个）+ 额外屏蔽（" + m
+                        + " 个），点下方明细查看具体 slug";
     }
 
-    /** 优先读 Hook 侧回写的远程值，再回落本地镜像。 */
-    private String foundListText() {
+    /** 最近发现的 slug 总数（「查看全部」跳转行文案用）。 */
+    private int discoveredCount() {
+        String v = getStringPref(PurifyPrefs.PLACEMENT_DISCOVERED, "");
+        if (v == null || v.trim().isEmpty()) return 0;
+        int n = 0;
+        for (String s : v.split("[,，\\s]+")) {
+            if (!s.trim().isEmpty()) n++;
+        }
+        return n;
+    }
+
+    /**
+     * 「最近发现」渲染为逐个可点击的 slug token：点按追加该 slug 到额外屏蔽；
+     * 已在额外屏蔽里的置灰加删除线，不再响应点击。
+     */
+    private void renderFoundList(TextView view, Runnable onAdded) {
         String v = getStringPref(PurifyPrefs.PLACEMENT_DISCOVERED, "");
         if (v == null || v.trim().isEmpty()) {
-            return "（暂无，打开一次小蚕首页后自动生成）";
+            view.setText("（暂无，打开一次小蚕首页后自动生成）");
+            return;
+        }
+        java.util.Set<String> existing = new java.util.HashSet<>();
+        for (String s : getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")
+                .split("[,，\\s]+")) {
+            if (!s.trim().isEmpty()) existing.add(s.trim().toUpperCase(Locale.ROOT));
         }
         String[] parts = v.split(",");
-        if (parts.length <= 14) return v;
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < 14; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(parts[i]);
+        android.text.SpannableStringBuilder ssb = new android.text.SpannableStringBuilder();
+        for (String raw : parts) {
+            final String slug = raw.trim();
+            if (slug.isEmpty()) continue;
+            if (ssb.length() > 0) ssb.append(", ");
+            int start = ssb.length();
+            ssb.append(slug);
+            int end = ssb.length();
+            if (existing.contains(slug.toUpperCase(Locale.ROOT))) {
+                ssb.setSpan(new android.text.style.StrikethroughSpan(), start, end, 0);
+                ssb.setSpan(new android.text.style.ForegroundColorSpan(
+                        ThemeHelper.textHint(this)), start, end, 0);
+            } else {
+                ssb.setSpan(new android.text.style.ClickableSpan() {
+                    @Override
+                    public void onClick(android.view.View widget) {
+                        addExtraSlug(slug, onAdded);
+                    }
+                }, start, end, 0);
+            }
         }
-        return sb.append(" … 共 ").append(parts.length).append(" 个").toString();
+        if (parts.length > 14) ssb.append(" … 共 ").append(parts.length).append(" 个");
+        view.setText(ssb, TextView.BufferType.SPANNABLE);
+        view.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+        view.setHighlightColor(0);
+    }
+
+    /** 追加单个 slug 到「额外屏蔽」（去重、大写归一），并回调刷新 UI。 */
+    private void addExtraSlug(String slug, Runnable onAdded) {
+        java.util.Set<String> merged = new java.util.LinkedHashSet<>();
+        for (String s : getStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "")
+                .split("[,，\\s]+")) {
+            if (!s.trim().isEmpty()) merged.add(s.trim().toUpperCase(Locale.ROOT));
+        }
+        merged.add(slug.toUpperCase(Locale.ROOT));
+        String val = android.text.TextUtils.join(",", merged);
+        setStringPref(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, val);
+        if (onAdded != null) onAdded.run();
     }
 
     private LinearLayout createCard() {

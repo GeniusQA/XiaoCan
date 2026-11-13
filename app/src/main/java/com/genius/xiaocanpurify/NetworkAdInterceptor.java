@@ -36,13 +36,7 @@ public final class NetworkAdInterceptor {
      */
     private static final java.util.Set<String> PROTECTED_SLUGS =
             java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
-                    java.util.Arrays.asList(
-                            "BEST_SELLER_GREAT_PRICE",
-                            "HOMEPAGE_CATEGORY_FLITER", "HOME_TAB", "SECOND_TAB",
-                            "HOMEPAGE_BIGBRAND_INSERT_POSITION",
-                            "HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
-                            "VIP_BRAND_ROLL_DATA", "EVENT_TAG",
-                            "INSTORE_SWITCH", "TD_TAB_SORT")));
+                    PurifyPrefs.PROTECTED_SLUG_DESC.keySet()));
 
     /** 已上报过的资源位，避免每次响应都写偏好。 */
     private static final java.util.Set<String> REPORTED_SLUGS =
@@ -431,6 +425,9 @@ public final class NetworkAdInterceptor {
         private static volatile long lastCarouselDumpMs;
         /** 入口配置响应上次 dump 时间（30 秒节流）。 */
         private static volatile long lastMenuCfgDumpMs;
+        /** 诊断去重：已 dump 过的免单（freeorder）响应内容（按方法名+内容指纹）。 */
+        private static final java.util.Set<String> dumpedFreeOrderBodies =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
         /** 诊断去重：已打印过的 /rpc 接口名（每个进程每种接口只打一次）。 */
         private static final java.util.Set<String> dumpedRpcNames =
                 java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
@@ -683,6 +680,67 @@ public final class NetworkAdInterceptor {
             }
         }
 
+        /** 搜索响应诊断去重（按方法名+内容指纹）。 */
+        private static final java.util.Set<String> dumpedSearchBodies =
+                java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+        /**
+         * 搜索响应结构诊断：打印 root/data 两层内所有数组字段的「长度+首条字段名+
+         * 疑似类型/品牌字段取值」，定位搜索页大牌/比例返条目挂在哪个数组、靠什么字段识别。
+         */
+        private static void dumpSearchStructure(String mn, String body) {
+            if (!dumpedSearchBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) return;
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                MainHook.log("SearchDump[" + mn + "] len=" + body.length()
+                        + " topKeys=" + root.names());
+                dumpArraysOneLevel(root, mn, "$");
+                org.json.JSONObject data = root.optJSONObject("data");
+                if (data != null) {
+                    MainHook.log("SearchDump[" + mn + "] dataKeys=" + data.names());
+                    dumpArraysOneLevel(data, mn, "data");
+                }
+            } catch (Throwable t) {
+                MainHook.log("SearchDump failed: " + t);
+            }
+        }
+
+        /** 单层遍历：数组字段打印摘要并下钻首条元素一层；对象字段打印键名。 */
+        private static void dumpArraysOneLevel(org.json.JSONObject obj, String mn, String path) {
+            try {
+                java.util.Iterator<String> it = obj.keys();
+                while (it.hasNext()) {
+                    String k = it.next();
+                    Object v = obj.opt(k);
+                    if (v instanceof org.json.JSONArray) {
+                        org.json.JSONArray arr = (org.json.JSONArray) v;
+                        StringBuilder sb = new StringBuilder("SearchDump[" + mn + "] "
+                                + path + "." + k + " len=" + arr.length());
+                        org.json.JSONObject first = arr.optJSONObject(0);
+                        if (first != null) {
+                            sb.append(" firstKeys=").append(first.names());
+                            for (String f : new String[]{"type", "brand_type", "is_big_brand",
+                                    "big_brand", "rebate_condition", "merchant_type",
+                                    "source", "resource_slug", "tag"}) {
+                                if (first.has(f)) sb.append(' ').append(f).append('=').append(first.opt(f));
+                            }
+                            String snippet = first.optString("title",
+                                    first.optString("merchant_name", ""));
+                            if (!snippet.isEmpty()) {
+                                sb.append(" title=").append(snippet,
+                                        0, Math.min(snippet.length(), 40));
+                            }
+                            dumpArraysOneLevel(first, mn, path + "." + k + "[0]");
+                        }
+                        MainHook.log(sb.toString());
+                    } else if (v instanceof org.json.JSONObject) {
+                        MainHook.log("SearchDump[" + mn + "] " + path + "." + k
+                                + " objKeys=" + ((org.json.JSONObject) v).names());
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
         /** 情报板块响应诊断去重（按方法名+内容指纹）。 */
         private static final java.util.Set<String> dumpedIntelBodies =
                 java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
@@ -856,6 +914,9 @@ public final class NetworkAdInterceptor {
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 org.json.JSONArray list = root.optJSONArray("promotions");
+                // 兼容嵌套结构：列表可能在 data.promotions 下
+                org.json.JSONObject data = list == null ? root.optJSONObject("data") : null;
+                if (list == null && data != null) list = data.optJSONArray("promotions");
                 if (list == null || list.length() == 0) return null;
                 int removed = 0;
                 org.json.JSONArray kept = new org.json.JSONArray();
@@ -867,7 +928,11 @@ public final class NetworkAdInterceptor {
                     kept.put(it);
                 }
                 if (removed == 0) return null;
-                root.put("promotions", kept);
+                if (data != null && root.optJSONArray("promotions") == null) {
+                    data.put("promotions", kept);
+                } else {
+                    root.put("promotions", kept);
+                }
                 int total = root.optInt("total", -1);
                 if (total > 0) root.put("total", Math.max(0, total - removed));
                 MainHook.log("SearchRebateFilter kept=" + kept.length()
@@ -1036,6 +1101,14 @@ public final class NetworkAdInterceptor {
                     if (!mn.isEmpty() && dumpedRpcNames.add(mn)) {
                         MainHook.log("RPC[list] mn=" + mn + " len=" + body.length());
                     }
+                    // 免单资格 Banner 数据源诊断：silkwormfreeorderclient.* 响应体 dump，
+                    // 定位「待免单订单/邀请进度」字段后实现响应层按开关清空
+                    if (mn.contains("freeorder")
+                            && dumpedFreeOrderBodies.add(
+                                    mn + ":" + body.length() + ":" + body.hashCode())) {
+                        MainHook.log("FreeOrder resp: " + mn + " => "
+                                + body.substring(0, Math.min(body.length(), 1500)));
+                    }
                     // banner/情报/促销/餐段分类响应：按方法名+内容指纹去重
                     if ((mn.contains("placement") || mn.contains("promotion")
                             || mn.contains("banner") || mn.contains("mealperiod")
@@ -1078,6 +1151,7 @@ public final class NetworkAdInterceptor {
                     }
                     // 搜索结果：仅保留「实付满返」(rebate_condition==99)，过滤比例返等类型
                     if (mn.toLowerCase().contains("searchpromotions")) {
+                        dumpSearchStructure(mn, body);
                         Object filtered = filterSearchRebateResponse(response, body);
                         if (filtered != null) return filtered;
                     }
