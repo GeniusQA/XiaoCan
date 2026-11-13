@@ -990,19 +990,27 @@ public final class HomePagePurifier {
             View child = group.getChildAt(i);
             String id = getViewIdName(child);
             if ("fl_banner".equals(id) && PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) {
-                // 3.21.5 把左上角地址栏入口放进了 fl_banner 容器——GONE 容器
-                // 会连带隐藏地址栏（用户逐个开关实测确认）。改为：保留容器，
-                // 清空活动背景，折叠容器内的图片类子视图（活动大图）；
-                // Banner 数据由 hookFeedBanners 在数据层过滤，容器内容为空后
-                // 高度自然塌陷，地址栏与净化两全。
+                // 3.21.5：fl_banner 内既有「砍价抢漏」轮播 theme_banner（com.youth.banner
+                // .Banner，是个 ViewGroup，不是 ImageView）又有 full_refund_gamify_hero_stub
+                // / full_refund_first_order_banner_stub 两个 ViewStub 延迟 inflate 的满返
+                // banner，还有 search_view 搜索框。以前只折直接 ImageView 子视图，折不到
+                // ViewGroup / ViewStub 的 banner，所以仍然显示。
+                // 这里改为：除搜索框 search_view / 地址栏 layout_address 外，其余子视图
+                // 全部 GONE，彻底隐藏 banner 同时保留搜索框与地址栏。cleanHomeTree 由
+                // enforceHome 的 OnGlobalLayoutListener 在每次布局时调用，迟到 inflate 的
+                // 满返 banner 也会在下一帧被隐藏。
                 child.setBackground(null);
                 if (child instanceof ViewGroup) {
                     ViewGroup g = (ViewGroup) child;
                     for (int j = 0; j < g.getChildCount(); j++) {
                         View s = g.getChildAt(j);
-                        if (s instanceof android.widget.ImageView) {
-                            collapseView(s);
+                        if (s == null) continue;
+                        String sid = getViewIdName(s);
+                        if ("search_view".equals(sid) || "layout_address".equals(sid)
+                                || (sid != null && sid.contains("address"))) {
+                            continue;   // 保留搜索框与地址栏
                         }
+                        collapseView(s);
                     }
                 }
             }
