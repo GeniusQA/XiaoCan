@@ -21,7 +21,11 @@ public final class NetworkAdInterceptor {
                     java.util.Arrays.asList(
                             "MESSAGE_PLACE", "MESSAGE_PLACE_NEW", "XC_JG",
                             "HOME_BOTTOM", "AGG_HOME_BOTTOM", "DOUYIN_BANNER",
-                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW")));
+                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW",
+                            // 首页列表内插入的运营卡/群卡/活动跳转（实测 content）
+                            "BARGAIN_HOME_SEEDS", "HOME_KJBANNER_TO_MINI",
+                            "MAIN_TO_TANDIAN_MINI", "BESTSELLERS_TAG",
+                            "CERAMIC_NEW", "UP_FRIST_PAGE_GIF")));
 
     /**
      * 保护名单：正常商品/分类/时段导航资源位，即使开启特征识别也不删。
@@ -35,8 +39,8 @@ public final class NetworkAdInterceptor {
                             "HOMEPAGE_CATEGORY_FLITER", "HOME_TAB", "SECOND_TAB",
                             "HOMEPAGE_BIGBRAND_INSERT_POSITION",
                             "HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
-                            "VIP_BRAND_ROLL_DATA", "BESTSELLERS_TAG", "EVENT_TAG",
-                            "INSTORE_SWITCH", "TD_TAB_SORT", "BARGAIN_HOME_SEEDS")));
+                            "VIP_BRAND_ROLL_DATA", "EVENT_TAG",
+                            "INSTORE_SWITCH", "TD_TAB_SORT")));
 
     /** 已上报过的资源位，避免每次响应都写偏好。 */
     private static final java.util.Set<String> REPORTED_SLUGS =
@@ -742,6 +746,14 @@ public final class NetworkAdInterceptor {
                     if (slug.isEmpty()) continue;
                     if (REPORTED_SLUGS.add(slug)) discovered.add(slug);
 
+                    // HOME_TAB 不能整组清空（会连「爆品好价」一起消失）：
+                    // 按 tab_type 精确剔除活动外跳 tab（tab_type!=1），保留原生 tab。
+                    // tab_name/web_url 由服务端动态下发，故不按文案判定。
+                    if ("HOME_TAB".equals(slug)) {
+                        if (filterHomeTabs(r)) changed = true;
+                        continue;
+                    }
+
                     boolean hit = blocked.contains(slug) && !PROTECTED_SLUGS.contains(slug);
                     if (!hit && auto && !PROTECTED_SLUGS.contains(slug)) {
                         hit = looksLikeInsertedBanner(r);
@@ -760,6 +772,94 @@ public final class NetworkAdInterceptor {
                 return replaceResponseBody(response, root.toString());
             } catch (Throwable t) {
                 MainHook.log("PlacementFilter failed: " + t);
+                return null;
+            }
+        }
+
+        /**
+         * 首页顶部导航 tab：剔除活动外跳 tab（tab_type != 1），保留 tab_type=1 的
+         * 原生商品 tab（如「爆品好价」）。value[].content 是内嵌 JSON 字符串。
+         *
+         * @return 是否有条目被移除
+         */
+        private static boolean filterHomeTabs(org.json.JSONObject resource) {
+            if (!PurifyPrefs.hide(PurifyPrefs.PLACEMENT_HIDE_ACTIVITY_TAB)) return false;
+            org.json.JSONArray vals = resource.optJSONArray("value");
+            if (vals == null || vals.length() == 0) return false;
+            org.json.JSONArray kept = new org.json.JSONArray();
+            boolean changed = false;
+            for (int j = 0; j < vals.length(); j++) {
+                org.json.JSONObject v = vals.optJSONObject(j);
+                if (v == null) { kept.put(new org.json.JSONObject()); continue; }
+                int tabType = 1;
+                String name = "";
+                try {
+                    org.json.JSONObject c = new org.json.JSONObject(v.optString("content", "{}"));
+                    tabType = c.optInt("tab_type", 1);
+                    name = c.optString("tab_name", "");
+                } catch (Throwable ignored) {}
+                if (tabType != 1) {
+                    changed = true;
+                    MainHook.log("PlacementFilter hid activity tab: " + name
+                            + " (tab_type=" + tabType + ")");
+                } else {
+                    kept.put(v);
+                }
+            }
+            if (changed) resource.put("value", kept);
+            return changed;
+        }
+
+        /**
+         * 小蚕情报响应层过滤：只把 promotion_list 置空，保留 status 等外层结构，
+         * 宿主按「空列表」渲染时板块自然不展示。默认关闭（opt-in）。
+         */
+        private Object filterIntelResponse(Object response, String body) {
+            if (!PurifyPrefs.hideOptIn(PurifyPrefs.INTEL_RESPONSE_FILTER)) return null;
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONArray list = root.optJSONArray("promotion_list");
+                if (list == null || list.length() == 0) return null;
+                root.put("promotion_list", new org.json.JSONArray());
+                MainHook.log("IntelFilter cleared promotion_list(" + list.length() + ")");
+                return replaceResponseBody(response, root.toString());
+            } catch (Throwable t) {
+                MainHook.log("IntelFilter failed: " + t);
+                return null;
+            }
+        }
+
+        /**
+         * 搜索结果响应层过滤：仅保留「实付满返」商家 (rebate_condition == 99)，
+         * 剔除比例返 (rebate_condition == 2) 等其它返利形式的条目。
+         * 判定依据是接口真实返回的 rebate_condition 字段，不依赖展示文案
+         * （「满X返Y」「最高返Z%」等均由客户端按字段动态拼装）。
+         * 开关默认关闭 (opt-in)，见 PurifyPrefs.SEARCH_ONLY_FULL_REBATE。
+         */
+        private static Object filterSearchRebateResponse(Object response, String body) {
+            if (!PurifyPrefs.hideOptIn(PurifyPrefs.SEARCH_ONLY_FULL_REBATE)) return null;
+            try {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONArray list = root.optJSONArray("promotions");
+                if (list == null || list.length() == 0) return null;
+                int removed = 0;
+                org.json.JSONArray kept = new org.json.JSONArray();
+                for (int i = 0; i < list.length(); i++) {
+                    org.json.JSONObject it = list.optJSONObject(i);
+                    int cond = it == null ? -1 : it.optInt("rebate_condition", 0);
+                    // 仅保留实付满返 (99)；比例返 (2) 等其它类型剔除
+                    if (cond != 99) { removed++; continue; }
+                    kept.put(it);
+                }
+                if (removed == 0) return null;
+                root.put("promotions", kept);
+                int total = root.optInt("total", -1);
+                if (total > 0) root.put("total", Math.max(0, total - removed));
+                MainHook.log("SearchRebateFilter kept=" + kept.length()
+                        + " removed=" + removed);
+                return replaceResponseBody(response, root.toString());
+            } catch (Throwable t) {
+                MainHook.log("SearchRebateFilter failed: " + t);
                 return null;
             }
         }
@@ -888,6 +988,16 @@ public final class NetworkAdInterceptor {
                     // 首页 Banner 响应层过滤（诊断之后执行，保证日志能看到原始结构）
                     if (mn.contains("batchmatchplacement")) {
                         Object filtered = filterPlacementResponse(response, body);
+                        if (filtered != null) return filtered;
+                    }
+                    // 小蚕情报：实验性响应层清空（默认关，见开关说明）
+                    if (mn.contains("getstorepromotionlist")) {
+                        Object filtered = filterIntelResponse(response, body);
+                        if (filtered != null) return filtered;
+                    }
+                    // 搜索结果：仅保留「实付满返」(rebate_condition==99)，过滤比例返等类型
+                    if (mn.toLowerCase().contains("searchpromotions")) {
+                        Object filtered = filterSearchRebateResponse(response, body);
                         if (filtered != null) return filtered;
                     }
                 }

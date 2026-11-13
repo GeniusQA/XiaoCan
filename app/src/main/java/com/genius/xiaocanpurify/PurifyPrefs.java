@@ -89,9 +89,15 @@ public final class PurifyPrefs {
 
     // 搜索页
     public static final String HIDE_SEARCH_INTEL = "hide_search_intel";
+    // 实验：响应层清空「小蚕情报」列表（默认关，确认接口不共用后再开）
+    public static final String INTEL_RESPONSE_FILTER = "intel_response_filter";
+    // 搜索结果：仅展示「实付满返」商家（rebate_condition==99），过滤比例返等其它返利形式
+    public static final String SEARCH_ONLY_FULL_REBATE = "search_only_full_rebate";
 
     // 首页 Banner 响应层过滤总开关（默认开启）
     public static final String PLACEMENT_FILTER = "placement_filter";
+    // 隐藏首页顶部导航里的活动外跳 tab（如「闪购叠红包」，按 tab_type!=1 判定，默认开启）
+    public static final String PLACEMENT_HIDE_ACTIVITY_TAB = "placement_hide_activity_tab";
     // 首页 Banner 响应层过滤：用户可追加的资源位 slug（逗号分隔）
     public static final String PLACEMENT_BLOCK_EXTRA = "placement_block_extra";
     // 按结构特征自动屏蔽新增的插入式广告位（默认关，避免误删正常内容）

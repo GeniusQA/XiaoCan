@@ -444,41 +444,20 @@ public final class HomePagePurifier {
 
     private static void collapseHeader(View root) {
         if (root == null) return;
-        if (!PurifyPrefs.hide(PurifyPrefs.HOME_TOP_BANNER)) return;
-        // 精准隐藏顶部 Banner：fl_banner 内除搜索框 search_view / 地址栏 layout_address
-        // 外的子视图一律设 INVISIBLE（占位保留、布局高度不变），避免 GONE 整个 header
-        // 误删搜索框、以及高度归零导致首 item 被裁。
+        // 不再 GONE 整个 header root、也不再把 height/minimumHeight 置 0。
+        // 实测：header 高度归零会让 RecyclerView 首 item 顶到吸顶筛选栏下，
+        // 第一个商家卡片的名称行被裁（关闭 HOME_TOP_BANNER 开关后即恢复完整）。
+        // 改为只精细折叠 fl_banner 内的活动大图并清背景，容器本身保留，
+        // 内容为空后高度自然塌陷，地址栏与首 item 布局都不受影响。
         View banner = findViewByName(root, "fl_banner");
         if (banner == null) return;
         banner.setBackground(null);
-        if (!(banner instanceof ViewGroup)) return;
-        final ViewGroup g = (ViewGroup) banner;
-        hideBannerChildren(g);
-        // ViewStub 延迟 inflate 后会往 fl_banner 里插入全新视图（layout_full_refund_
-        // gamify_hero "砍价抢漏"、full_refund_first_order_banner 首单 banner），首次遍历
-        // 时它们还不存在。挂全局布局监听，布局变化即重新隐藏，保证迟到的 banner 也被
-        // INVISIBLE（保留占位、不裁首 item）。
-        if (!BANNER_BOUND.containsKey(g)) {
-            BANNER_BOUND.put(g, Boolean.TRUE);
-            g.getViewTreeObserver().addOnGlobalLayoutListener(
-                    new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
-                        @Override public void onGlobalLayout() { hideBannerChildren(g); }
-                    });
-        }
-    }
-
-    /** 已挂布局监听的 fl_banner 实例（WeakHashMap 自动回收，避免重复注册）。 */
-    private static final java.util.Map<ViewGroup, Boolean> BANNER_BOUND =
-            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<ViewGroup, Boolean>());
-
-    /** 把 fl_banner 内除搜索框/地址栏外的可见子视图设为 INVISIBLE（保留占位）。 */
-    private static void hideBannerChildren(ViewGroup g) {
-        for (int j = 0; j < g.getChildCount(); j++) {
-            View child = g.getChildAt(j);
-            if (child == null || child.getVisibility() != View.VISIBLE) continue;
-            String id = getViewIdName(child);
-            if ("search_view".equals(id) || "layout_address".equals(id)) continue;
-            try { child.setVisibility(View.INVISIBLE); } catch (Throwable ignored) {}
+        if (banner instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) banner;
+            for (int j = 0; j < g.getChildCount(); j++) {
+                View child = g.getChildAt(j);
+                if (child instanceof android.widget.ImageView) collapseView(child);
+            }
         }
     }
 
