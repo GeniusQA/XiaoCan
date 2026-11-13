@@ -490,6 +490,15 @@ public final class HomePagePurifier {
                             java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
                             java.util.ArrayList<Object> others = new java.util.ArrayList<>();
                             for (Object item : (java.util.Collection<?>) args[i]) {
+                                String cls = item.getClass().getSimpleName();
+                                String typ = "";
+                                try {
+                                    Object t = item.getClass().getMethod("getType").invoke(item);
+                                    typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t);
+                                } catch (Throwable ignored) {}
+                                String s = item.toString();
+                                if (s.length() > 110) s = s.substring(0, 110);
+                                MainHook.log("ITEM " + cls + " type=" + typ + " | " + s);
                                 if (item != null && item.toString().contains("元气早餐")) {
                                     banners.add(item);
                                     continue;
