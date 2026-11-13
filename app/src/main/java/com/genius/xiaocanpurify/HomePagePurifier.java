@@ -43,6 +43,7 @@ public final class HomePagePurifier {
         if (PurifyPrefs.hide(PurifyPrefs.HOME_MENU_ROW)) {
             hookMenusRow(xposed, classLoader);
         }
+        hookFeedBanners(xposed, classLoader);
         hookHomeFragmentGuard(xposed, classLoader);
     }
 
@@ -475,23 +476,36 @@ public final class HomePagePurifier {
             Class<?> type = Class.forName("com.realtech.promotion.adapters.HomePromotionAdapter", false, cl);
             for (Method m : type.getSuperclass().getDeclaredMethods()) {
                 String name = m.getName();
-                boolean bulk = "submitList".equals(name) || "setItems".equals(name) || "addAll".equals(name);
+                boolean bulk = "submitList".equals(name) || "setItems".equals(name)
+                        || "addAll".equals(name) || "setList".equals(name)
+                        || "setNewData".equals(name) || "replaceData".equals(name);
                 if (!bulk && !"add".equals(name) && !"set".equals(name)) continue;
                 xposed.hook(m).intercept(chain -> {
                     if (!type.isInstance(chain.getThisObject())) return chain.proceed();
                     Object[] args = chain.getArgs().toArray();
+                    MainHook.log("FeedHook " + name + " args=" + args.length);
                     if (bulk) {
                         for (int i = 0; i < args.length; i++) {
                             if (!(args[i] instanceof java.util.Collection)) continue;
-                            java.util.ArrayList<Object> clean = new java.util.ArrayList<>();
-                            for (Object item : (java.util.Collection<?>) args[i])
-                                if (!isAdFeedItem(item)) clean.add(item);
-                            args[i] = clean;
+                            java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
+                            java.util.ArrayList<Object> others = new java.util.ArrayList<>();
+                            for (Object item : (java.util.Collection<?>) args[i]) {
+                                if (item != null && item.toString().contains("元气早餐")) {
+                                    banners.add(item);
+                                    continue;
+                                }
+                                if (isAdFeedItem(item)) continue;   // 隐藏其它广告
+                                others.add(item);
+                            }
+                            java.util.ArrayList<Object> reordered = new java.util.ArrayList<>(banners);
+                            reordered.addAll(others);
+                            args[i] = reordered;
+                            MainHook.log("FeedHook " + name + " banner=" + banners.size() + " kept=" + others.size());
                         }
                     } else if (args.length > 0 && isAdFeedItem(args[args.length - 1])) {
                         if ("set".equals(name)) {
                             type.getSuperclass().getMethod("removeAt", int.class)
-                                .invoke(chain.getThisObject(), args[0]);
+                                    .invoke(chain.getThisObject(), args[0]);
                         }
                         return null;
                     }
