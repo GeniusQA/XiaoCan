@@ -86,7 +86,8 @@ public final class HostLogBridge {
         } catch (Throwable ignored) {}
     }
 
-    private static Context currentApplication() {
+    /** Hook 侧取宿主 Application Context（反射 ActivityThread），包级可见供广播回推复用。 */
+    static Context currentApplication() {
         try {
             Class<?> at = Class.forName("android.app.ActivityThread");
             java.lang.reflect.Method m = at.getDeclaredMethod("currentApplication");
