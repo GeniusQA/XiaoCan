@@ -872,7 +872,7 @@ public final class NetworkAdInterceptor {
          * 商家列表连续排列在其下方。这是响应层改写，比视图层 hook 更可靠
          * （宿主重新 VISIBLE 也影响不到 JSON 顺序）。其它广告条目保持隐藏不动。
          */
-        private static Object filterFeedPromotions(Object response, String body) {
+        private Object filterFeedPromotions(Object response, String body) {
             try {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 org.json.JSONArray items = root.optJSONArray("feed_items");
