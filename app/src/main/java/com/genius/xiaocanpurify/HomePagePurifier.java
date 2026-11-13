@@ -510,6 +510,24 @@ public final class HomePagePurifier {
     }
 
     /**
+     * 福利群「种子条目」（BARGAIN_HOME_SEEDS / rid=62）：服务端只下发跳转+图片模板，
+     * 文案由客户端按定位动态填充，故不能按文案屏蔽；其数据结构稳定——web_url 含
+     * WechatGroup、或同时带 wx_gh_id + order 模板。响应层已按 slug 清空，但宿主会本地
+     * 缓存该 placement 并从缓存渲染，响应层清空后仍展示，故在适配器层再兜一道：直接丢弃。
+     */
+    private static boolean isWelfareSeedItem(Object item) {
+        if (item == null) return false;
+        String s;
+        try { s = item.toString(); } catch (Throwable t) { return false; }
+        if (s == null) return false;
+        if (s.contains("WechatGroup")) return true;
+        if (s.contains("wx_gh_id") && (s.contains("\"order\"") || s.contains("order="))) return true;
+        return false;
+    }
+
+    private static volatile boolean seedDiagDone;
+
+    /**
      * Filter ad items (picbanner/pic/group) from HomePromotionAdapter data list
      * so they never appear in the RecyclerView at all.
      */
@@ -531,12 +549,35 @@ public final class HomePagePurifier {
                             if (!(args[i] instanceof java.util.Collection)) continue;
                             java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
                             java.util.ArrayList<Object> others = new java.util.ArrayList<>();
+                            int idx2 = 0;
+                            boolean diag = !seedDiagDone && ((java.util.Collection<?>) args[i]).size() >= 20;
+                            if (diag) seedDiagDone = true;
                             for (Object item : (java.util.Collection<?>) args[i]) {
                                 if (isMealBannerItem(item)) {   // 餐段运营 Banner（标题随时段变）
                                     banners.add(item);
                                     continue;
                                 }
+                                if (isWelfareSeedItem(item)) {   // 福利群种子（响应层清空后仍可能被缓存渲染）
+                                    MainHook.log("WelfareSeed dropped: " + item.getClass().getSimpleName());
+                                    if (diag) {
+                                        String typ = "";
+                                        try { Object t = item.getClass().getMethod("getType").invoke(item);
+                                            typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t); } catch (Throwable ignored) {}
+                                        String s = item.toString(); if (s.length() > 160) s = s.substring(0, 160);
+                                        MainHook.log("SEEDDIAG " + idx2 + " " + item.getClass().getSimpleName() + " type=" + typ + " | " + s);
+                                    }
+                                    idx2++;
+                                    continue;
+                                }
                                 if (isAdFeedItem(item)) continue;   // 隐藏其它广告
+                                if (diag) {
+                                    String typ = "";
+                                    try { Object t = item.getClass().getMethod("getType").invoke(item);
+                                        typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t); } catch (Throwable ignored) {}
+                                    String s = item.toString(); if (s.length() > 130) s = s.substring(0, 130);
+                                    MainHook.log("SEEDDIAG " + idx2 + " " + item.getClass().getSimpleName() + " type=" + typ + " | " + s);
+                                }
+                                idx2++;
                                 others.add(item);
                             }
                             if (!banners.isEmpty()) {
