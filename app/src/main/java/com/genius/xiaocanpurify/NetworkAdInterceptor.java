@@ -806,7 +806,9 @@ public final class NetworkAdInterceptor {
                     kept.put(v);
                 }
             }
-            if (changed) resource.put("value", kept);
+            if (changed) {
+                try { resource.put("value", kept); } catch (Throwable ignored) {}
+            }
             return changed;
         }
 
