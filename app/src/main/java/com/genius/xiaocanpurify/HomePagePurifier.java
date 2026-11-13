@@ -44,6 +44,7 @@ public final class HomePagePurifier {
             hookMenusRow(xposed, classLoader);
         }
         hookFeedBanners(xposed, classLoader);
+        hookWelfareSeedView(xposed, classLoader);
         hookHomeFragmentGuard(xposed, classLoader);
     }
 
@@ -510,24 +511,6 @@ public final class HomePagePurifier {
     }
 
     /**
-     * 福利群「种子条目」（BARGAIN_HOME_SEEDS / rid=62）：服务端只下发跳转+图片模板，
-     * 文案由客户端按定位动态填充，故不能按文案屏蔽；其数据结构稳定——web_url 含
-     * WechatGroup、或同时带 wx_gh_id + order 模板。响应层已按 slug 清空，但宿主会本地
-     * 缓存该 placement 并从缓存渲染，响应层清空后仍展示，故在适配器层再兜一道：直接丢弃。
-     */
-    private static boolean isWelfareSeedItem(Object item) {
-        if (item == null) return false;
-        String s;
-        try { s = item.toString(); } catch (Throwable t) { return false; }
-        if (s == null) return false;
-        if (s.contains("WechatGroup")) return true;
-        if (s.contains("wx_gh_id") && (s.contains("\"order\"") || s.contains("order="))) return true;
-        return false;
-    }
-
-    private static volatile boolean seedDiagDone;
-
-    /**
      * Filter ad items (picbanner/pic/group) from HomePromotionAdapter data list
      * so they never appear in the RecyclerView at all.
      */
@@ -549,35 +532,12 @@ public final class HomePagePurifier {
                             if (!(args[i] instanceof java.util.Collection)) continue;
                             java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
                             java.util.ArrayList<Object> others = new java.util.ArrayList<>();
-                            int idx2 = 0;
-                            boolean diag = !seedDiagDone && ((java.util.Collection<?>) args[i]).size() >= 20;
-                            if (diag) seedDiagDone = true;
                             for (Object item : (java.util.Collection<?>) args[i]) {
                                 if (isMealBannerItem(item)) {   // 餐段运营 Banner（标题随时段变）
                                     banners.add(item);
                                     continue;
                                 }
-                                if (isWelfareSeedItem(item)) {   // 福利群种子（响应层清空后仍可能被缓存渲染）
-                                    MainHook.log("WelfareSeed dropped: " + item.getClass().getSimpleName());
-                                    if (diag) {
-                                        String typ = "";
-                                        try { Object t = item.getClass().getMethod("getType").invoke(item);
-                                            typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t); } catch (Throwable ignored) {}
-                                        String s = item.toString(); if (s.length() > 160) s = s.substring(0, 160);
-                                        MainHook.log("SEEDDIAG " + idx2 + " " + item.getClass().getSimpleName() + " type=" + typ + " | " + s);
-                                    }
-                                    idx2++;
-                                    continue;
-                                }
                                 if (isAdFeedItem(item)) continue;   // 隐藏其它广告
-                                if (diag) {
-                                    String typ = "";
-                                    try { Object t = item.getClass().getMethod("getType").invoke(item);
-                                        typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t); } catch (Throwable ignored) {}
-                                    String s = item.toString(); if (s.length() > 130) s = s.substring(0, 130);
-                                    MainHook.log("SEEDDIAG " + idx2 + " " + item.getClass().getSimpleName() + " type=" + typ + " | " + s);
-                                }
-                                idx2++;
                                 others.add(item);
                             }
                             if (!banners.isEmpty()) {
@@ -599,6 +559,61 @@ public final class HomePagePurifier {
                 MainHook.log("Home-only feed filter: " + m.getName());
             }
         } catch (Throwable t) { MainHook.log("Feed hook: " + t); }
+    }
+
+    /**
+     * 福利群「种子卡片」（BARGAIN_HOME_SEEDS / rid=62）：文案由客户端按定位动态填充
+     * （如「成华区霸王餐福利群」「200+人已加入」），响应层已按 slug 清空该 placement，
+     * 但宿主会缓存 placement 并从缓存渲染，导致「元气早餐」能置顶、福利群却仍出现。
+     * 故在视图层兜底：标题 setText 含「福利群」时隐藏整张卡片（无论来源是网络还是缓存）。
+     */
+    private static void hookWelfareSeedView(XposedInterface xposed, ClassLoader cl) {
+        try {
+            Class<?> tv = Class.forName("android.widget.TextView", false, cl);
+            for (Method m : tv.getDeclaredMethods()) {
+                if (!"setText".equals(m.getName())) continue;
+                Class<?>[] ps = m.getParameterTypes();
+                if (ps.length == 1 && ps[0].equals(CharSequence.class)) {
+                    xposed.hook(m).intercept(chain -> {
+                        Object a = chain.getArgs().get(0);
+                        if (a instanceof CharSequence) {
+                            String s = a.toString();
+                            if (s.contains("福利群")) {
+                                final View v = (View) chain.getThisObject();
+                                MainHook.log("WelfareSeedView title=" + s.substring(0, Math.min(s.length(), 30)));
+                                // 延后到绑定完成后再隐藏，避免被 ViewHolder 统一 setVisibility 覆盖
+                                v.post(() -> hideWelfareCard(v));
+                            }
+                        }
+                        return chain.proceed();
+                    });
+                    MainHook.log("Hooked TextView.setText for welfare seed");
+                    break;
+                }
+            }
+        } catch (Throwable t) { MainHook.log("WelfareSeedView hook failed: " + t); }
+    }
+
+    private static void hideWelfareCard(View v) {
+        try {
+            View cur = v;
+            ViewParent p = cur.getParent();
+            int depth = 0;
+            while (p instanceof View && depth < 10) {
+                View pv = (View) p;
+                String cn = pv.getClass().getName();
+                if (cn.contains("RecyclerView") || cn.contains("ListView")) {
+                    cur.setVisibility(View.GONE);
+                    cur.requestLayout();
+                    return;
+                }
+                cur = pv;
+                p = cur.getParent();
+                depth++;
+            }
+            cur.setVisibility(View.GONE);
+            cur.requestLayout();
+        } catch (Throwable ignored) {}
     }
 
     private static boolean isAdFeedItem(Object item) {
