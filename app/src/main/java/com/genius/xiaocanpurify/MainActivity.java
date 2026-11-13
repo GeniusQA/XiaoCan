@@ -1408,7 +1408,8 @@ public class MainActivity extends Activity {
                 }, start, end, 0);
             }
         }
-        if (parts.length > 14) ssb.append(" … 共 ").append(parts.length).append(" 个");
+        if (parts.length > 14) ssb.append(" … 共 ")
+                .append(String.valueOf(parts.length)).append(" 个");
         view.setText(ssb, TextView.BufferType.SPANNABLE);
         view.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
         view.setHighlightColor(0);
