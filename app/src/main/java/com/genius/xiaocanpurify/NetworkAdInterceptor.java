@@ -981,6 +981,23 @@ public final class NetworkAdInterceptor {
                             && dumpedPromoBodies.add(mn + ":" + body.length() + ":" + body.hashCode())) {
                         dumpPromoBannerStructure(mn, body);
                     }
+                    // 记录餐段运营 Banner 标题：首页「元气早餐/饱餐一顿/忙里偷闲」随时段变化，
+                    // 用 category_info.title 与 categories[].title 动态登记，供 feed 置顶识别。
+                    if (mn.contains("mealperiod")) {
+                        try {
+                            org.json.JSONObject r = new org.json.JSONObject(body);
+                            org.json.JSONObject ci = r.optJSONObject("category_info");
+                            if (ci != null) HomePagePurifier.registerMealPeriodTitle(ci.optString("title", ""));
+                            org.json.JSONArray cats = r.optJSONArray("categories");
+                            if (cats != null) {
+                                for (int i = 0; i < cats.length(); i++) {
+                                    org.json.JSONObject c = cats.optJSONObject(i);
+                                    if (c != null) HomePagePurifier.registerMealPeriodTitle(c.optString("title", ""));
+                                }
+                            }
+                            MainHook.log("MealPeriod titles: " + HomePagePurifier.mealPeriodTitlesSnapshot());
+                        } catch (Throwable ignored) {}
+                    }
                     // 情报板块诊断：定位「小蚕情报」来自哪个接口/字段
                     if (mn.contains("search") || mn.contains("promotion")
                             || mn.contains("feed") || mn.contains("intel")

@@ -468,6 +468,48 @@ public final class HomePagePurifier {
     }
 
     /**
+     * 餐段运营 Banner 的标题池。首页「元气早餐，能量加满 / 饱餐一顿，补充体力 /
+     * 忙里偷闲，来点甜的」是同一套随时段变化的运营位，来自
+     * fusionservice.getmealperiodcategory 的 category_info.title 与 categories[].title。
+     * 标题随时段变化，硬编码某个（如"元气早餐"）在别的时段会漏匹配，故运行时登记。
+     */
+    static final java.util.Set<String> mealPeriodTitles =
+            java.util.Collections.synchronizedSet(new java.util.LinkedHashSet<String>());
+
+    /** 登记餐段标题：整串 + 逗号前主词，兼容 item 只存主词的情况。 */
+    static void registerMealPeriodTitle(String title) {
+        if (title == null) return;
+        String t = title.trim();
+        if (t.length() < 2) return;
+        mealPeriodTitles.add(t);
+        int cut = t.indexOf('，');
+        if (cut < 0) cut = t.indexOf(',');
+        if (cut > 0) mealPeriodTitles.add(t.substring(0, cut).trim());
+    }
+
+    static String mealPeriodTitlesSnapshot() {
+        synchronized (mealPeriodTitles) { return mealPeriodTitles.toString(); }
+    }
+
+    /** 常见餐段主词兜底：即使 getmealperiodcategory 响应尚未登记也能识别。 */
+    private static final String[] MEAL_BANNER_KEYWORDS =
+            {"元气早餐", "饱餐一顿", "忙里偷闲", "能量加满", "补充体力", "来点甜的"};
+
+    /** 判断某条 feed item 是否是"餐段运营 Banner"（需置顶的那条）。 */
+    private static boolean isMealBannerItem(Object item) {
+        if (item == null) return false;
+        String s;
+        try { s = item.toString(); } catch (Throwable t) { return false; }
+        if (s == null) return false;
+        for (String k : MEAL_BANNER_KEYWORDS) if (s.contains(k)) return true;
+        synchronized (mealPeriodTitles) {
+            for (String k : mealPeriodTitles)
+                if (k != null && k.length() >= 2 && s.contains(k)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Filter ad items (picbanner/pic/group) from HomePromotionAdapter data list
      * so they never appear in the RecyclerView at all.
      */
@@ -490,7 +532,7 @@ public final class HomePagePurifier {
                             java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
                             java.util.ArrayList<Object> others = new java.util.ArrayList<>();
                             for (Object item : (java.util.Collection<?>) args[i]) {
-                                if (item != null && item.toString().contains("元气早餐")) {
+                                if (isMealBannerItem(item)) {   // 餐段运营 Banner（标题随时段变）
                                     banners.add(item);
                                     continue;
                                 }
