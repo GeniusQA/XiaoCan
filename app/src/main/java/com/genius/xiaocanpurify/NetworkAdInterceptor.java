@@ -18,14 +18,16 @@ public final class NetworkAdInterceptor {
      */
     private static final java.util.Set<String> DEFAULT_BLOCKED_SLUGS =
             java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
-                    java.util.Arrays.asList(
-                            "MESSAGE_PLACE", "MESSAGE_PLACE_NEW", "XC_JG",
-                            "HOME_BOTTOM", "AGG_HOME_BOTTOM", "DOUYIN_BANNER",
-                            "SHARER_HOME_POPUP", "OPS_POPUP", "POPUP_NEW",
-                            // 首页列表内插入的运营卡/群卡/活动跳转（实测 content）
-                            "BARGAIN_HOME_SEEDS", "HOME_KJBANNER_TO_MINI",
-                            "MAIN_TO_TANDIAN_MINI", "BESTSELLERS_TAG",
-                            "CERAMIC_NEW", "UP_FRIST_PAGE_GIF")));
+                    PurifyPrefs.DEFAULT_SLUG_DESC.keySet()));
+
+    /**
+     * 原候选名单已于 2026-11-13 移入内置黑名单（PurifyPrefs.DEFAULT_SLUG_DESC）：
+     * HOME_BANNER_TD_NEWUSER_THREEORDER / MAIN_TO_DAODIAN_MINI / FLASH_SALE_CAROUSEL_PRODUCT。
+     * 其中 FLASH_SALE_CAROUSEL_PRODUCT 同时从 PROTECTED_SLUGS 移除，否则保护判定会压过黑名单。
+     * 仍在保护名单的大牌配置（HOMEPAGE_BIGBRAND_INSERT_POSITION /
+     * HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION）默认保留；手动加进
+     * 「额外屏蔽的资源位」可覆盖保护判定。
+     */
 
     /**
      * 保护名单：正常商品/分类/时段导航资源位，即使开启特征识别也不删。
@@ -35,7 +37,7 @@ public final class NetworkAdInterceptor {
     private static final java.util.Set<String> PROTECTED_SLUGS =
             java.util.Collections.unmodifiableSet(new java.util.HashSet<>(
                     java.util.Arrays.asList(
-                            "BEST_SELLER_GREAT_PRICE", "FLASH_SALE_CAROUSEL_PRODUCT",
+                            "BEST_SELLER_GREAT_PRICE",
                             "HOMEPAGE_CATEGORY_FLITER", "HOME_TAB", "SECOND_TAB",
                             "HOMEPAGE_BIGBRAND_INSERT_POSITION",
                             "HOMEPAGE_EVERYVIPLEVEL_BIGBRAND_INSERT_POSITION",
@@ -45,6 +47,12 @@ public final class NetworkAdInterceptor {
     /** 已上报过的资源位，避免每次响应都写偏好。 */
     private static final java.util.Set<String> REPORTED_SLUGS =
             java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+    /** 已回推的最近发现 slug（静态保存，供模块请求重发时回放）。 */
+    private static final java.util.Set<String> LAST_DISCOVERED =
+            java.util.Collections.newSetFromMap(
+                    new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+    private static volatile boolean discoveryResendRegistered;
 
     /** RPC 探针窗口截止时间：红包任务点击后临时记录宿主全部请求，用于发现领奖上报接口。 */
     private static volatile long DISCOVERY_UNTIL = 0L;
@@ -728,14 +736,18 @@ public final class NetworkAdInterceptor {
                 if (resources == null || resources.length() == 0) return null;
 
                 java.util.Set<String> blocked = new java.util.HashSet<>(DEFAULT_BLOCKED_SLUGS);
-                // 用户自定义追加：每次响应实时读取，改完下一次请求即生效
+                // 用户自定义追加：每次响应实时读取，改完下一次请求即生效。
+                // 用户显式追加的 slug 优先于保护名单——即使它落在 PROTECTED 里也能拦
+                // （避免每次手动加都得改代码移出 PROTECTED）。
+                java.util.Set<String> extraSet = new java.util.HashSet<>();
                 String extra = PurifyPrefs.getString(PurifyPrefs.PLACEMENT_BLOCK_EXTRA, "");
                 if (extra != null && !extra.trim().isEmpty()) {
                     for (String s : extra.split("[,，\\s]+")) {
                         String u = s.trim().toUpperCase(Locale.ROOT);
-                        if (!u.isEmpty() && !PROTECTED_SLUGS.contains(u)) blocked.add(u);
+                        if (!u.isEmpty()) extraSet.add(u);
                     }
                 }
+                blocked.addAll(extraSet);
                 boolean auto = PurifyPrefs.hideOptIn(PurifyPrefs.PLACEMENT_AUTO_BLOCK);
                 java.util.List<String> discovered = new java.util.ArrayList<>();
                 boolean changed = false;
@@ -754,7 +766,8 @@ public final class NetworkAdInterceptor {
                         continue;
                     }
 
-                    boolean hit = blocked.contains(slug) && !PROTECTED_SLUGS.contains(slug);
+                    boolean hit = blocked.contains(slug)
+                            && (!PROTECTED_SLUGS.contains(slug) || extraSet.contains(slug));
                     if (!hit && auto && !PROTECTED_SLUGS.contains(slug)) {
                         hit = looksLikeInsertedBanner(r);
                     }
@@ -879,20 +892,69 @@ public final class NetworkAdInterceptor {
             return false;
         }
 
-        /** 把新发现的资源位写回偏好，供设置页展示/一键复制。 */
+        /**
+         * 把新发现的资源位回推模块：libxposed 的 RemotePreferences 仅「模块→宿主」单向
+         * （模块写自身偏好、宿主只读），宿主反向写回会被忽略。故改用显式广播
+         * （与 CacheReceiver / HostLogBridge 同款）写入模块自有偏好，供设置页展示。
+         */
         private static void persistDiscovered(java.util.List<String> slugs) {
             try {
-                java.util.Set<String> all = new java.util.TreeSet<>();
-                String old = PurifyPrefs.getString(PurifyPrefs.PLACEMENT_DISCOVERED, "");
-                if (old != null && !old.isEmpty()) {
-                    for (String s : old.split("[,，\\s]+")) {
-                        if (!s.trim().isEmpty()) all.add(s.trim());
-                    }
-                }
-                all.addAll(slugs);
-                PurifyPrefs.putRemoteString(PurifyPrefs.PLACEMENT_DISCOVERED,
-                        android.text.TextUtils.join(",", all));
+                synchronized (LAST_DISCOVERED) { LAST_DISCOVERED.addAll(slugs); }
+                sendDiscoveredBroadcast();
             } catch (Throwable ignored) {}
+        }
+
+        private static void sendDiscoveredBroadcast() {
+            try {
+                ensureDiscoveryResendRegistered();
+                android.content.Context ctx = HostLogBridge.currentApplication();
+                if (ctx == null) return;
+                java.util.ArrayList<String> list;
+                synchronized (LAST_DISCOVERED) { list = new java.util.ArrayList<>(LAST_DISCOVERED); }
+                java.util.Collections.sort(list);
+                android.content.Intent i = new android.content.Intent(
+                        "com.genius.xiaocanpurify.ACTION_DISCOVERED");
+                i.setPackage("com.genius.xiaocanpurify");
+                i.putExtra("slugs", android.text.TextUtils.join(",", list));
+                ctx.sendBroadcast(i);
+            } catch (Throwable ignored) {}
+        }
+
+        /** 宿主注册「模块请求重发 discovered」接收器：模块进程被杀期间丢弃后，重开时补拉。 */
+        private static void ensureDiscoveryResendRegistered() {
+            if (discoveryResendRegistered) return;
+            // registerReceiver 需在主线程 Looper 上执行，故投递到主线程
+            try {
+                android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                h.post(() -> {
+                    synchronized (NetworkAdInterceptor.class) {
+                        if (discoveryResendRegistered) return;
+                        try {
+                            final android.content.Context ctx = HostLogBridge.currentApplication();
+                            if (ctx == null) return;
+                            android.content.BroadcastReceiver r = new android.content.BroadcastReceiver() {
+                                @Override
+                                public void onReceive(android.content.Context c, android.content.Intent i) {
+                                    sendDiscoveredBroadcast();
+                                }
+                            };
+                            android.content.IntentFilter f = new android.content.IntentFilter(
+                                    "com.genius.xiaocanpurify.ACTION_DISCOVERED_RESEND");
+                            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                ctx.registerReceiver(r, f, android.content.Context.RECEIVER_EXPORTED);
+                            } else {
+                                ctx.registerReceiver(r, f);
+                            }
+                            discoveryResendRegistered = true;
+                            MainHook.log("Discovery resend receiver registered");
+                        } catch (Throwable t) {
+                            MainHook.log("Discovery resend register failed: " + t);
+                        }
+                    }
+                });
+            } catch (Throwable t) {
+                MainHook.log("Discovery resend post failed: " + t);
+            }
         }
 
         /** 用 newBuilder 重建响应 body，保留原 headers/protocol/code，去掉压缩相关头。 */

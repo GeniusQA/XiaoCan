@@ -62,6 +62,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- 接收宿主回推的「最近发现的资源位」slug 列表（显式广播，模块安装即可接收） -->
+        <receiver
+            android:name=".DiscoveredReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.genius.xiaocanpurify.ACTION_DISCOVERED" />
+            </intent-filter>
+        </receiver>
+
         <!-- 承载桌面图标的入口：隐藏图标时禁用该 alias 即可，设置页仍可通过 LSPosed 模块列表打开 -->
         <activity-alias
             android:name=".MainActivityAlias"

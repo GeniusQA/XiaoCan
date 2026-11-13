@@ -105,6 +105,36 @@ public final class PurifyPrefs {
     // Hook 侧回写的「最近发现的资源位」slug 清单，供设置页展示/一键复制
     public static final String PLACEMENT_DISCOVERED = "placement_discovered";
 
+    /**
+     * 内置黑名单 slug → 对应广告位说明（响应层拦截的单一事实来源）。
+     * NetworkAdInterceptor.DEFAULT_BLOCKED_SLUGS 直接取 keySet，保证黑名单与设置页展示一致。
+     * 说明按实测/代码注释能坐实的写；坐实不了的标注「形态未确认」，不臆测。
+     */
+    public static final java.util.LinkedHashMap<String, String> DEFAULT_SLUG_DESC =
+            new java.util.LinkedHashMap<>();
+    static {
+        DEFAULT_SLUG_DESC.put("MESSAGE_PLACE", "首页列表内插入的 Banner 集合");
+        DEFAULT_SLUG_DESC.put("MESSAGE_PLACE_NEW", "首页列表插入 Banner 集合（新版）");
+        DEFAULT_SLUG_DESC.put("XC_JG", "形态未确认（响应层按 slug 精确拦截）");
+        DEFAULT_SLUG_DESC.put("HOME_BOTTOM", "首页底部横幅");
+        DEFAULT_SLUG_DESC.put("AGG_HOME_BOTTOM", "首页底部聚合横幅");
+        DEFAULT_SLUG_DESC.put("DOUYIN_BANNER", "抖音引流 Banner");
+        DEFAULT_SLUG_DESC.put("SHARER_HOME_POPUP", "分享弹窗");
+        DEFAULT_SLUG_DESC.put("OPS_POPUP", "运营弹窗");
+        DEFAULT_SLUG_DESC.put("POPUP_NEW", "运营弹窗（新版）");
+        DEFAULT_SLUG_DESC.put("BARGAIN_HOME_SEEDS", "福利群种子卡（「XX区霸王餐福利群」）");
+        DEFAULT_SLUG_DESC.put("HOME_KJBANNER_TO_MINI", "首页 Banner 跳小程序卡");
+        DEFAULT_SLUG_DESC.put("MAIN_TO_TANDIAN_MINI", "探店小程序跳转卡");
+        DEFAULT_SLUG_DESC.put("BESTSELLERS_TAG", "热销榜标签卡");
+        DEFAULT_SLUG_DESC.put("CERAMIC_NEW", "形态未确认（响应层按 slug 精确拦截）");
+        DEFAULT_SLUG_DESC.put("UP_FRIST_PAGE_GIF", "首页置顶 GIF 动图卡");
+        // 原候选名单实测确认后移入（2026-11-13）
+        DEFAULT_SLUG_DESC.put("HOME_BANNER_TD_NEWUSER_THREEORDER",
+                "首页新用户「探店三单」跳转 Banner 卡（web_url 跳 H5 探店落地页）");
+        DEFAULT_SLUG_DESC.put("MAIN_TO_DAODIAN_MINI", "到店版小程序跳转卡（探店卡的兄弟）");
+        DEFAULT_SLUG_DESC.put("FLASH_SALE_CAROUSEL_PRODUCT", "闪购轮播商品卡插入");
+    }
+
     // Detail page
     public static final String DETAIL_SHARE = "hide_detail_share";
 

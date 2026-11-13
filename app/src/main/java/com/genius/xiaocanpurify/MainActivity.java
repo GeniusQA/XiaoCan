@@ -1254,6 +1254,24 @@ public class MainActivity extends Activity {
                 }));
         card.addView(extraRow);
 
+        // 内置黑名单明细：展开查看每个 slug 对应的广告位（与响应层拦截同一份映射）
+        TextView builtinToggle = new TextView(this);
+        builtinToggle.setText("内置黑名单明细（点按展开/收起）");
+        builtinToggle.setTextSize(12);
+        builtinToggle.setTextColor(ThemeHelper.textHint(this));
+        builtinToggle.setPadding(0, dp2px(2), 0, dp2px(4));
+        card.addView(builtinToggle);
+        final TextView builtinList = new TextView(this);
+        builtinList.setTextSize(11);
+        builtinList.setTextColor(ThemeHelper.textBody(this));
+        builtinList.setPadding(0, dp2px(2), 0, dp2px(8));
+        builtinList.setText(builtinSlugsText());
+        builtinList.setVisibility(android.view.View.GONE);
+        builtinToggle.setOnClickListener(v -> builtinList.setVisibility(
+                builtinList.getVisibility() == android.view.View.GONE
+                        ? android.view.View.VISIBLE : android.view.View.GONE));
+        card.addView(builtinList);
+
         View divider = new View(this);
         divider.setBackgroundColor(ThemeHelper.cardStroke(this));
         card.addView(divider, new LinearLayout.LayoutParams(
@@ -1277,6 +1295,15 @@ public class MainActivity extends Activity {
         foundList.setTextColor(ThemeHelper.textBody(this));
         foundList.setPadding(0, dp2px(6), 0, 0);
         foundList.setText(foundListText());
+        // 请求宿主重发最近发现的资源位：模块进程 stopped/被杀期间宿主发出的广播会被丢弃，
+        // 设置页打开（进程活着）时发请求，宿主收到后重发，2 秒后刷新显示
+        try {
+            android.content.Intent i = new android.content.Intent(
+                    "com.genius.xiaocanpurify.ACTION_DISCOVERED_RESEND");
+            i.setPackage("com.realtech.xiaocan");
+            sendBroadcast(i);
+            foundList.postDelayed(() -> foundList.setText(foundListText()), 2000);
+        } catch (Throwable ignored) {}
         foundList.setOnClickListener(v -> {
             String found = foundListText();
             if (found.isEmpty() || found.startsWith("（")) return;
@@ -1296,9 +1323,20 @@ public class MainActivity extends Activity {
     }
 
     private String extraSummaryText(String val) {
+        int n = PurifyPrefs.DEFAULT_SLUG_DESC.size();
         return val == null || val.trim().isEmpty()
-                ? "当前：仅内置黑名单（9 个广告位）"
-                : "当前：内置黑名单 + " + val.trim();
+                ? "当前：仅内置黑名单（" + n + " 个广告位，点下方「内置黑名单明细」查看）"
+                : "当前：内置黑名单（" + n + " 个）+ " + val.trim();
+    }
+
+    /** 内置黑名单 slug → 广告位说明，逐行列出（与响应层拦截同一份映射）。 */
+    private String builtinSlugsText() {
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, String> e : PurifyPrefs.DEFAULT_SLUG_DESC.entrySet()) {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(e.getKey()).append(" — ").append(e.getValue());
+        }
+        return sb.toString();
     }
 
     /** 优先读 Hook 侧回写的远程值，再回落本地镜像。 */
