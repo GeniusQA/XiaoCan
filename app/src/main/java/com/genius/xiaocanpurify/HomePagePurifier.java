@@ -483,19 +483,6 @@ public final class HomePagePurifier {
                     if (bulk) {
                         for (int i = 0; i < args.length; i++) {
                             if (!(args[i] instanceof java.util.Collection)) continue;
-                            for (Object item : (java.util.Collection<?>) args[i]) {
-                                String info = item.getClass().getSimpleName();
-                                try {
-                                    Method gt = item.getClass().getMethod("getType");
-                                    Object t = gt.invoke(item);
-                                    info += "|" + (t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t));
-                                } catch (Throwable ignored) {}
-                                try {
-                                    String s = item.toString();
-                                    info += "|" + s.substring(0, Math.min(s.length(), 90));
-                                } catch (Throwable ignored) {}
-                                MainHook.log("FEEDITEM " + info);
-                            }
                             java.util.ArrayList<Object> clean = new java.util.ArrayList<>();
                             for (Object item : (java.util.Collection<?>) args[i])
                                 if (!isAdFeedItem(item)) clean.add(item);
