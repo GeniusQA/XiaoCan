@@ -490,15 +490,6 @@ public final class HomePagePurifier {
                             java.util.ArrayList<Object> banners = new java.util.ArrayList<>();
                             java.util.ArrayList<Object> others = new java.util.ArrayList<>();
                             for (Object item : (java.util.Collection<?>) args[i]) {
-                                String cls = item.getClass().getSimpleName();
-                                String typ = "";
-                                try {
-                                    Object t = item.getClass().getMethod("getType").invoke(item);
-                                    typ = t instanceof Enum ? ((Enum<?>) t).name() : String.valueOf(t);
-                                } catch (Throwable ignored) {}
-                                String s = item.toString();
-                                if (s.length() > 110) s = s.substring(0, 110);
-                                MainHook.log("ITEM " + cls + " type=" + typ + " | " + s);
                                 if (item != null && item.toString().contains("元气早餐")) {
                                     banners.add(item);
                                     continue;
@@ -506,10 +497,12 @@ public final class HomePagePurifier {
                                 if (isAdFeedItem(item)) continue;   // 隐藏其它广告
                                 others.add(item);
                             }
-                            java.util.ArrayList<Object> reordered = new java.util.ArrayList<>(banners);
-                            reordered.addAll(others);
-                            args[i] = reordered;
-                            MainHook.log("FeedHook " + name + " banner=" + banners.size() + " kept=" + others.size());
+                            if (!banners.isEmpty()) {
+                                java.util.ArrayList<Object> reordered = new java.util.ArrayList<>(banners);
+                                reordered.addAll(others);
+                                args[i] = reordered;
+                                MainHook.log("FeedBanner moved top: " + banners.size() + " banner, " + others.size() + " others");
+                            }
                         }
                     } else if (args.length > 0 && isAdFeedItem(args[args.length - 1])) {
                         if ("set".equals(name)) {

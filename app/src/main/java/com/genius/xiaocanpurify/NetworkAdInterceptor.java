@@ -866,42 +866,6 @@ public final class NetworkAdInterceptor {
             }
         }
 
-        /**
-         * 首页 feed（fusionservice.getfeedpromotions）响应层处理：
-         * 把「元气早餐」等营销 banner 条目从列表中部移动到 feed_items 最前，
-         * 商家列表连续排列在其下方。这是响应层改写，比视图层 hook 更可靠
-         * （宿主重新 VISIBLE 也影响不到 JSON 顺序）。其它广告条目保持隐藏不动。
-         */
-        private Object filterFeedPromotions(Object response, String body) {
-            try {
-                org.json.JSONObject root = new org.json.JSONObject(body);
-                org.json.JSONArray items = root.optJSONArray("feed_items");
-                if (items == null || items.length() <= 1) return null;
-                // 诊断：列出每个条目的首个 key，确认 banner 条目结构与识别方式
-                StringBuilder dbg = new StringBuilder("FeedPromoItems[" + items.length() + "] ");
-                int idx = -1;
-                for (int i = 0; i < items.length(); i++) {
-                    org.json.JSONObject it = items.optJSONObject(i);
-                    if (it == null) { dbg.append(i).append("=null "); continue; }
-                    java.util.Iterator<String> ks = it.keys();
-                    String firstKey = ks.hasNext() ? ks.next() : "?";
-                    dbg.append(i).append("=").append(firstKey).append(" ");
-                    // 识别「元气早餐」banner：标题/名称含该关键字即视为营销 banner
-                    if (idx < 0 && it.toString().contains("元气早餐")) idx = i;
-                }
-                MainHook.log(dbg.toString());
-                if (idx <= 0) return null;   // 未找到或已在最前
-                org.json.JSONObject banner = items.getJSONObject(idx);
-                items.remove(idx);
-                items.put(0, banner);
-                MainHook.log("FeedPromo moved banner(" + idx + "->0) items=" + items.length());
-                return replaceResponseBody(response, root.toString());
-            } catch (Throwable t) {
-                MainHook.log("FeedPromoFilter failed: " + t);
-                return null;
-            }
-        }
-
         /** 插入式广告图的结构特征：content 带 information_location / ad_type。 */
         private static boolean looksLikeInsertedBanner(org.json.JSONObject r) {
             org.json.JSONArray vals = r.optJSONArray("value");
@@ -1036,11 +1000,6 @@ public final class NetworkAdInterceptor {
                     // 搜索结果：仅保留「实付满返」(rebate_condition==99)，过滤比例返等类型
                     if (mn.toLowerCase().contains("searchpromotions")) {
                         Object filtered = filterSearchRebateResponse(response, body);
-                        if (filtered != null) return filtered;
-                    }
-                    // 首页 feed：把「元气早餐」营销 banner 移到列表最前，商家列表连续排列在下方
-                    if (mn.contains("getfeedpromotions")) {
-                        Object filtered = filterFeedPromotions(response, body);
                         if (filtered != null) return filtered;
                     }
                 }
