@@ -953,35 +953,55 @@ public final class HomePagePurifier {
                                     }
                                 }
                             }
-                            // 缩短搜索框：左边界收敛到「logo+区名」右侧 + 3dp。
-                            // 区名已收敛为「成华区」，地址栏宽度稳定，此修正可稳定收敛。
+                            // 顶栏行数自适应：新版宿主改为「两行」——logo+区名在第一行、
+                            // 搜索框在第二行，垂直区间不重叠；此时旧版单行修正（把搜索框
+                            // 左边界推到地址栏右侧）会把搜索框错误右移，左侧留大片空白。
+                            // 只有两者垂直重叠（旧版单行并排）才做 leftMargin 修正。
                             if (svFinal != null && addrFinal.getWidth() > 0
                                     && svFinal.getWidth() > 0) {
                                 int[] la = new int[2], ls = new int[2];
                                 addrFinal.getLocationOnScreen(la);
                                 svFinal.getLocationOnScreen(ls);
-                                int gap = (int) (3 * svFinal.getResources()
-                                        .getDisplayMetrics().density + 0.5f);
-                                int wantLeft = la[0] + addrFinal.getWidth() + gap;
-                                int delta = wantLeft - ls[0];
+                                float dens = svFinal.getResources().getDisplayMetrics().density;
+                                int tol = (int) (8 * dens + 0.5f);
+                                boolean sameRow = la[1] < ls[1] + svFinal.getHeight() - tol
+                                        && ls[1] < la[1] + addrFinal.getHeight() - tol;
                                 ViewGroup.LayoutParams lp = svFinal.getLayoutParams();
-                                if (Math.abs(delta) > 2
-                                        && lp instanceof ViewGroup.MarginLayoutParams) {
-                                    ViewGroup.MarginLayoutParams mp =
-                                            (ViewGroup.MarginLayoutParams) lp;
-                                    int maxLeft = svFinal.getWidth() / 2;
-                                    if (svAdjustCount < 20) {
-                                        int newLeft = Math.max(0, Math.min(
-                                                mp.leftMargin + delta / 2, maxLeft));
-                                        if (Math.abs(newLeft - mp.leftMargin) > 1) {
-                                            mp.leftMargin = newLeft;
+                                if (!sameRow) {
+                                    // 两行布局：清掉旧版单行修正残留的 leftMargin，恢复全宽
+                                    if (lp instanceof ViewGroup.MarginLayoutParams) {
+                                        ViewGroup.MarginLayoutParams mp =
+                                                (ViewGroup.MarginLayoutParams) lp;
+                                        if (mp.leftMargin != 0) {
+                                            mp.leftMargin = 0;
                                             svFinal.setLayoutParams(lp);
-                                            svAdjustCount++;
-                                            MainHook.log("HomeSearch fix#" + svAdjustCount
-                                                    + " margin=" + newLeft
-                                                    + " svLeft=" + ls[0] + " addrRight="
-                                                    + (la[0] + addrFinal.getWidth())
-                                                    + " svW=" + svFinal.getWidth());
+                                            MainHook.log("HomeSearch fix: two-row toolbar, "
+                                                    + "searchView leftMargin reset to 0");
+                                        }
+                                    }
+                                } else {
+                                    // 旧版单行：缩短搜索框，左边界收敛到「logo+区名」右侧 + 3dp
+                                    int gap = (int) (3 * dens + 0.5f);
+                                    int wantLeft = la[0] + addrFinal.getWidth() + gap;
+                                    int delta = wantLeft - ls[0];
+                                    if (Math.abs(delta) > 2
+                                            && lp instanceof ViewGroup.MarginLayoutParams) {
+                                        ViewGroup.MarginLayoutParams mp =
+                                                (ViewGroup.MarginLayoutParams) lp;
+                                        int maxLeft = svFinal.getWidth() / 2;
+                                        if (svAdjustCount < 20) {
+                                            int newLeft = Math.max(0, Math.min(
+                                                    mp.leftMargin + delta / 2, maxLeft));
+                                            if (Math.abs(newLeft - mp.leftMargin) > 1) {
+                                                mp.leftMargin = newLeft;
+                                                svFinal.setLayoutParams(lp);
+                                                svAdjustCount++;
+                                                MainHook.log("HomeSearch fix#" + svAdjustCount
+                                                        + " margin=" + newLeft
+                                                        + " svLeft=" + ls[0] + " addrRight="
+                                                        + (la[0] + addrFinal.getWidth())
+                                                        + " svW=" + svFinal.getWidth());
+                                            }
                                         }
                                     }
                                 }
