@@ -897,21 +897,30 @@ public final class HomePagePurifier {
     /** 已挂全局布局监听的地址栏父容器（防重复挂）。 */
     private static final java.util.WeakHashMap<View, Boolean> ADDR_HOOKED =
             new java.util.WeakHashMap<>();
-    /** 已深色化过的顶栏地址行（View 重建后自动失效，需重新染色）。 */
-    private static final java.util.WeakHashMap<View, Boolean> ADDR_DARKENED =
-            new java.util.WeakHashMap<>();
+    /** 顶栏文字色诊断日志节流（10 秒）。 */
+    private static volatile long lastTopColorLogMs;
 
     /**
      * 新版两行顶栏：宿主按「深色/彩色活动背景 + 白色 logo/文字」配置，模块把
      * 顶部活动背景清成白色后，白色资源不可见（截图里 logo/区名淡到看不清）。
-     * 这里把地址行的文字与图标统一染成深色，保证白底可读。
+     * 这里把地址行的文字与图标统一染成深色。宿主会异步把 tv_address 颜色
+     * 重设回白色（实测图标染色能保留、文字色会被覆盖），故每次布局都重染。
      */
     private static void darkenTopAddressRow(View toolbar) {
         final int dark = 0xFF333333;
         try {
             View tv = findViewByName(toolbar, "tv_address");
             if (tv instanceof android.widget.TextView) {
-                ((android.widget.TextView) tv).setTextColor(dark);
+                android.widget.TextView t = (android.widget.TextView) tv;
+                if (t.getCurrentTextColor() != dark) {
+                    long now = android.os.SystemClock.uptimeMillis();
+                    if (now - lastTopColorLogMs > 10000L) {
+                        lastTopColorLogMs = now;
+                        MainHook.log("TopAddr text color before="
+                                + Integer.toHexString(t.getCurrentTextColor()));
+                    }
+                    t.setTextColor(dark);
+                }
             }
         } catch (Throwable ignored) {}
         for (String name : new String[]{"ivXiaocan", "ivLocation", "iv_icon"}) {
@@ -995,15 +1004,9 @@ public final class HomePagePurifier {
                                         && ls[1] < la[1] + addrFinal.getHeight() - tol;
                                 ViewGroup.LayoutParams lp = svFinal.getLayoutParams();
                                 if (!sameRow) {
-                                    // 白底下把 logo/区名染深色（宿主原配色配的是深色活动背景）
-                                    synchronized (ADDR_DARKENED) {
-                                        if (!ADDR_DARKENED.containsKey(toolbar)) {
-                                            ADDR_DARKENED.put(toolbar, Boolean.TRUE);
-                                            darkenTopAddressRow(toolbar);
-                                            MainHook.log("HomeSearch fix: two-row toolbar, "
-                                                    + "address row darkened");
-                                        }
-                                    }
+                                    // 白底下把 logo/区名染深色；宿主会异步重设文字色，
+                                    // 故每次布局都重染（方法内部按当前色跳过，幂等）
+                                    darkenTopAddressRow(toolbar);
                                     // 两行布局：清掉旧版单行修正残留的 leftMargin，恢复全宽
                                     if (lp instanceof ViewGroup.MarginLayoutParams) {
                                         ViewGroup.MarginLayoutParams mp =
@@ -1064,6 +1067,8 @@ public final class HomePagePurifier {
                         ftv.setText(want);
                         MainHook.log("HomeAddress: tv_address filled");
                     }
+                    // 宿主会异步把文字色重设回白色；renderState 与布局监听两条路径都重染
+                    if (ftv.getCurrentTextColor() != 0xFF333333) ftv.setTextColor(0xFF333333);
                 }
             } catch (Throwable ignored) {}
         }
