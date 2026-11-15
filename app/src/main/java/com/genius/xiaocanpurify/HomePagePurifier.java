@@ -897,6 +897,33 @@ public final class HomePagePurifier {
     /** 已挂全局布局监听的地址栏父容器（防重复挂）。 */
     private static final java.util.WeakHashMap<View, Boolean> ADDR_HOOKED =
             new java.util.WeakHashMap<>();
+    /** 已深色化过的顶栏地址行（View 重建后自动失效，需重新染色）。 */
+    private static final java.util.WeakHashMap<View, Boolean> ADDR_DARKENED =
+            new java.util.WeakHashMap<>();
+
+    /**
+     * 新版两行顶栏：宿主按「深色/彩色活动背景 + 白色 logo/文字」配置，模块把
+     * 顶部活动背景清成白色后，白色资源不可见（截图里 logo/区名淡到看不清）。
+     * 这里把地址行的文字与图标统一染成深色，保证白底可读。
+     */
+    private static void darkenTopAddressRow(View toolbar) {
+        final int dark = 0xFF333333;
+        try {
+            View tv = findViewByName(toolbar, "tv_address");
+            if (tv instanceof android.widget.TextView) {
+                ((android.widget.TextView) tv).setTextColor(dark);
+            }
+        } catch (Throwable ignored) {}
+        for (String name : new String[]{"ivXiaocan", "ivLocation", "iv_icon"}) {
+            try {
+                View v = findViewByName(toolbar, name);
+                if (v instanceof android.widget.ImageView) {
+                    ((android.widget.ImageView) v).setColorFilter(dark,
+                            android.graphics.PorterDuff.Mode.SRC_IN);
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
     private static void enforceHome(Object binding) {
         if (PurifyPrefs.hide(PurifyPrefs.HOME_FAB)) {
             collapseView(asView(field(binding, "layoutFab")));
@@ -968,6 +995,15 @@ public final class HomePagePurifier {
                                         && ls[1] < la[1] + addrFinal.getHeight() - tol;
                                 ViewGroup.LayoutParams lp = svFinal.getLayoutParams();
                                 if (!sameRow) {
+                                    // 白底下把 logo/区名染深色（宿主原配色配的是深色活动背景）
+                                    synchronized (ADDR_DARKENED) {
+                                        if (!ADDR_DARKENED.containsKey(toolbar)) {
+                                            ADDR_DARKENED.put(toolbar, Boolean.TRUE);
+                                            darkenTopAddressRow(toolbar);
+                                            MainHook.log("HomeSearch fix: two-row toolbar, "
+                                                    + "address row darkened");
+                                        }
+                                    }
                                     // 两行布局：清掉旧版单行修正残留的 leftMargin，恢复全宽
                                     if (lp instanceof ViewGroup.MarginLayoutParams) {
                                         ViewGroup.MarginLayoutParams mp =
